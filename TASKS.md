@@ -528,7 +528,7 @@ entry.
         cannot hijack the lock; `add-signer` takes the candidate's key
         and refuses when the server reports another, so
         the server cannot promote its own key; `client up
-        --lock-signer <fp>` pins the signer a fresh device must see in
+        --lock-signer <key>` pins the signer a fresh device must see in
         its first record, closing the first-contact gap for devices
         enrolled after the lock; old-key signature rows are pruned on
         rotation; duplicate signer peer ids are invalid.
