@@ -84,13 +84,14 @@ flowchart TD
 |---|---|---|---|
 | `internal/config` | Load one YAML file, apply defaults, validate | `Load(path) (*Config, error)`, `Config` struct, `Default()` | stdlib, yaml |
 | `internal/store` | Persist peers, users, tokens, policy generation and the audit log in SQLite; run migrations | `Open(dsn) (*Store, error)`, `Store.Peers()`, `Store.Users()`, `Store.Tokens()`, `Store.Meta()`, `Store.Audit()`, each a small interface with ctx-first methods | `modernc.org/sqlite` |
-| `internal/control` | Everything that decides: enrollment, registry, key distribution (netmap), policy compilation, endpoint tracking, IP allocation, audit recording | `Enroller`, `Registry`, `Policy` (parse + compile), `NetMapBuilder`, `EndpointTable`, `Allocator`, `Auditor` | `internal/store` |
+| `internal/control` | Everything that decides: enrollment, registry, key distribution (netmap), policy compilation, endpoint tracking, IP allocation, audit recording, the network lock record and peer signatures | `Enroller`, `Registry`, `Policy` (parse + compile), `NetMapBuilder`, `EndpointTable`, `Allocator`, `Auditor`, `LockService` | `internal/store`, `internal/lock` |
+| `internal/lock` | Network lock records (spec 012), pure: Ed25519 keys and signatures (`crypto/ed25519`), the canonical bytes of a peer record `(id, name, key)` and of a lock record `(generation, disabled, signers)`, and the rule for accepting a successor record | `GenerateKey`, `Sign`, `Verify`, `PeerRecord.Bytes`, `Record.Bytes`, `Accept` | none |
 | `internal/wg` | Talk to a WireGuard device without knowing about Thawr | `Device` interface (`Configure` diffs peers in place, `SetPeer`, `RemovePeer`, `Stats`), `Open(ctx, Options)` (kernel via wgctrl on Linux, else wireguard-go configured through its in-process IPC API, no UAPI socket), `STUNCapable` (the userspace device sends STUN from its own socket), `Filter` interface (spec 006), `wgtest.Fake` | `wgctrl`, `wireguard-go`, netlink / nftables, `internal/stun` |
 | `internal/stun` | STUN binding codec (copied from Tailscale), `Discover` client with symmetric-NAT detection, rate-limited `Serve` | `Request`, `ParseResponse`, `Transport`, `Discover`, `Serve` | stdlib |
 | `internal/control/path` | Candidate ordering both sides compute identically and the per-peer path state machine (pure, clock and stats injected) | `Order`, `Machine.Step` | `internal/control` types |
 | `internal/relay` | Forward opaque packets between authenticated peers; local UDP proxy on the client | `Server`, `Client`, frame codec | `internal/control` (for auth + visibility check via a small interface) |
 | `internal/api` | gRPC service and REST handlers; translate wire types to `control` calls; no business logic | `NewGRPC(deps)`, `NewREST(deps)`, `Combine` (one listener for both), protobuf under `internal/api/proto` generated with buf via `make proto` | `internal/control`, `internal/relay` |
-| `internal/client` | Device side independent of the CLI: state directory (node key, enrollment state, netmap cache, key pins), TLS fingerprint pinning, the Enroll call, the sync daemon with endpoint discovery and the path prober, key pinning with hold-until-trusted, and its local socket API | `Enroll(ctx, Options)`, `NewDaemon(DaemonOptions)`, `Daemon.Run`, `Daemon.Ping`, `Daemon.Trust`, `BuildConfig`, `LoadPins`, `NewLocalClient`, `LoadState`, `Forget` | `internal/api/proto`, `internal/wg`, `internal/stun`, `internal/control/path` |
+| `internal/client` | Device side independent of the CLI: state directory (node key, lock key, enrollment state, netmap cache, key pins and the pinned lock record), TLS fingerprint pinning, the Enroll call, the sync daemon with endpoint discovery and the path prober, key pinning with hold-until-trusted, the network lock (hold unsigned, sign from the daemon), and its local socket API | `Enroll(ctx, Options)`, `NewDaemon(DaemonOptions)`, `Daemon.Run`, `Daemon.Ping`, `Daemon.Trust`, `Daemon.LockInit`, `Daemon.LockSign`, `BuildConfig`, `LoadPins`, `NewLocalClient`, `LoadState`, `Forget` | `internal/api/proto`, `internal/wg`, `internal/stun`, `internal/control/path`, `internal/lock` |
 | `internal/server` | Compose the server: data dir, store, server key, TLS, hub interface, policy, listeners; startup order, readiness, reload, shutdown | `New(cfg, Deps)`, `Run(ctx, reload)`, `Check()`, `Status(ctx)` | `internal/config`, `internal/store`, `internal/wg`, `internal/control`, `internal/api`, `web` |
 | `web` | Static admin UI, embedded | `embed.FS` | nothing |
 | `internal/svc` | Register the binary as a system service: render systemd units and launchd plists, drive `systemctl`/`launchctl` through an injected runner, create Windows services via x/sys | `New(Options) (Manager, error)`, `Manager.Install/Start/Stop/Uninstall/Status/Logs`, `RenderSystemdUnit`, `RenderLaunchdPlist` | `golang.org/x/sys/windows/svc` |
@@ -182,8 +183,23 @@ peer's view:
 - the hub as a peer with AllowedIPs covering every `static` peer's address
 - the receiver-side filter rules for this peer (source ipv4 → allowed
   proto/ports)
+- the signed lock record, if any, and per peer (the hub and the
+  receiver itself included) the signatures over its current record
+  (spec 012)
 
-The client first checks every netmap against its pins (spec 011): the
+With the network lock on (spec 012) the client runs the lock check
+before the pins: the record the server offers is reconciled with the
+one pinned in `pins.json` (the first is pinned as offered; a later one
+must carry a higher generation and a signature by a key of the pinned
+set, else it is refused and `status` reports why; no record at all
+keeps the pin, so only a signed `disabled` record turns the lock off).
+Then every agent peer and the hub must carry a signature by a signer of
+the pinned record over `(id, name, key)`; the rest are **held** with
+reason `unsigned` and `trust` cannot release them. Signed entries are
+accepted into the pins, so a signed rotation or a signed new peer
+passes the pin check below without a trust step.
+
+The client then checks every netmap against its pins (spec 011): the
 hub key and each agent peer's `(id, key)` under the peer's name, stored
 in `pins.json`. A first-seen name is pinned, a known id under a new name
 keeps its pin (the old name stays pinned, so a later peer taking that
@@ -425,12 +441,16 @@ reachable from the internet. Spec 010.
 | `Sync(SyncRequest) stream NetMap` | node secret | Long-lived netmap push |
 | `ReportEndpoints(EndpointReport) Empty` | node secret | Candidates + NAT type |
 | `ReportPath(PathReport) Empty` | node secret | direct/relay state per peer (for status and admin UI) |
-| `RotateKey(RotateKeyRequest) RotateKeyResponse` | node secret | Replace the WireGuard key; old key valid until next generation is acknowledged |
+| `RotateKey(RotateKeyRequest) RotateKeyResponse` | node secret | Replace the WireGuard key; old key valid until next generation is acknowledged; a signer may attach its signature over the new key, stored in the same transaction |
 | `Leave(Empty) Empty` | node secret | Peer removes itself |
+| `SetLock(SetLockRequest) Empty` | node secret | Install a signed lock record (first one as is, later ones per `lock.Accept`), optionally with the signatures that go with it |
+| `SignPeer(SignPeerRequest) Empty` | node secret, signer | Store a signature over a peer's (or the hub's) current record |
+| `ListLockPeers(Empty) LockPeers` | node secret, signer | Every peer with its signed state and reported lock key; the one RPC that shows a peer the whole registry, and only to a signer the record names |
 
 Node secret travels as gRPC metadata `authorization: Bearer <secret>`.
 Every message carries `client_version`; the server rejects versions older
-than its `min_client_version`.
+than its `min_client_version`. `SyncRequest.lock_key` reports the
+device's lock public key, if it has one, so a signer can add it.
 
 ### REST `/api/v1` (admin)
 
@@ -438,7 +458,9 @@ than its `min_client_version`.
 `GET|POST /tokens`, `DELETE /tokens/{id}`, `GET /peers`,
 `GET|PATCH|DELETE /peers/{name}`, `POST /peers/mobile`, `GET /policy`,
 `POST /policy/check`, `POST /policy/reload`, `GET /audit` (admins;
-`since`, `before_id`, `action`, `actor`, `limit`). JSON bodies. Browser
+`since`, `before_id`, `action`, `actor`, `limit`), `GET /lock` (the
+signer set and the unsigned peers; peer views carry `signed` while the
+lock is on). JSON bodies. Browser
 sessions are in memory (12 h) behind one `HttpOnly`, `Secure`,
 `SameSite=Strict` cookie; the session's CSRF token is returned by
 `/login` and `/me` and must be sent as `X-CSRF-Token` on mutating calls.
@@ -452,15 +474,22 @@ access is filesystem permission (`root` and group `thawr`).
 supports `AF_UNIX`; mode 0660, group `thawr` where that group exists)
 with a tiny JSON-over-HTTP API: `GET /status`, `POST /down`,
 `POST /rotate-key`, `POST /trust/{name}` (accept a held key; `all` for
-every held one, `hub` for the hub), and `POST /ping/{name}` (mark
-traffic intent, probe, answer with the settled path).
+every held one, `hub` for the hub), `POST /ping/{name}` (mark
+traffic intent, probe, answer with the settled path), and the network
+lock (spec 012): `POST /lock/init`, `POST /lock/sign/{name}` (`all`,
+`hub`), `POST /lock/key`, `POST /lock/add-signer/{name}`,
+`POST /lock/disable`, each answering with the generation and the
+fingerprints it signed.
 
 `GET /status` returns the document described by `docs/status.schema.json`:
 `version`, `self`, `server`, `wireguard`, `nat`, `relay`, `filter`,
-`dns`, `hub`, `peers[]`, `held[]`, `retrieved_at`. Fields are only ever
-added. `held[]{name, ipv4, kind, owner, pinned_key, offered_key, since}`
-lists the entries whose key differs from the pinned one; each also
-appears in `peers` (or `hub`) with `path` `key_changed`.
+`dns`, `hub`, `peers[]`, `held[]`, `lock`, `retrieved_at`. Fields are only ever
+added. `held[]{name, ipv4, kind, owner, pinned_key, offered_key, since,
+reason}` lists the entries held out of the tunnel (`reason`
+`key_changed` or `unsigned`); each also appears in `peers` (or `hub`)
+with `path` `key_changed` or `unsigned`. `lock{enabled, signer,
+has_key, generation, signers[], rejected, self_signed}` is the network
+lock as the device sees it.
 `dns{listen, state, method, names, error}` describes the client's
 resolver (`state` `serving` or `error`; `method` `resolved`, `hosts`,
 `resolver-file`, `nrpt` or `none`) and is absent with `--dns off`.
@@ -475,8 +504,9 @@ signal Thawr has; it never contacts anything but the user's server.
 is one of ours), `cone`, or `unknown` when STUN never answered. A peer's
 `path` is the prober's state (`idle`, `probing`, `direct`, `relay`,
 `unreachable`), `offline` when the server reports the peer offline and
-no path is in use, `hub` for peers reached through the hub, or
-`key_changed` for a peer held until trusted;
+no path is in use, `hub` for peers reached through the hub,
+`key_changed` for a peer held until trusted, or `unsigned` for one the
+lock has not signed;
 `filter.dropped_5m` is a sampled five-minute window over the device's
 drop counter. The CLI is a thin renderer of that document: the table by
 default, `--json` verbatim, `--watch` redrawn every 2 s. Exit codes:
@@ -488,9 +518,13 @@ the system `ping` and reports path changes it observes in between.
 
 SQLite, WAL mode, single writer. Tables: `users`, `peers`,
 `enrollment_tokens`, `meta` (netmap generation, schema version, server
-key fingerprint), `audit_log` (`at`, `actor`, `actor_role`, `action`,
-`target`, `details` JSON; appended inside the mutation's transaction,
-pruned after `audit.retention_days`). Endpoints, relay sessions and path state are ephemeral
+key fingerprint, the signed lock record as JSON under `lock_record`),
+`audit_log` (`at`, `actor`, `actor_role`, `action`, `target`, `details`
+JSON; appended inside the mutation's transaction, pruned after
+`audit.retention_days`), `peer_signatures` (`peer_id` or `hub`,
+`public_key`, `signer_key`, `signature`, `signed_at`; rows for a
+peer's old key stop matching after a rotation and go with the peer on
+delete). Endpoints, relay sessions and path state are ephemeral
 and kept in memory in `control.EndpointTable`; a restart simply waits for
 clients to re-report. Migrations are `NNNN_name.sql` files embedded and
 applied in a transaction with the version recorded in `meta`.
@@ -506,7 +540,8 @@ Indexes: `peers(public_key)` unique, `peers(name)` unique,
 | `/var/lib/thawr/client/node.key` | WireGuard private key | 0600 |
 | `/var/lib/thawr/client/state.json` | server URL, TLS fingerprint, peer id, node secret, listen port | 0600 |
 | `/var/lib/thawr/client/netmap.json` | last netmap (public keys, addresses, endpoints) | 0600 |
-| `/var/lib/thawr/client/pins.json` | accepted hub key and per-peer `(id, key)` by name | 0600 |
+| `/var/lib/thawr/client/pins.json` | accepted hub key, per-peer `(id, key)` by name, and the pinned lock record | 0600 |
+| `/var/lib/thawr/client/lock.key` | Ed25519 lock private key; only on devices that ran `lock init` or `lock key`; removed by `down --forget` | 0600 |
 
 macOS: `/Library/Application Support/Thawr/`. Windows: `%ProgramData%\Thawr\`.
 The cached netmap lets the client restore WireGuard peers before the

@@ -6,7 +6,7 @@
 |---|---|---|
 | `make test` | Unit tests with the race detector, fake WireGuard device, in-process gRPC/TLS | Every OS, CI matrix |
 | `make lint` | gofmt, go vet, golangci-lint | Linux, CI |
-| `make integration` | Network-namespace tests in `tests/`: server boot, two-client enrollment, encrypted ping, NAT traversal (restricted/restricted, full-cone/symmetric, symmetric/symmetric, same LAN; needs `nft`), relay over symmetric NATs, relay-to-direct upgrade (needs `conntrack`), relay throughput (needs `iperf3`), policy enforcement end to end (needs `nc`), a phone joining via `wg-quick` through the hub and the policy it is subject to (needs `wg-quick`, `nc`), the nftables ruleset listing (`internal/wg`, needs `nft`), server and client installed as systemd services with the real binary (skips unless systemd is PID 1 and no thawr service exists), `<name>.thawr` resolution through each client's resolver and through the hub from the phone (needs `wg-quick`; clients run with `--dns serve` so the host's resolver files are never touched), a rotated key held on the other client until `client trust` and the rotation in `admin audit` | Linux, root, iproute2, nftables |
+| `make integration` | Network-namespace tests in `tests/`: server boot, two-client enrollment, encrypted ping, NAT traversal (restricted/restricted, full-cone/symmetric, symmetric/symmetric, same LAN; needs `nft`), relay over symmetric NATs, relay-to-direct upgrade (needs `conntrack`), relay throughput (needs `iperf3`), policy enforcement end to end (needs `nc`), a phone joining via `wg-quick` through the hub and the policy it is subject to (needs `wg-quick`, `nc`), the nftables ruleset listing (`internal/wg`, needs `nft`), server and client installed as systemd services with the real binary (skips unless systemd is PID 1 and no thawr service exists), `<name>.thawr` resolution through each client's resolver and through the hub from the phone (needs `wg-quick`; clients run with `--dns serve` so the host's resolver files are never touched), a rotated key held on the other client until `client trust` and the rotation in `admin audit`, the network lock end to end (`lock init` on one client, a third client held as `unsigned` on both until `lock sign`, an unsigned rotation held and a signed one applied without `trust`, `admin lock`, the SIGNED column, `lock.set` and `peer.sign` in the audit log, `lock disable`) | Linux, root, iproute2, nftables |
 | `make release-verify` | Builds two targets twice and compares the archives; CI runs it on every push and before every release | Linux |
 
 The integration tests use the real binary and the WireGuard adapter that
@@ -234,3 +234,37 @@ Two devices behind different home routers, server on a public host.
 6. With `audit: {retention_days: 1}` and an entry older than a day
    (`sqlite3` on a copy, or wait), the next start logs `audit: pruned
    old entries`.
+
+## Manual checklist for the network lock (spec 012)
+
+1. Two devices see each other. `thawr client lock init` on the laptop
+   prints `network lock enabled (generation 1)`, one `signed <name>
+   (<fp>)` line for the hub, the laptop and the desktop, and asks you to
+   compare the fingerprints: `thawr client status` on the desktop shows
+   the same fingerprint for its own key. Both status headers now read
+   `lock: on` (`lock: on (signer)` on the laptop); `pins.json` carries
+   the record and `lock.key` exists on the laptop only, mode 0600.
+2. Enrol a third device. Within seconds the desktop's header says `1
+   unsigned: thawr client lock sign <new>`, the row reads `unsigned`,
+   the name does not resolve, and `thawr client trust <new>` on the
+   desktop is refused with the `lock sign` hint. The new device's own
+   `client lock status` says it is unsigned and its log names the
+   signer command.
+3. `thawr client lock sign <new>` on the laptop; the desktop releases
+   it and `client ping <new>` finds a path. `thawr admin lock` lists
+   the signer and no unsigned peer; `admin peer list` shows `yes` in
+   SIGNED; `admin audit --action peer.sign` has one row per signature
+   with fingerprints only.
+4. `thawr client rotate-key` on the laptop prints `key rotated and
+   signed`; the desktop switches without any `trust`. `rotate-key` on
+   the desktop is held as `unsigned` on the laptop until `lock sign
+   --all` there.
+5. `thawr client lock key` on the desktop, then `lock add-signer
+   <desktop>` on the laptop; the desktop's header shows `(signer)` and
+   `lock disable` there turns the lock off everywhere (`lock: off`,
+   `admin lock` says `disabled at generation N`). `lock init` on either
+   signer turns it on again; a non-signer's `lock init` is refused.
+6. Stop the server, edit `meta.lock_record` in `thawr.db` to a record
+   signed by some other key (or delete it) and start again: every
+   client keeps its pinned record, `client lock status` prints the
+   warning, and nothing is released or held that was not before.

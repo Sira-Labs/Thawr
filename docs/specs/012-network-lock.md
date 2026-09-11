@@ -78,7 +78,9 @@ WireGuard: kernel · thawr0 · listen 41820 · NAT: cone (...) · DNS: .thawr vi
   must exceed the current one and the signature must verify against a
   key of the **current** set. A record with `disabled` set turns the
   lock off and must be signed the same way, so the server cannot turn
-  the lock off on its own.
+  the lock off on its own; it keeps the signer set, so only a signer
+  can turn the lock on again. A record without signers ends its
+  lineage: the next record starts over under the first-contact rule.
 
 ### Server
 
@@ -86,10 +88,14 @@ WireGuard: kernel · thawr0 · listen 41820 · NAT: cone (...) · DNS: .thawr vi
   signer_key, signature, signed_at)` with the primary key `(peer_id,
   public_key, signer_key)`; `peer_id` is a peer id or `hub`. The lock
   record and its signature live in `meta` under `lock_record`.
-- `SetLock(record, signature)`: any node may send the first record;
-  later ones must pass `lock.Accept` against the stored one. Stored,
-  generation bumped, audit `lock.set` (actor `peer:<name>`, details
-  generation, signers, disabled).
+- `SetLock(record, signature, signatures[])`: any node may send the
+  first record; later ones must pass `lock.Accept` against the stored
+  one. The optional signatures are by the caller's key in the new
+  record and are verified and stored in the same transaction, so a
+  record and the signatures that go with it reach every device in one
+  netmap. Stored, generation bumped, audit `lock.set` (actor
+  `peer:<name>`, details generation, signers, disabled) and one
+  `peer.sign` per attached signature.
 - `SignPeer(peer_id, public_key, signer_key, signature)`: the caller's
   peer id must be a signer of the current record with that lock key,
   the signature must verify over the record of the named peer's
@@ -106,9 +112,10 @@ WireGuard: kernel · thawr0 · listen 41820 · NAT: cone (...) · DNS: .thawr vi
   new key; when the caller is a signer with that key and the signature
   verifies, the row is written in the rotation's transaction, so the
   new key is signed the moment other devices see it.
-- Netmaps carry the current lock record and, per peer and for the hub,
-  the signatures over the current key. `Build` reads all signatures in
-  one query per netmap.
+- Netmaps carry the current lock record and, per peer, for the hub and
+  for the receiver itself (`SelfInfo.signatures`), the signatures over
+  the current key. `Build` reads all signatures in one query per
+  netmap.
 - `GET /api/v1/lock` (authenticated): enabled, generation, signers
   (fingerprint, peer name), unsigned peers. `peers[].signed` is true or
   false while the lock is on and absent otherwise.
@@ -140,20 +147,22 @@ WireGuard: kernel · thawr0 · listen 41820 · NAT: cone (...) · DNS: .thawr vi
 - Signing runs inside the daemon over the local API (`POST /lock/init`,
   `/lock/sign/{name}`, `/lock/key`, `/lock/add-signer/{name}`,
   `/lock/disable`): it holds the gRPC client, the netmap and the key.
-  `init` signs the hub and every peer the daemon currently sees
-  **before** it sends the record, so enabling never cuts a working
-  network; `status` lists peers outside the signer's view as unsigned
-  so the owner can sign them from `ListLockPeers`. Every signing
+  `init` sends the record **together with** its signatures over the
+  hub, itself and every peer the daemon currently sees, stored in one
+  transaction, so enabling never cuts a working network; peers outside
+  the signer's policy view stay unsigned until `lock sign`, which
+  lists them all through `ListLockPeers`. Every signing
   command prints the fingerprints it signed; comparing them with
   `thawr client status` on the other device is the human step that
   gives the signature its meaning. `rotate-key` on a signer signs its
   own new key.
-- Status: `lock{enabled, signer, generation, signers[], rejected,
-  self_signed}`; `held[].reason` is `key_changed` or `unsigned`; the
-  header appends `· lock: on (signer)` / `· lock: on` / `· lock: off`
-  and, when something is unsigned, `· N unsigned: thawr client lock
-  sign <names>`. `client up` logs a hint while its own record is
-  unsigned.
+- Status: `lock{enabled, signer, has_key, generation, signers[],
+  rejected, self_signed}`; `held[].reason` is `key_changed` or
+  `unsigned`; the header appends `· lock: on (signer)` / `· lock: on` /
+  `· lock: on, this device unsigned` / `· lock: off` and, when
+  something is unsigned, `· N unsigned: thawr client lock sign
+  <names>`. `client up` logs a hint while its own record is unsigned;
+  `client lock status` prints the record, the signers and the holds.
 
 ## Acceptance criteria
 
@@ -182,9 +191,11 @@ WireGuard: kernel · thawr0 · listen 41820 · NAT: cone (...) · DNS: .thawr vi
   replay, outside key, disabled).
 - `internal/store`: signatures put/list/delete, lock record round trip.
 - `internal/control`: `TestLockSetAcceptsOnlySignedSuccessors`,
-  `TestSignPeerRequiresSigner`, `TestRotateKeyStoresSignature`,
-  `TestNetMapCarriesSignatures`.
-- `internal/api`: `ListLockPeers` gating, REST lock view.
+  `TestSignPeerRequiresSigner`, `TestRotateKeyStoresSignature` (which
+  also checks the netmap carries the signatures).
+- `internal/api`: `TestLockRPCs` (`ListLockPeers` gating, `SetLock`,
+  `SignPeer`, signatures and record in `Sync`), `TestLockEndpoint`
+  (REST lock view and `signed`).
 - `internal/client`: unsigned peer held then signed and applied, signed
   rotation passes without trust, outside-key record rejected, dropped
   record keeps the lock, disabled record turns it off, `lock.key` round
