@@ -25,6 +25,9 @@ const (
 	Control_ReportPath_FullMethodName      = "/thawr.v1.Control/ReportPath"
 	Control_RotateKey_FullMethodName       = "/thawr.v1.Control/RotateKey"
 	Control_Leave_FullMethodName           = "/thawr.v1.Control/Leave"
+	Control_SetLock_FullMethodName         = "/thawr.v1.Control/SetLock"
+	Control_SignPeer_FullMethodName        = "/thawr.v1.Control/SignPeer"
+	Control_ListLockPeers_FullMethodName   = "/thawr.v1.Control/ListLockPeers"
 )
 
 // ControlClient is the client API for Control service.
@@ -47,6 +50,15 @@ type ControlClient interface {
 	RotateKey(ctx context.Context, in *RotateKeyRequest, opts ...grpc.CallOption) (*RotateKeyResponse, error)
 	// Leave removes the caller from the network.
 	Leave(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Empty, error)
+	// SetLock installs a lock record (spec 012). The first record is
+	// accepted as is; later ones must carry a higher generation and a
+	// signature by a key of the current record.
+	SetLock(ctx context.Context, in *SetLockRequest, opts ...grpc.CallOption) (*Empty, error)
+	// SignPeer stores a signer's signature over a peer's current record.
+	SignPeer(ctx context.Context, in *SignPeerRequest, opts ...grpc.CallOption) (*Empty, error)
+	// ListLockPeers lists every peer with its signing state. Only a peer
+	// named as signer in the current lock record may call it.
+	ListLockPeers(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*LockPeers, error)
 }
 
 type controlClient struct {
@@ -126,6 +138,36 @@ func (c *controlClient) Leave(ctx context.Context, in *Empty, opts ...grpc.CallO
 	return out, nil
 }
 
+func (c *controlClient) SetLock(ctx context.Context, in *SetLockRequest, opts ...grpc.CallOption) (*Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Empty)
+	err := c.cc.Invoke(ctx, Control_SetLock_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *controlClient) SignPeer(ctx context.Context, in *SignPeerRequest, opts ...grpc.CallOption) (*Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Empty)
+	err := c.cc.Invoke(ctx, Control_SignPeer_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *controlClient) ListLockPeers(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*LockPeers, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LockPeers)
+	err := c.cc.Invoke(ctx, Control_ListLockPeers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ControlServer is the server API for Control service.
 // All implementations must embed UnimplementedControlServer
 // for forward compatibility.
@@ -146,6 +188,15 @@ type ControlServer interface {
 	RotateKey(context.Context, *RotateKeyRequest) (*RotateKeyResponse, error)
 	// Leave removes the caller from the network.
 	Leave(context.Context, *Empty) (*Empty, error)
+	// SetLock installs a lock record (spec 012). The first record is
+	// accepted as is; later ones must carry a higher generation and a
+	// signature by a key of the current record.
+	SetLock(context.Context, *SetLockRequest) (*Empty, error)
+	// SignPeer stores a signer's signature over a peer's current record.
+	SignPeer(context.Context, *SignPeerRequest) (*Empty, error)
+	// ListLockPeers lists every peer with its signing state. Only a peer
+	// named as signer in the current lock record may call it.
+	ListLockPeers(context.Context, *Empty) (*LockPeers, error)
 	mustEmbedUnimplementedControlServer()
 }
 
@@ -173,6 +224,15 @@ func (UnimplementedControlServer) RotateKey(context.Context, *RotateKeyRequest) 
 }
 func (UnimplementedControlServer) Leave(context.Context, *Empty) (*Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Leave not implemented")
+}
+func (UnimplementedControlServer) SetLock(context.Context, *SetLockRequest) (*Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetLock not implemented")
+}
+func (UnimplementedControlServer) SignPeer(context.Context, *SignPeerRequest) (*Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SignPeer not implemented")
+}
+func (UnimplementedControlServer) ListLockPeers(context.Context, *Empty) (*LockPeers, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListLockPeers not implemented")
 }
 func (UnimplementedControlServer) mustEmbedUnimplementedControlServer() {}
 func (UnimplementedControlServer) testEmbeddedByValue()                 {}
@@ -296,6 +356,60 @@ func _Control_Leave_Handler(srv interface{}, ctx context.Context, dec func(inter
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Control_SetLock_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetLockRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).SetLock(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_SetLock_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).SetLock(ctx, req.(*SetLockRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Control_SignPeer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SignPeerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).SignPeer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_SignPeer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).SignPeer(ctx, req.(*SignPeerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Control_ListLockPeers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).ListLockPeers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_ListLockPeers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).ListLockPeers(ctx, req.(*Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Control_ServiceDesc is the grpc.ServiceDesc for Control service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -322,6 +436,18 @@ var Control_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Leave",
 			Handler:    _Control_Leave_Handler,
+		},
+		{
+			MethodName: "SetLock",
+			Handler:    _Control_SetLock_Handler,
+		},
+		{
+			MethodName: "SignPeer",
+			Handler:    _Control_SignPeer_Handler,
+		},
+		{
+			MethodName: "ListLockPeers",
+			Handler:    _Control_ListLockPeers_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
