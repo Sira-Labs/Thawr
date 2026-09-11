@@ -55,7 +55,7 @@ func (h *rest) handleCreateMobile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, mobileView{
-		Peer: h.peerView(r.Context(), res.Peer, map[string]string{}), Config: conf, QRSVG: svg, Warning: MobileWarning,
+		Peer: h.peerView(r.Context(), res.Peer, map[string]string{}, nil), Config: conf, QRSVG: svg, Warning: MobileWarning,
 	})
 }
 

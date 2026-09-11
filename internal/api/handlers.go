@@ -296,6 +296,9 @@ type peerView struct {
 	OS      string `json:"os"`
 	// PathSummary counts the paths the peer last reported by state.
 	PathSummary pathSummary `json:"path_summary"`
+	// Signed says whether the peer's current key carries a signature by
+	// a signer of the lock record; absent while the lock is off.
+	Signed *bool `json:"signed,omitempty"`
 }
 
 // pathSummary counts reported paths: direct, relay and everything else.
@@ -305,7 +308,7 @@ type pathSummary struct {
 	Other  int `json:"other"`
 }
 
-func (h *rest) peerView(ctx context.Context, p store.Peer, names map[string]string) peerView {
+func (h *rest) peerView(ctx context.Context, p store.Peer, names map[string]string, signed map[string]bool) peerView {
 	v := peerView{ID: p.ID, Name: p.Name, Kind: p.Kind, Mode: p.Mode, Owner: h.userName(ctx, p.OwnerID, names), Tags: p.Tags,
 		PublicKey: p.PublicKey, IPv4: p.IPv4, CreatedAt: p.CreatedAt.UTC().Format(timeFormat), Version: p.ClientVersion, OS: p.OS}
 	if v.Tags == nil {
@@ -329,6 +332,10 @@ func (h *rest) peerView(ctx context.Context, p store.Peer, names map[string]stri
 			}
 		}
 	}
+	if signed != nil {
+		ok := signed[p.ID]
+		v.Signed = &ok
+	}
 	return v
 }
 
@@ -340,9 +347,10 @@ func (h *rest) handleListPeers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	names := map[string]string{}
+	signed := h.signedIndex(r.Context())
 	out := make([]peerView, 0, len(peers))
 	for _, peer := range peers {
-		out = append(out, h.peerView(r.Context(), peer, names))
+		out = append(out, h.peerView(r.Context(), peer, names, signed))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -354,7 +362,7 @@ func (h *rest) handleGetPeer(w http.ResponseWriter, r *http.Request) {
 		h.writeControlError(w, err)
 		return
 	}
-	detail := peerDetail{peerView: h.peerView(r.Context(), peer, map[string]string{}), Paths: []pathView{}, Endpoints: []endpointView{}, Filter: []filterView{}}
+	detail := peerDetail{peerView: h.peerView(r.Context(), peer, map[string]string{}, h.signedIndex(r.Context())), Paths: []pathView{}, Endpoints: []endpointView{}, Filter: []filterView{}}
 	if h.deps.Endpoints != nil {
 		eps, symmetric := h.deps.Endpoints.Get(peer.ID)
 		detail.Symmetric = symmetric
@@ -436,7 +444,7 @@ func (h *rest) handleRenamePeer(w http.ResponseWriter, r *http.Request) {
 		h.writeControlError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, h.peerView(r.Context(), peer, map[string]string{}))
+	writeJSON(w, http.StatusOK, h.peerView(r.Context(), peer, map[string]string{}, h.signedIndex(r.Context())))
 }
 
 func (h *rest) handleDeletePeer(w http.ResponseWriter, r *http.Request) {

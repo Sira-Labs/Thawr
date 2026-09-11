@@ -65,6 +65,10 @@ type Signer struct {
 	PeerID string    `json:"peer_id"`
 }
 
+// MaxSigners bounds the signer list of a record; a network has a
+// handful of signing devices, not hundreds.
+const MaxSigners = 32
+
 // Record is the trusted signer set. A record with Disabled set turns
 // the lock off; it is signed like any other so the server cannot do
 // that on its own.
@@ -124,8 +128,8 @@ func (r Record) SignerKey(peerID string) (PublicKey, bool) {
 func (r Record) Enabled() bool { return !r.Disabled && len(r.Signers) > 0 }
 
 func (r Record) validate() error {
-	if len(r.Signers) > maxField {
-		return fmt.Errorf("%w: too many signers", ErrInvalid)
+	if len(r.Signers) > MaxSigners {
+		return fmt.Errorf("%w: at most %d signers", ErrInvalid, MaxSigners)
 	}
 	if !r.Disabled && len(r.Signers) == 0 {
 		return fmt.Errorf("%w: an enabled record needs at least one signer", ErrInvalid)

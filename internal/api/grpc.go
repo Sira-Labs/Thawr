@@ -71,6 +71,8 @@ type GRPCDeps struct {
 	Peers     PeerOps
 	Endpoints *control.EndpointTable
 	Paths     *control.PathTable
+	// Lock enables the network-lock RPCs; nil answers Unimplemented.
+	Lock LockOps
 }
 
 // NewGRPC builds the gRPC server with the Control service registered.
@@ -136,6 +138,14 @@ func (s *controlServer) Sync(req *thawrv1.SyncRequest, stream grpc.ServerStreami
 	}
 	log := s.deps.Logger.With("peer", me.Name, "peer_id", me.ID)
 	log.Info("sync connected", "client_generation", req.GetGeneration(), "client_version", req.GetClientVersion(), "remote", remoteIP(ctx))
+	if s.deps.Lock != nil {
+		if k := req.GetLockKey(); k != "" {
+			if _, err := lock.ParsePublicKey(k); err != nil {
+				return status.Error(codes.InvalidArgument, "lock_key: "+err.Error())
+			}
+		}
+		s.deps.Lock.ReportKey(me.ID, req.GetLockKey())
+	}
 
 	wake, unsubscribe := s.deps.Sync.Subscribe(me.ID)
 	defer unsubscribe()

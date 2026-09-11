@@ -35,6 +35,8 @@ type RESTDeps struct {
 	Policy PolicyService
 	// Audit enables GET /api/v1/audit (admins only).
 	Audit AuditService
+	// Lock enables GET /api/v1/lock and the signed field of peer views.
+	Lock LockView
 	// Now is the clock for relative audit queries; defaults to time.Now.
 	Now  func() time.Time
 	Join JoinInfo
@@ -103,6 +105,9 @@ func NewREST(deps RESTDeps) (http.Handler, error) {
 		}
 		if deps.Audit != nil {
 			mux.HandleFunc("GET /api/v1/audit", h.requireAdmin(h.handleListAudit))
+		}
+		if deps.Lock != nil {
+			mux.HandleFunc("GET /api/v1/lock", h.requireAuth(h.handleShowLock))
 		}
 	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) {
