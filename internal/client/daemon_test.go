@@ -214,6 +214,21 @@ func startDaemon(t *testing.T, dir string, mods ...func(*DaemonOptions)) (*Daemo
 	}
 }
 
+// loadNetMapSettled reads the netmap cache, retrying briefly: the daemon
+// rewrites it through a temporary file and a rename on every netmap,
+// and Windows reports a read that overlaps the rename as a sharing
+// violation.
+func loadNetMapSettled(dir string) (NetMap, bool, error) {
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		nm, ok, err := LoadNetMap(dir)
+		if err == nil || time.Now().After(deadline) {
+			return nm, ok, err
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 func waitApplied(t *testing.T, d *Daemon, cond func(NetMap) bool) NetMap {
 	t.Helper()
 	deadline := time.After(5 * time.Second)
@@ -294,7 +309,7 @@ func TestDaemonSyncAppliesAndCaches(t *testing.T) {
 	if len(last.Peers) != 2 {
 		t.Errorf("device peers after b: %d", len(last.Peers))
 	}
-	cached, ok, err := LoadNetMap(dirA)
+	cached, ok, err := loadNetMapSettled(dirA)
 	if err != nil || !ok || cached.Generation != withB.Generation {
 		t.Errorf("cache: ok=%v gen=%d err=%v", ok, cached.Generation, err)
 	}
