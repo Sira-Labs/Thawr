@@ -83,11 +83,14 @@ type NetMap struct {
 	SelfID     string
 	SelfName   string
 	SelfKind   string
-	SelfIPv4   netip.Addr
-	Overlay    netip.Prefix
-	Peers      []NetPeer
-	Hub        HubPeer
-	Filter     []FilterRule
+	// SelfSignatures are the lock signatures over the receiver's own
+	// current record (spec 012).
+	SelfSignatures []PeerSignature
+	SelfIPv4       netip.Addr
+	Overlay        netip.Prefix
+	Peers          []NetPeer
+	Hub            HubPeer
+	Filter         []FilterRule
 	// STUN lists the server's STUN listeners as host:port.
 	STUN []string
 	// Lock is the current signed lock record; nil while none was set.
@@ -179,12 +182,13 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 	}
 	sigs := IndexSignatures(sigRows)
 	nm := NetMap{
-		Generation: b.generation(),
-		SelfID:     self.ID,
-		SelfName:   self.Name,
-		SelfKind:   self.Kind,
-		SelfIPv4:   selfIP,
-		Overlay:    b.hub.Overlay,
+		Generation:     b.generation(),
+		SelfID:         self.ID,
+		SelfName:       self.Name,
+		SelfKind:       self.Kind,
+		SelfIPv4:       selfIP,
+		SelfSignatures: sigs[self.ID+"\x00"+self.PublicKey],
+		Overlay:        b.hub.Overlay,
 		Hub: HubPeer{
 			PublicKey:  b.hub.PublicKey,
 			Endpoint:   b.hub.Endpoint,

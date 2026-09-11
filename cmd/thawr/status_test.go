@@ -46,6 +46,7 @@ func statusFixture() client.Status {
 				EndpointCandidates: []client.Candidate{}},
 		},
 		Held:        []client.HeldStatus{},
+		Lock:        client.LockStatus{Signers: []client.LockSignerStatus{}},
 		RetrievedAt: now,
 	}
 }
@@ -226,10 +227,11 @@ func TestStatusJSONSchema(t *testing.T) {
 	}
 	validate("fixture", statusFixture())
 	minimal := client.Status{Server: client.ServerStatus{State: client.ServerReconnecting}, Peers: []client.PeerStatus{}, Held: []client.HeldStatus{},
-		NAT: client.NATStatus{Type: client.NATUnknown, Reflexive: []string{}, Local: []string{}}}
+		Lock: client.LockStatus{Signers: []client.LockSignerStatus{}},
+		NAT:  client.NATStatus{Type: client.NATUnknown, Reflexive: []string{}, Local: []string{}}}
 	validate("minimal", minimal)
 	held := statusFixture()
-	held.Held = []client.HeldStatus{{Name: "homelab-nas", IPv4: "100.64.0.3", Kind: "server", PinnedKey: "NAS=", OfferedKey: "NEW=", Since: held.RetrievedAt}}
+	held.Held = []client.HeldStatus{{Name: "homelab-nas", IPv4: "100.64.0.3", Kind: "server", PinnedKey: "NAS=", OfferedKey: "NEW=", Since: held.RetrievedAt, Reason: client.HeldKeyChanged}}
 	held.Peers[0].Path, held.Peers[0].PublicKey = client.PathKeyChanged, "NEW="
 	validate("held", held)
 	bad := statusFixture()

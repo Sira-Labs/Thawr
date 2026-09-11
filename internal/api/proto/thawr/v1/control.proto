@@ -95,6 +95,9 @@ message SelfInfo {
   repeated string stun_addrs = 5;
   // kind is the receiving peer's kind (human, server, agent).
   string kind = 6;
+  // signatures are the lock signatures over the receiver's own current
+  // record, so it can tell whether it is signed (spec 012).
+  repeated PeerSignature signatures = 7;
 }
 
 // NetPeer is one visible peer.
@@ -173,6 +176,10 @@ message SignedLockRecord {
 // SetLockRequest carries the record to install.
 message SetLockRequest {
   SignedLockRecord lock = 1;
+  // signatures are applied in the same transaction as the record, so
+  // enabling the lock never shows other devices a record without the
+  // signatures that go with it (lock init).
+  repeated SignPeerRequest signatures = 2;
 }
 
 // SignPeerRequest carries a signature over one peer's current record.

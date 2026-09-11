@@ -35,9 +35,12 @@ type Status struct {
 	Hub   *PeerStatus  `json:"hub,omitempty"`
 	Peers []PeerStatus `json:"peers"`
 	// Held lists the netmap entries whose key differs from the pinned
-	// one; each also appears in Peers (or Hub) with path key_changed.
-	Held        []HeldStatus `json:"held"`
-	RetrievedAt time.Time    `json:"retrieved_at"`
+	// one or that the network lock has not signed; each also appears in
+	// Peers (or Hub) with path key_changed or unsigned.
+	Held []HeldStatus `json:"held"`
+	// Lock is the network lock as this device sees it (spec 012).
+	Lock        LockStatus `json:"lock"`
+	RetrievedAt time.Time  `json:"retrieved_at"`
 }
 
 // SelfStatus identifies this device.
@@ -126,6 +129,8 @@ const (
 	// PathKeyChanged marks a peer held out of the tunnel because its
 	// key differs from the pinned one (spec 011).
 	PathKeyChanged = "key_changed"
+	// PathUnsigned marks a peer the network lock has not signed.
+	PathUnsigned = "unsigned"
 )
 
 // PeerStatus joins netmap knowledge with device counters.
@@ -158,6 +163,7 @@ func (d *Daemon) Status(ctx context.Context) Status {
 	now := d.opts.Now()
 	d.mu.Lock()
 	nm, dev, held := d.netmap, d.dev, d.held
+	lockSt := d.lockStatusLocked()
 	srv := ServerStatus{Addr: d.state.Server, State: ServerReconnecting, Attempt: d.attempt, LastError: d.lastError,
 		NextRetryAt: timePtr(d.nextRetryAt), UnreachableSince: timePtr(d.unreachableSince), LastMessageAt: timePtr(d.lastMessage)}
 	if d.connected {
@@ -172,11 +178,14 @@ func (d *Daemon) Status(ctx context.Context) Status {
 		Server:    srv,
 		WireGuard: WGStatus{Interface: d.opts.Interface, ListenPort: d.state.ListenPort},
 		NAT:       NATStatus{Type: NATUnknown, Reflexive: []string{}, Local: []string{}},
-		Peers:     []PeerStatus{}, Held: []HeldStatus{}, RetrievedAt: now,
+		Peers:     []PeerStatus{}, Held: []HeldStatus{}, Lock: lockSt, RetrievedAt: now,
 	}
 	for _, h := range held {
 		st.Held = append(st.Held, h)
 		ps := PeerStatus{Name: h.Name, IPv4: h.IPv4, Kind: h.Kind, Owner: h.Owner, PublicKey: h.OfferedKey, Path: PathKeyChanged, EndpointCandidates: []Candidate{}}
+		if h.Reason == HeldUnsigned {
+			ps.Path = PathUnsigned
+		}
 		if h.Name == HubName {
 			ps.Online = true
 			st.Hub = &ps
@@ -330,6 +339,38 @@ func (d *Daemon) localHandler() http.Handler {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+	lockOp := func(w http.ResponseWriter, res LockResult, err error) {
+		switch {
+		case errors.Is(err, ErrUnknownPeer):
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		case errors.Is(err, ErrNoLockKey), errors.Is(err, ErrNotSigner), errors.Is(err, ErrLockOff):
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+		case err != nil:
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		default:
+			writeJSON(w, http.StatusOK, res)
+		}
+	}
+	mux.HandleFunc("POST /lock/init", func(w http.ResponseWriter, r *http.Request) {
+		res, err := d.LockInit(r.Context())
+		lockOp(w, res, err)
+	})
+	mux.HandleFunc("POST /lock/sign/{name}", func(w http.ResponseWriter, r *http.Request) {
+		res, err := d.LockSign(r.Context(), []string{r.PathValue("name")})
+		lockOp(w, res, err)
+	})
+	mux.HandleFunc("POST /lock/key", func(w http.ResponseWriter, _ *http.Request) {
+		res, err := d.LockKey()
+		lockOp(w, res, err)
+	})
+	mux.HandleFunc("POST /lock/add-signer/{name}", func(w http.ResponseWriter, r *http.Request) {
+		res, err := d.LockAddSigner(r.Context(), r.PathValue("name"))
+		lockOp(w, res, err)
+	})
+	mux.HandleFunc("POST /lock/disable", func(w http.ResponseWriter, r *http.Request) {
+		res, err := d.LockDisable(r.Context())
+		lockOp(w, res, err)
+	})
 	return mux
 }
 
@@ -382,6 +423,39 @@ type TrustResult struct {
 func (c *LocalClient) Trust(ctx context.Context, name string) (TrustResult, error) {
 	var res TrustResult
 	return res, c.do(ctx, http.MethodPost, "/trust/"+url.PathEscape(name), &res)
+}
+
+// LockInit asks the daemon to enable the network lock with this
+// device as the first signer.
+func (c *LocalClient) LockInit(ctx context.Context) (LockResult, error) {
+	var res LockResult
+	return res, c.do(ctx, http.MethodPost, "/lock/init", &res)
+}
+
+// LockSign asks the daemon to sign a peer ("all" for every unsigned
+// one, "hub" for the hub).
+func (c *LocalClient) LockSign(ctx context.Context, name string) (LockResult, error) {
+	var res LockResult
+	return res, c.do(ctx, http.MethodPost, "/lock/sign/"+url.PathEscape(name), &res)
+}
+
+// LockKey asks the daemon to create its lock key if needed and report
+// the public key.
+func (c *LocalClient) LockKey(ctx context.Context) (LockResult, error) {
+	var res LockResult
+	return res, c.do(ctx, http.MethodPost, "/lock/key", &res)
+}
+
+// LockAddSigner asks the daemon to add a peer to the signer set.
+func (c *LocalClient) LockAddSigner(ctx context.Context, name string) (LockResult, error) {
+	var res LockResult
+	return res, c.do(ctx, http.MethodPost, "/lock/add-signer/"+url.PathEscape(name), &res)
+}
+
+// LockDisable asks the daemon to turn the network lock off.
+func (c *LocalClient) LockDisable(ctx context.Context) (LockResult, error) {
+	var res LockResult
+	return res, c.do(ctx, http.MethodPost, "/lock/disable", &res)
 }
 
 // Ping asks the daemon to establish a path to the named peer and

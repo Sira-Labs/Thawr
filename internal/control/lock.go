@@ -40,6 +40,15 @@ type LockPeer struct {
 	LockKey string
 }
 
+// PeerSigning is one signature a signer submits together with a lock
+// record.
+type PeerSigning struct {
+	PeerID    string
+	PublicKey string
+	Signer    lock.PublicKey
+	Signature lock.Signature
+}
+
 // LockService keeps the lock record and the peer signatures (spec
 // 012). It never holds a lock private key: signers are client devices.
 type LockService struct {
@@ -103,7 +112,10 @@ func LoadLockRecord(ctx context.Context, st *store.Store) (*lock.Signed, error) 
 
 // Set installs a record on behalf of by. The first record is accepted
 // as it is; later ones must pass lock.Accept against the stored one.
-func (s *LockService) Set(ctx context.Context, by store.Peer, next lock.Signed) error {
+// sigs are signatures by by's key in next, stored in the same
+// transaction so the record and its signatures reach every device in
+// one netmap.
+func (s *LockService) Set(ctx context.Context, by store.Peer, next lock.Signed, sigs []PeerSigning) error {
 	cur, err := s.Current(ctx)
 	if err != nil {
 		return err
@@ -115,6 +127,10 @@ func (s *LockService) Set(ctx context.Context, by store.Peer, next lock.Signed) 
 	if err := lock.Accept(curRec, next); err != nil {
 		return fmt.Errorf("%w: %w", ErrValidation, err)
 	}
+	signerKey, isSigner := next.Record.SignerKey(by.ID)
+	if len(sigs) > 0 && (!isSigner || !next.Record.Enabled()) {
+		return fmt.Errorf("%w: only a signer of the new record may attach signatures", ErrValidation)
+	}
 	data, err := json.Marshal(next)
 	if err != nil {
 		return fmt.Errorf("control: encode lock record: %w", err)
@@ -123,6 +139,14 @@ func (s *LockService) Set(ctx context.Context, by store.Peer, next lock.Signed) 
 	err = s.store.InTx(ctx, func(tx *store.Store) error {
 		if err := tx.Meta().Set(ctx, store.MetaLockRecord, string(data)); err != nil {
 			return err
+		}
+		for _, sg := range sigs {
+			if sg.Signer != signerKey {
+				return fmt.Errorf("%w: signature over %s is not by %s's key in the record", ErrValidation, sg.PeerID, by.Name)
+			}
+			if err := s.signInTx(ctx, tx, by, sg); err != nil {
+				return err
+			}
 		}
 		gen, err = tx.Meta().IncrementGeneration(ctx)
 		if err != nil {
@@ -177,11 +201,11 @@ func (s *LockService) signerKeyOf(ctx context.Context, st *store.Store, by store
 
 // Record returns the peer record a signer signs for peerID, resolving
 // the hub and checking that publicKey is the peer's current key.
-func (s *LockService) Record(ctx context.Context, peerID, publicKey string) (lock.PeerRecord, string, error) {
+func (s *LockService) Record(ctx context.Context, st *store.Store, peerID, publicKey string) (lock.PeerRecord, string, error) {
 	name := peerID
 	current := s.hubKey
 	if peerID != lock.HubID {
-		p, err := s.store.Peers().GetByID(ctx, peerID)
+		p, err := st.Peers().GetByID(ctx, peerID)
 		if errors.Is(err, store.ErrNotFound) {
 			return lock.PeerRecord{}, "", fmt.Errorf("peer %s: %w", peerID, ErrNotFound)
 		}
@@ -205,7 +229,21 @@ func (s *LockService) Sign(ctx context.Context, by store.Peer, peerID, publicKey
 	if err := s.signerKeyOf(ctx, s.store, by, signer); err != nil {
 		return err
 	}
-	rec, name, err := s.Record(ctx, peerID, publicKey)
+	err := s.store.InTx(ctx, func(tx *store.Store) error {
+		return s.signInTx(ctx, tx, by, PeerSigning{PeerID: peerID, PublicKey: publicKey, Signer: signer, Signature: sig})
+	})
+	if err != nil {
+		return err
+	}
+	s.changed()
+	return nil
+}
+
+// signInTx verifies one signature against the peer's current record
+// and stores it with its audit row; the caller has checked that the
+// signer key belongs to by.
+func (s *LockService) signInTx(ctx context.Context, tx *store.Store, by store.Peer, sg PeerSigning) error {
+	rec, name, err := s.Record(ctx, tx, sg.PeerID, sg.PublicKey)
 	if err != nil {
 		return err
 	}
@@ -213,24 +251,20 @@ func (s *LockService) Sign(ctx context.Context, by store.Peer, peerID, publicKey
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrValidation, err)
 	}
-	if !lock.Verify(signer, msg, sig) {
+	if !lock.Verify(sg.Signer, msg, sg.Signature) {
 		return fmt.Errorf("%w: signature over %s does not verify", ErrValidation, name)
 	}
-	err = s.store.InTx(ctx, func(tx *store.Store) error {
-		if err := tx.Signatures().Put(ctx, store.PeerSignature{PeerID: peerID, PublicKey: publicKey, SignerKey: signer.String(), Signature: sig.String(), SignedAt: s.now()}); err != nil {
-			return err
-		}
-		if _, err := tx.Meta().IncrementGeneration(ctx); err != nil {
-			return err
-		}
-		return s.audit.Record(ctx, tx, PeerPrincipal(by.Name), AuditPeerSign, peerID,
-			map[string]string{"name": name, "key": wg.Fingerprint(wg.Key(rec.Key)), "signer": lock.Fingerprint(signer)})
-	})
-	if err != nil {
+	if err := tx.Signatures().Put(ctx, store.PeerSignature{PeerID: sg.PeerID, PublicKey: sg.PublicKey, SignerKey: sg.Signer.String(), Signature: sg.Signature.String(), SignedAt: s.now()}); err != nil {
 		return err
 	}
-	s.changed()
-	s.log.Info("peer signed", "peer", name, "peer_id", peerID, "signer", lock.Fingerprint(signer), "by", by.Name)
+	if _, err := tx.Meta().IncrementGeneration(ctx); err != nil {
+		return err
+	}
+	if err := s.audit.Record(ctx, tx, PeerPrincipal(by.Name), AuditPeerSign, sg.PeerID,
+		map[string]string{"name": name, "key": wg.Fingerprint(wg.Key(rec.Key)), "signer": lock.Fingerprint(sg.Signer)}); err != nil {
+		return err
+	}
+	s.log.Info("peer signed", "peer", name, "peer_id", sg.PeerID, "signer", lock.Fingerprint(sg.Signer), "by", by.Name)
 	return nil
 }
 

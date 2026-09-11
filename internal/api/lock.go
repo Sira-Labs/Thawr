@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"google.golang.org/grpc/codes"
@@ -16,7 +17,7 @@ import (
 // LockOps are the network-lock operations behind the signing RPCs
 // (spec 012). Signers are client devices; the server only stores.
 type LockOps interface {
-	Set(ctx context.Context, by store.Peer, next lock.Signed) error
+	Set(ctx context.Context, by store.Peer, next lock.Signed, sigs []control.PeerSigning) error
 	Sign(ctx context.Context, by store.Peer, peerID, publicKey string, signer lock.PublicKey, sig lock.Signature) error
 	IsSigner(ctx context.Context, peerID string) (bool, error)
 	ListPeers(ctx context.Context) ([]control.LockPeer, control.LockPeer, error)
@@ -41,10 +42,39 @@ func (s *controlServer) SetLock(ctx context.Context, req *thawrv1.SetLockRequest
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	if err := s.deps.Lock.Set(ctx, me, signed); err != nil {
+	if len(req.GetSignatures()) > maxLockSignatures {
+		return nil, status.Errorf(codes.InvalidArgument, "at most %d signatures per request", maxLockSignatures)
+	}
+	sigs := make([]control.PeerSigning, 0, len(req.GetSignatures()))
+	for _, sg := range req.GetSignatures() {
+		ps, err := signingFromProto(sg)
+		if err != nil {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		}
+		sigs = append(sigs, ps)
+	}
+	if err := s.deps.Lock.Set(ctx, me, signed, sigs); err != nil {
 		return nil, s.toStatus(err)
 	}
 	return &thawrv1.Empty{}, nil
+}
+
+// maxLockSignatures bounds the signatures one SetLock may carry.
+const maxLockSignatures = 4096
+
+func signingFromProto(sg *thawrv1.SignPeerRequest) (control.PeerSigning, error) {
+	if sg.GetPeerId() == "" {
+		return control.PeerSigning{}, errors.New("peer_id required")
+	}
+	signer, err := lock.ParsePublicKey(sg.GetSignerKey())
+	if err != nil {
+		return control.PeerSigning{}, err
+	}
+	sig, err := lock.ParseSignature(sg.GetSignature())
+	if err != nil {
+		return control.PeerSigning{}, err
+	}
+	return control.PeerSigning{PeerID: sg.GetPeerId(), PublicKey: sg.GetPublicKey(), Signer: signer, Signature: sig}, nil
 }
 
 func (s *controlServer) SignPeer(ctx context.Context, req *thawrv1.SignPeerRequest) (*thawrv1.Empty, error) {
@@ -55,18 +85,11 @@ func (s *controlServer) SignPeer(ctx context.Context, req *thawrv1.SignPeerReque
 	if !ok {
 		return nil, status.Error(codes.Unauthenticated, "node secret required")
 	}
-	signer, err := lock.ParsePublicKey(req.GetSignerKey())
+	ps, err := signingFromProto(req)
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	sig, err := lock.ParseSignature(req.GetSignature())
-	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-	if req.GetPeerId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "peer_id required")
-	}
-	if err := s.deps.Lock.Sign(ctx, me, req.GetPeerId(), req.GetPublicKey(), signer, sig); err != nil {
+	if err := s.deps.Lock.Sign(ctx, me, ps.PeerID, ps.PublicKey, ps.Signer, ps.Signature); err != nil {
 		return nil, s.toStatus(err)
 	}
 	return &thawrv1.Empty{}, nil

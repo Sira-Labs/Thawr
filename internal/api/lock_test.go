@@ -235,7 +235,7 @@ func TestLockEndpoint(t *testing.T) {
 	first := lock.Record{Generation: 1, Signers: []lock.Signer{{Key: ka.Public(), PeerID: alice.ID}}}
 	msg, _ := first.Bytes()
 	sig, _ := lock.Sign(ka, msg)
-	if err := svc.Set(ctx, alice, lock.Signed{Record: first, Signature: sig}); err != nil {
+	if err := svc.Set(ctx, alice, lock.Signed{Record: first, Signature: sig}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.Sign(ctx, alice, alice.ID, alice.PublicKey, ka.Public(), mustSig(t, peerSignature(t, ka, alice.ID, alice.Name, alice.PublicKey))); err != nil {

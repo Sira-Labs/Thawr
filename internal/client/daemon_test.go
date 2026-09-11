@@ -39,6 +39,7 @@ type controlPlane struct {
 	endpoints *control.EndpointTable
 	paths     *control.PathTable
 	relay     *relay.Server
+	lock      *control.LockService
 	admin     control.Principal
 	ts        *httptest.Server
 	fp        string
@@ -77,7 +78,8 @@ func newControlPlane(t *testing.T, mods ...func(*cpOptions)) *controlPlane {
 	}
 	overlay := netip.MustParsePrefix("100.64.0.0/10")
 	hubKey, _ := wg.GenerateKey()
-	registry := control.NewRegistry(st, quiet).WithNotifier(hub)
+	lockSvc := control.NewLockService(st, time.Now, quiet, hubKey.PublicKey().String()).WithNotifier(hub)
+	registry := control.NewRegistry(st, quiet).WithNotifier(hub).WithLock(lockSvc)
 	enroller := control.NewEnroller(st, time.Now, quiet, overlay, "").WithNotifier(hub)
 	endpoints := control.NewEndpointTable(time.Now)
 	paths := control.NewPathTable(time.Now)
@@ -86,7 +88,7 @@ func newControlPlane(t *testing.T, mods ...func(*cpOptions)) *controlPlane {
 	builder := control.NewNetMapBuilder(st, cpo.visibility, endpoints, hub, hubCfg, hub.Generation)
 	grpcSrv, err := api.NewGRPC(api.GRPCDeps{
 		Enroller: enroller, Hub: api.HubInfo{PublicKey: hubCfg.PublicKey, Endpoint: hubCfg.Endpoint, Overlay: overlay}, Logger: quiet,
-		NodeAuth: registry, NetMaps: builder, Sync: hub, Peers: registry, Endpoints: endpoints, Paths: paths, Version: "v0.9.0",
+		NodeAuth: registry, NetMaps: builder, Sync: hub, Peers: registry, Endpoints: endpoints, Paths: paths, Version: "v0.9.0", Lock: lockSvc,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -102,7 +104,7 @@ func newControlPlane(t *testing.T, mods ...func(*cpOptions)) *controlPlane {
 	ts.TLS = &tls.Config{MinVersion: tls.VersionTLS13, NextProtos: []string{"h2", "http/1.1"}}
 	ts.StartTLS()
 	t.Cleanup(ts.Close)
-	return &controlPlane{t: t, st: st, hub: hub, registry: registry, tokens: control.NewTokens(st, time.Now, quiet), endpoints: endpoints, paths: paths, relay: relaySrv,
+	return &controlPlane{t: t, st: st, hub: hub, registry: registry, tokens: control.NewTokens(st, time.Now, quiet), endpoints: endpoints, paths: paths, relay: relaySrv, lock: lockSvc,
 		admin: control.Principal{UserID: admin.ID, Name: admin.Name, Role: admin.Role}, ts: ts, fp: Fingerprint(ts.Certificate().Raw), hubKey: hubKey}
 }
 

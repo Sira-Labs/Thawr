@@ -59,7 +59,7 @@ func endpointsFromProto(eps []*thawrv1.Endpoint) ([]control.Endpoint, error) {
 func netMapToProto(nm control.NetMap) *thawrv1.NetMap {
 	out := &thawrv1.NetMap{
 		Generation: nm.Generation,
-		Self:       &thawrv1.SelfInfo{Id: nm.SelfID, Name: nm.SelfName, Kind: nm.SelfKind, Ipv4: nm.SelfIPv4.String(), OverlayCidr: nm.Overlay.String(), StunAddrs: append([]string{}, nm.STUN...)},
+		Self:       &thawrv1.SelfInfo{Id: nm.SelfID, Name: nm.SelfName, Kind: nm.SelfKind, Ipv4: nm.SelfIPv4.String(), OverlayCidr: nm.Overlay.String(), StunAddrs: append([]string{}, nm.STUN...), Signatures: signaturesToProto(nm.SelfSignatures)},
 		Hub:        &thawrv1.HubPeer{PublicKey: nm.Hub.PublicKey, Endpoint: nm.Hub.Endpoint, Signatures: signaturesToProto(nm.Hub.Signatures)},
 		Lock:       lockToProto(nm.Lock),
 	}

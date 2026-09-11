@@ -110,10 +110,11 @@ func SaveKey(dir string, key wg.Key) error {
 	return writeSecret(dir, KeyFile, []byte(key.String()+"\n"))
 }
 
-// Forget removes the state and key so the device can enrol again.
+// Forget removes the state, the node key and the lock key so the device
+// can enrol again; pins.json stays.
 func Forget(dir string) error {
 	var errs []error
-	for _, name := range []string{StateFile, KeyFile} {
+	for _, name := range []string{StateFile, KeyFile, LockKeyFile} {
 		if err := os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			errs = append(errs, fmt.Errorf("client: remove %s: %w", name, err))
 		}

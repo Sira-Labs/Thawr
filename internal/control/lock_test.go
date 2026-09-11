@@ -72,11 +72,26 @@ func signPeer(t *testing.T, k lock.PrivateKey, id, name, key string) lock.Signat
 }
 
 // enable installs the first record with pa as sole signer.
+// enable installs generation 1 with pa as signer and, in the same
+// call, pa's signature over the hub; a signature by another key in the
+// same request is refused and nothing is stored.
 func (e *lockEnv) enable(t *testing.T) {
 	t.Helper()
+	ctx := context.Background()
 	rec := signRecord(t, e.ka, lock.Record{Generation: 1, Signers: []lock.Signer{{Key: e.ka.Public(), PeerID: e.pa.ID}}})
-	if err := e.svc.Set(context.Background(), e.pa, rec); err != nil {
+	bad := PeerSigning{PeerID: lock.HubID, PublicKey: e.hubKey, Signer: e.kb.Public(), Signature: signPeer(t, e.kb, lock.HubID, lock.HubID, e.hubKey)}
+	if err := e.svc.Set(ctx, e.pa, rec, []PeerSigning{bad}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("foreign signature with record: %v", err)
+	}
+	if cur, err := e.svc.Current(ctx); err != nil || cur != nil {
+		t.Fatalf("record stored despite refused signature: %+v %v", cur, err)
+	}
+	good := PeerSigning{PeerID: lock.HubID, PublicKey: e.hubKey, Signer: e.ka.Public(), Signature: signPeer(t, e.ka, lock.HubID, lock.HubID, e.hubKey)}
+	if err := e.svc.Set(ctx, e.pa, rec, []PeerSigning{good}); err != nil {
 		t.Fatal(err)
+	}
+	if _, hub, err := e.svc.ListPeers(ctx); err != nil || !hub.Signed {
+		t.Fatalf("hub not signed with the record: %+v %v", hub, err)
 	}
 }
 
@@ -89,7 +104,7 @@ func TestLockSetAcceptsOnlySignedSuccessors(t *testing.T) {
 	outsider, _ := lock.GenerateKey(rand.Reader)
 	// The first record must be signed by one of its own keys.
 	bad := signRecord(t, outsider, lock.Record{Generation: 1, Signers: []lock.Signer{{Key: e.ka.Public(), PeerID: e.pa.ID}}})
-	if err := e.svc.Set(ctx, e.pa, bad); !errors.Is(err, ErrValidation) {
+	if err := e.svc.Set(ctx, e.pa, bad, nil); !errors.Is(err, ErrValidation) {
 		t.Errorf("first record by outsider: %v", err)
 	}
 	e.enable(t)
@@ -108,24 +123,24 @@ func TestLockSetAcceptsOnlySignedSuccessors(t *testing.T) {
 	}
 	// Replay, outsider and self-added signer are refused.
 	replay := signRecord(t, e.ka, cur.Record)
-	if err := e.svc.Set(ctx, e.pa, replay); !errors.Is(err, ErrValidation) {
+	if err := e.svc.Set(ctx, e.pa, replay, nil); !errors.Is(err, ErrValidation) {
 		t.Errorf("replay: %v", err)
 	}
 	two := lock.Record{Generation: 2, Signers: []lock.Signer{{Key: e.ka.Public(), PeerID: e.pa.ID}, {Key: e.kb.Public(), PeerID: e.pb.ID}}}
-	if err := e.svc.Set(ctx, e.pb, signRecord(t, e.kb, two)); !errors.Is(err, ErrValidation) {
+	if err := e.svc.Set(ctx, e.pb, signRecord(t, e.kb, two), nil); !errors.Is(err, ErrValidation) {
 		t.Errorf("self-added signer: %v", err)
 	}
-	if err := e.svc.Set(ctx, e.pa, signRecord(t, outsider, lock.Record{Generation: 9, Signers: []lock.Signer{{Key: outsider.Public(), PeerID: e.pa.ID}}})); !errors.Is(err, ErrValidation) {
+	if err := e.svc.Set(ctx, e.pa, signRecord(t, outsider, lock.Record{Generation: 9, Signers: []lock.Signer{{Key: outsider.Public(), PeerID: e.pa.ID}}}), nil); !errors.Is(err, ErrValidation) {
 		t.Errorf("hijack: %v", err)
 	}
-	if err := e.svc.Set(ctx, e.pa, signRecord(t, e.ka, two)); err != nil {
+	if err := e.svc.Set(ctx, e.pa, signRecord(t, e.ka, two), nil); err != nil {
 		t.Fatalf("add signer: %v", err)
 	}
 	if ok, _ := e.svc.IsSigner(ctx, e.pb.ID); !ok {
 		t.Error("pb not a signer after being added")
 	}
 	// The new signer may disable the lock.
-	if err := e.svc.Set(ctx, e.pb, signRecord(t, e.kb, lock.Record{Generation: 3, Disabled: true})); err != nil {
+	if err := e.svc.Set(ctx, e.pb, signRecord(t, e.kb, lock.Record{Generation: 3, Disabled: true}), nil); err != nil {
 		t.Fatalf("disable: %v", err)
 	}
 	if ok, _ := e.svc.IsSigner(ctx, e.pa.ID); ok {
@@ -178,11 +193,12 @@ func TestSignPeerRequiresSigner(t *testing.T) {
 	for _, p := range peers {
 		signed[p.Name] = p.Signed
 	}
-	if !signed["pb"] || signed["pa"] || hub.Signed || hub.ID != lock.HubID || hub.PublicKey != e.hubKey {
+	// enable signed the hub together with the record.
+	if !signed["pb"] || signed["pa"] || !hub.Signed || hub.ID != lock.HubID || hub.PublicKey != e.hubKey {
 		t.Errorf("list: %+v hub=%+v", peers, hub)
 	}
 	if err := e.svc.Sign(ctx, e.pa, lock.HubID, e.hubKey, e.ka.Public(), signPeer(t, e.ka, lock.HubID, lock.HubID, e.hubKey)); err != nil {
-		t.Fatalf("sign hub: %v", err)
+		t.Fatalf("sign hub again: %v", err)
 	}
 	if _, hub, _ = e.svc.ListPeers(ctx); !hub.Signed {
 		t.Error("hub not signed")
@@ -233,8 +249,8 @@ func TestRotateKeyStoresSignature(t *testing.T) {
 	if nm.Lock == nil || nm.Lock.Record.Generation != 1 || len(nm.Peers) != 1 || nm.Peers[0].PublicKey != newKey || len(nm.Peers[0].Signatures) != 1 || nm.Peers[0].Signatures[0].Signer != e.ka.Public() {
 		t.Errorf("netmap after signed rotation: lock=%+v peers=%+v", nm.Lock, nm.Peers)
 	}
-	if len(nm.Hub.Signatures) != 0 {
-		t.Errorf("hub signed without a signature: %+v", nm.Hub)
+	if len(nm.Hub.Signatures) != 1 || nm.Hub.Signatures[0].Signer != e.ka.Public() {
+		t.Errorf("hub signature from enable missing: %+v", nm.Hub)
 	}
 	// An unsigned rotation drops the peer to unsigned: old-key rows do not match.
 	if _, err := e.registry.RotateKey(ctx, e.pa.ID, newPubKey(t), nil); err != nil {

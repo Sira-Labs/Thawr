@@ -459,7 +459,10 @@ type SelfInfo struct {
 	// stun_addrs are the server's STUN listeners as host:port (one or two).
 	StunAddrs []string `protobuf:"bytes,5,rep,name=stun_addrs,json=stunAddrs,proto3" json:"stun_addrs,omitempty"`
 	// kind is the receiving peer's kind (human, server, agent).
-	Kind          string `protobuf:"bytes,6,opt,name=kind,proto3" json:"kind,omitempty"`
+	Kind string `protobuf:"bytes,6,opt,name=kind,proto3" json:"kind,omitempty"`
+	// signatures are the lock signatures over the receiver's own current
+	// record, so it can tell whether it is signed (spec 012).
+	Signatures    []*PeerSignature `protobuf:"bytes,7,rep,name=signatures,proto3" json:"signatures,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -534,6 +537,13 @@ func (x *SelfInfo) GetKind() string {
 		return x.Kind
 	}
 	return ""
+}
+
+func (x *SelfInfo) GetSignatures() []*PeerSignature {
+	if x != nil {
+		return x.Signatures
+	}
+	return nil
 }
 
 // NetPeer is one visible peer.
@@ -1030,8 +1040,12 @@ func (x *SignedLockRecord) GetSignature() string {
 
 // SetLockRequest carries the record to install.
 type SetLockRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Lock          *SignedLockRecord      `protobuf:"bytes,1,opt,name=lock,proto3" json:"lock,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Lock  *SignedLockRecord      `protobuf:"bytes,1,opt,name=lock,proto3" json:"lock,omitempty"`
+	// signatures are applied in the same transaction as the record, so
+	// enabling the lock never shows other devices a record without the
+	// signatures that go with it (lock init).
+	Signatures    []*SignPeerRequest `protobuf:"bytes,2,rep,name=signatures,proto3" json:"signatures,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1069,6 +1083,13 @@ func (*SetLockRequest) Descriptor() ([]byte, []int) {
 func (x *SetLockRequest) GetLock() *SignedLockRecord {
 	if x != nil {
 		return x.Lock
+	}
+	return nil
+}
+
+func (x *SetLockRequest) GetSignatures() []*SignPeerRequest {
+	if x != nil {
+		return x.Signatures
 	}
 	return nil
 }
@@ -1709,7 +1730,7 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"\x06filter\x18\x05 \x03(\v2\x14.thawr.v1.FilterRuleR\x06filter\x12\x1c\n" +
 	"\tkeepalive\x18\x06 \x01(\bR\tkeepalive\x12%\n" +
 	"\x0eserver_version\x18\a \x01(\tR\rserverVersion\x12.\n" +
-	"\x04lock\x18\b \x01(\v2\x1a.thawr.v1.SignedLockRecordR\x04lock\"\x98\x01\n" +
+	"\x04lock\x18\b \x01(\v2\x1a.thawr.v1.SignedLockRecordR\x04lock\"\xd1\x01\n" +
 	"\bSelfInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -1717,7 +1738,10 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"\foverlay_cidr\x18\x04 \x01(\tR\voverlayCidr\x12\x1d\n" +
 	"\n" +
 	"stun_addrs\x18\x05 \x03(\tR\tstunAddrs\x12\x12\n" +
-	"\x04kind\x18\x06 \x01(\tR\x04kind\"\x83\x03\n" +
+	"\x04kind\x18\x06 \x01(\tR\x04kind\x127\n" +
+	"\n" +
+	"signatures\x18\a \x03(\v2\x17.thawr.v1.PeerSignatureR\n" +
+	"signatures\"\x83\x03\n" +
 	"\aNetPeer\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -1766,9 +1790,12 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"\asigners\x18\x03 \x03(\v2\x14.thawr.v1.LockSignerR\asigners\"^\n" +
 	"\x10SignedLockRecord\x12,\n" +
 	"\x06record\x18\x01 \x01(\v2\x14.thawr.v1.LockRecordR\x06record\x12\x1c\n" +
-	"\tsignature\x18\x02 \x01(\tR\tsignature\"@\n" +
+	"\tsignature\x18\x02 \x01(\tR\tsignature\"{\n" +
 	"\x0eSetLockRequest\x12.\n" +
-	"\x04lock\x18\x01 \x01(\v2\x1a.thawr.v1.SignedLockRecordR\x04lock\"\x86\x01\n" +
+	"\x04lock\x18\x01 \x01(\v2\x1a.thawr.v1.SignedLockRecordR\x04lock\x129\n" +
+	"\n" +
+	"signatures\x18\x02 \x03(\v2\x19.thawr.v1.SignPeerRequestR\n" +
+	"signatures\"\x86\x01\n" +
 	"\x0fSignPeerRequest\x12\x17\n" +
 	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12\x1d\n" +
 	"\n" +
@@ -1878,40 +1905,42 @@ var file_thawr_v1_control_proto_depIdxs = []int32{
 	8,  // 2: thawr.v1.NetMap.hub:type_name -> thawr.v1.HubPeer
 	17, // 3: thawr.v1.NetMap.filter:type_name -> thawr.v1.FilterRule
 	12, // 4: thawr.v1.NetMap.lock:type_name -> thawr.v1.SignedLockRecord
-	7,  // 5: thawr.v1.NetPeer.endpoints:type_name -> thawr.v1.Endpoint
-	9,  // 6: thawr.v1.NetPeer.signatures:type_name -> thawr.v1.PeerSignature
-	0,  // 7: thawr.v1.Endpoint.kind:type_name -> thawr.v1.EndpointKind
-	9,  // 8: thawr.v1.HubPeer.signatures:type_name -> thawr.v1.PeerSignature
-	10, // 9: thawr.v1.LockRecord.signers:type_name -> thawr.v1.LockSigner
-	11, // 10: thawr.v1.SignedLockRecord.record:type_name -> thawr.v1.LockRecord
-	12, // 11: thawr.v1.SetLockRequest.lock:type_name -> thawr.v1.SignedLockRecord
-	16, // 12: thawr.v1.LockPeers.peers:type_name -> thawr.v1.LockPeer
-	16, // 13: thawr.v1.LockPeers.hub:type_name -> thawr.v1.LockPeer
-	7,  // 14: thawr.v1.EndpointReport.endpoints:type_name -> thawr.v1.Endpoint
-	20, // 15: thawr.v1.PathReport.paths:type_name -> thawr.v1.PathState
-	1,  // 16: thawr.v1.Control.Enroll:input_type -> thawr.v1.EnrollRequest
-	3,  // 17: thawr.v1.Control.Sync:input_type -> thawr.v1.SyncRequest
-	18, // 18: thawr.v1.Control.ReportEndpoints:input_type -> thawr.v1.EndpointReport
-	19, // 19: thawr.v1.Control.ReportPath:input_type -> thawr.v1.PathReport
-	21, // 20: thawr.v1.Control.RotateKey:input_type -> thawr.v1.RotateKeyRequest
-	23, // 21: thawr.v1.Control.Leave:input_type -> thawr.v1.Empty
-	13, // 22: thawr.v1.Control.SetLock:input_type -> thawr.v1.SetLockRequest
-	14, // 23: thawr.v1.Control.SignPeer:input_type -> thawr.v1.SignPeerRequest
-	23, // 24: thawr.v1.Control.ListLockPeers:input_type -> thawr.v1.Empty
-	2,  // 25: thawr.v1.Control.Enroll:output_type -> thawr.v1.EnrollResponse
-	4,  // 26: thawr.v1.Control.Sync:output_type -> thawr.v1.NetMap
-	23, // 27: thawr.v1.Control.ReportEndpoints:output_type -> thawr.v1.Empty
-	23, // 28: thawr.v1.Control.ReportPath:output_type -> thawr.v1.Empty
-	22, // 29: thawr.v1.Control.RotateKey:output_type -> thawr.v1.RotateKeyResponse
-	23, // 30: thawr.v1.Control.Leave:output_type -> thawr.v1.Empty
-	23, // 31: thawr.v1.Control.SetLock:output_type -> thawr.v1.Empty
-	23, // 32: thawr.v1.Control.SignPeer:output_type -> thawr.v1.Empty
-	15, // 33: thawr.v1.Control.ListLockPeers:output_type -> thawr.v1.LockPeers
-	25, // [25:34] is the sub-list for method output_type
-	16, // [16:25] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	9,  // 5: thawr.v1.SelfInfo.signatures:type_name -> thawr.v1.PeerSignature
+	7,  // 6: thawr.v1.NetPeer.endpoints:type_name -> thawr.v1.Endpoint
+	9,  // 7: thawr.v1.NetPeer.signatures:type_name -> thawr.v1.PeerSignature
+	0,  // 8: thawr.v1.Endpoint.kind:type_name -> thawr.v1.EndpointKind
+	9,  // 9: thawr.v1.HubPeer.signatures:type_name -> thawr.v1.PeerSignature
+	10, // 10: thawr.v1.LockRecord.signers:type_name -> thawr.v1.LockSigner
+	11, // 11: thawr.v1.SignedLockRecord.record:type_name -> thawr.v1.LockRecord
+	12, // 12: thawr.v1.SetLockRequest.lock:type_name -> thawr.v1.SignedLockRecord
+	14, // 13: thawr.v1.SetLockRequest.signatures:type_name -> thawr.v1.SignPeerRequest
+	16, // 14: thawr.v1.LockPeers.peers:type_name -> thawr.v1.LockPeer
+	16, // 15: thawr.v1.LockPeers.hub:type_name -> thawr.v1.LockPeer
+	7,  // 16: thawr.v1.EndpointReport.endpoints:type_name -> thawr.v1.Endpoint
+	20, // 17: thawr.v1.PathReport.paths:type_name -> thawr.v1.PathState
+	1,  // 18: thawr.v1.Control.Enroll:input_type -> thawr.v1.EnrollRequest
+	3,  // 19: thawr.v1.Control.Sync:input_type -> thawr.v1.SyncRequest
+	18, // 20: thawr.v1.Control.ReportEndpoints:input_type -> thawr.v1.EndpointReport
+	19, // 21: thawr.v1.Control.ReportPath:input_type -> thawr.v1.PathReport
+	21, // 22: thawr.v1.Control.RotateKey:input_type -> thawr.v1.RotateKeyRequest
+	23, // 23: thawr.v1.Control.Leave:input_type -> thawr.v1.Empty
+	13, // 24: thawr.v1.Control.SetLock:input_type -> thawr.v1.SetLockRequest
+	14, // 25: thawr.v1.Control.SignPeer:input_type -> thawr.v1.SignPeerRequest
+	23, // 26: thawr.v1.Control.ListLockPeers:input_type -> thawr.v1.Empty
+	2,  // 27: thawr.v1.Control.Enroll:output_type -> thawr.v1.EnrollResponse
+	4,  // 28: thawr.v1.Control.Sync:output_type -> thawr.v1.NetMap
+	23, // 29: thawr.v1.Control.ReportEndpoints:output_type -> thawr.v1.Empty
+	23, // 30: thawr.v1.Control.ReportPath:output_type -> thawr.v1.Empty
+	22, // 31: thawr.v1.Control.RotateKey:output_type -> thawr.v1.RotateKeyResponse
+	23, // 32: thawr.v1.Control.Leave:output_type -> thawr.v1.Empty
+	23, // 33: thawr.v1.Control.SetLock:output_type -> thawr.v1.Empty
+	23, // 34: thawr.v1.Control.SignPeer:output_type -> thawr.v1.Empty
+	15, // 35: thawr.v1.Control.ListLockPeers:output_type -> thawr.v1.LockPeers
+	27, // [27:36] is the sub-list for method output_type
+	18, // [18:27] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_thawr_v1_control_proto_init() }

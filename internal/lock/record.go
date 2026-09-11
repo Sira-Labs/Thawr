@@ -162,11 +162,16 @@ type Signed struct {
 // Accept decides whether next may replace current. With no current
 // record the first one is accepted as it is (first contact). Otherwise
 // next must carry a higher generation and a signature by a key of the
-// current set.
+// current set. A current record without signers (a disabled record
+// that dropped them) ends its lineage: the next record starts over
+// under the first-contact rule.
 func Accept(current *Record, next Signed) error {
 	msg, err := next.Record.Bytes()
 	if err != nil {
 		return err
+	}
+	if current != nil && len(current.Signers) == 0 {
+		current = nil
 	}
 	if current == nil {
 		// First contact: the record must at least be signed by one of

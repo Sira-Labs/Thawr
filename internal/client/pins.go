@@ -10,6 +10,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/thedatadudech/thawr/internal/lock"
 	"github.com/thedatadudech/thawr/internal/wg"
 )
 
@@ -31,7 +32,19 @@ type pinEntry struct {
 type pinFile struct {
 	Hub   string              `json:"hub"`
 	Peers map[string]pinEntry `json:"peers"`
+	// Lock is the pinned network-lock record (spec 012); absent while
+	// this device never saw one.
+	Lock *lock.Signed `json:"lock,omitempty"`
 }
+
+// Reasons an entry is held.
+const (
+	// HeldKeyChanged: the offered key differs from the pinned one.
+	HeldKeyChanged = "key_changed"
+	// HeldUnsigned: the network lock is on and no signer signed the
+	// offered record.
+	HeldUnsigned = "unsigned"
+)
 
 // Pins is the set of accepted keys, keyed by peer name. It is not safe
 // for concurrent use; the daemon calls it under its own lock.
@@ -39,6 +52,7 @@ type Pins struct {
 	dir   string
 	hub   string
 	peers map[string]pinEntry
+	lock  *lock.Signed
 	// dirty is set while the in-memory set is ahead of the file, so a
 	// failed write is retried on the next Apply instead of being lost
 	// at the next start.
@@ -59,6 +73,8 @@ type HeldStatus struct {
 	OfferedKey string `json:"offered_key"`
 	// Since is when this offered key was first held.
 	Since time.Time `json:"since"`
+	// Reason is HeldKeyChanged or HeldUnsigned.
+	Reason string `json:"reason"`
 	// id is the offered peer id, needed to accept it.
 	id string
 }
@@ -86,12 +102,18 @@ func LoadPins(dir string) (*Pins, error) {
 		}
 		p.peers[name] = e
 	}
+	if f.Lock != nil {
+		if err := lock.Accept(nil, *f.Lock); err != nil {
+			return nil, fmt.Errorf("client: parse %s: lock record: %w", PinsFile, err)
+		}
+		p.lock = f.Lock
+	}
 	return p, nil
 }
 
 // save writes the set with mode 0600 through a temporary file.
 func (p *Pins) save() error {
-	f := pinFile{Hub: p.hub, Peers: p.peers}
+	f := pinFile{Hub: p.hub, Peers: p.peers, Lock: p.lock}
 	data, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return fmt.Errorf("client: encode %s: %w", PinsFile, err)
@@ -130,7 +152,7 @@ func (p *Pins) Apply(nm NetMap, now time.Time, prev []HeldStatus) (NetMap, []Hel
 			p.hub, changed = nm.Hub.PublicKey, true
 		case nm.Hub.PublicKey:
 		default:
-			held = append(held, HeldStatus{Name: HubName, IPv4: hubAddr(nm), Kind: "server", PinnedKey: p.hub, OfferedKey: nm.Hub.PublicKey, Since: since(HubName, nm.Hub.PublicKey)})
+			held = append(held, HeldStatus{Name: HubName, IPv4: hubAddr(nm), Kind: "server", PinnedKey: p.hub, OfferedKey: nm.Hub.PublicKey, Since: since(HubName, nm.Hub.PublicKey), Reason: HeldKeyChanged})
 			out.Hub = HubPeer{}
 		}
 	}
@@ -153,7 +175,7 @@ func (p *Pins) Apply(nm NetMap, now time.Time, prev []HeldStatus) (NetMap, []Hel
 			continue
 		}
 		held = append(held, HeldStatus{Name: peer.Name, IPv4: peer.IPv4, Kind: peer.Kind, Owner: peer.Owner, PinnedKey: pin.Key, OfferedKey: peer.PublicKey,
-			Since: since(peer.Name, peer.PublicKey), id: peer.ID})
+			Since: since(peer.Name, peer.PublicKey), Reason: HeldKeyChanged, id: peer.ID})
 	}
 	if changed || p.dirty {
 		p.dirty = true
@@ -179,6 +201,131 @@ func (p *Pins) Trust(h HeldStatus) error {
 	}
 	p.dirty = false
 	return nil
+}
+
+// Lock returns the pinned lock record, nil when none was ever pinned.
+func (p *Pins) Lock() *lock.Signed { return p.lock }
+
+// Enabled reports whether the pinned record turns the lock on.
+func (p *Pins) Enabled() bool { return p.lock != nil && p.lock.Record.Enabled() }
+
+// UpdateLock reconciles the record the server offers with the pinned
+// one and returns why the offer was not adopted, empty when it was or
+// when nothing changed. The first record is pinned as offered; a later
+// one must pass lock.Accept against the pin. A server that offers
+// nothing while a record is pinned does not turn the lock off: the pin
+// stays until a signed disabled record arrives. The pin is written by
+// the next Apply.
+func (p *Pins) UpdateLock(offered *lock.Signed) string {
+	switch {
+	case offered == nil && p.lock == nil:
+		return ""
+	case offered == nil:
+		return "server offers no lock record; keeping the pinned one"
+	case p.lock != nil && p.lock.Record.Generation == offered.Record.Generation && p.lock.Signature == offered.Signature:
+		return ""
+	}
+	var cur *lock.Record
+	if p.lock != nil {
+		cur = &p.lock.Record
+	}
+	if err := lock.Accept(cur, *offered); err != nil {
+		return fmt.Sprintf("offered record (generation %d) refused: %v", offered.Record.Generation, err)
+	}
+	p.lock, p.dirty = offered, true
+	return ""
+}
+
+// SetLock pins a record this device produced itself and persists it.
+func (p *Pins) SetLock(s lock.Signed) error {
+	p.lock, p.dirty = &s, true
+	if err := p.save(); err != nil {
+		return err
+	}
+	p.dirty = false
+	return nil
+}
+
+// Accept records key for name (HubName for the hub) as the pinned one
+// without a trust step: the lock signers vouched for it. The pin is
+// written by the next Apply.
+func (p *Pins) Accept(name, id, key string) {
+	if name == HubName {
+		if p.hub != key {
+			p.hub, p.dirty = key, true
+		}
+		return
+	}
+	if e := p.peers[name]; e.ID != id || e.Key != key {
+		p.peers[name], p.dirty = pinEntry{ID: id, Key: key}, true
+	}
+}
+
+// HoldUnsigned removes from nm every entry (hub included, ViaHub peers
+// excepted) whose record carries no valid signature by a signer of set
+// and returns them as held with reason HeldUnsigned; signed entries
+// are accepted into the pins so a signed rotation needs no trust.
+func (p *Pins) HoldUnsigned(nm NetMap, set lock.Record, now time.Time, prev []HeldStatus) (NetMap, []HeldStatus) {
+	since := func(name, offered string) time.Time {
+		for _, h := range prev {
+			if h.Name == name && h.OfferedKey == offered && h.Reason == HeldUnsigned {
+				return h.Since
+			}
+		}
+		return now
+	}
+	var held []HeldStatus
+	out := nm
+	out.Peers = make([]Peer, 0, len(nm.Peers))
+	if nm.Hub.PublicKey != "" {
+		if signedBy(set, lock.HubID, lock.HubID, nm.Hub.PublicKey, nm.Hub.Signatures) {
+			p.Accept(HubName, "", nm.Hub.PublicKey)
+		} else {
+			held = append(held, HeldStatus{Name: HubName, IPv4: hubAddr(nm), Kind: "server", PinnedKey: p.hub, OfferedKey: nm.Hub.PublicKey, Since: since(HubName, nm.Hub.PublicKey), Reason: HeldUnsigned})
+			out.Hub = HubPeer{}
+		}
+	}
+	for _, peer := range nm.Peers {
+		if peer.ViaHub || peer.Name == "" || peer.ID == "" || peer.PublicKey == "" {
+			out.Peers = append(out.Peers, peer)
+			continue
+		}
+		if signedBy(set, peer.ID, peer.Name, peer.PublicKey, peer.Signatures) {
+			p.Accept(peer.Name, peer.ID, peer.PublicKey)
+			out.Peers = append(out.Peers, peer)
+			continue
+		}
+		held = append(held, HeldStatus{Name: peer.Name, IPv4: peer.IPv4, Kind: peer.Kind, Owner: peer.Owner, PinnedKey: p.peers[peer.Name].Key, OfferedKey: peer.PublicKey,
+			Since: since(peer.Name, peer.PublicKey), Reason: HeldUnsigned, id: peer.ID})
+	}
+	return out, held
+}
+
+// signedBy reports whether one of sigs is a valid signature by a key of
+// set over the record (id, name, key).
+func signedBy(set lock.Record, id, name, key string, sigs []PeerSignature) bool {
+	wk, err := wg.ParseKey(key)
+	if err != nil {
+		return false
+	}
+	msg, err := lock.PeerRecord{ID: id, Name: name, Key: [32]byte(wk)}.Bytes()
+	if err != nil {
+		return false
+	}
+	for _, s := range sigs {
+		signer, err := lock.ParsePublicKey(s.Signer)
+		if err != nil || !set.Has(signer) {
+			continue
+		}
+		sig, err := lock.ParseSignature(s.Signature)
+		if err != nil {
+			continue
+		}
+		if lock.Verify(signer, msg, sig) {
+			return true
+		}
+	}
+	return false
 }
 
 // hubAddr is the hub's overlay address as the netmap routes it.
