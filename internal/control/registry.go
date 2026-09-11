@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/thedatadudech/thawr/internal/lock"
 	"github.com/thedatadudech/thawr/internal/store"
 	"github.com/thedatadudech/thawr/internal/wg"
 )
@@ -23,6 +24,19 @@ type Registry struct {
 	overlay    netip.Prefix
 	tagAllowed TagAllowed
 	audit      *Auditor
+	lock       *LockService
+}
+
+// WithLock lets a signer vouch for its own key on rotation.
+func (r *Registry) WithLock(l *LockService) *Registry {
+	r.lock = l
+	return r
+}
+
+// SignedRotation is the signature a signer sends over its new key.
+type SignedRotation struct {
+	Signer    lock.PublicKey
+	Signature lock.Signature
 }
 
 // NewRegistry builds the registry service. notify may be nil.
@@ -147,6 +161,9 @@ func (r *Registry) deletePeer(ctx context.Context, id string, by Principal, acti
 		if err := tx.Peers().Delete(ctx, id); err != nil {
 			return err
 		}
+		if err := tx.Signatures().DeletePeer(ctx, id); err != nil {
+			return err
+		}
 		if by.Name == "" {
 			by = PeerPrincipal(name)
 		}
@@ -176,8 +193,11 @@ func (r *Registry) PeerByNodeSecret(ctx context.Context, secret string) (store.P
 }
 
 // RotateKey replaces a peer's WireGuard public key and bumps the
-// generation so every client switches within one netmap.
-func (r *Registry) RotateKey(ctx context.Context, peerID, newPublicKey string) (int64, error) {
+// generation so every client switches within one netmap. A signer may
+// pass its signature over the new key (spec 012); it is verified and
+// stored in the same transaction, so other devices never see the new
+// key unsigned.
+func (r *Registry) RotateKey(ctx context.Context, peerID, newPublicKey string, signed *SignedRotation) (int64, error) {
 	if _, err := parsePublicKey(newPublicKey); err != nil {
 		return 0, err
 	}
@@ -190,11 +210,27 @@ func (r *Registry) RotateKey(ctx context.Context, peerID, newPublicKey string) (
 		if err != nil {
 			return err
 		}
+		var sig *store.PeerSignature
+		if signed != nil {
+			if r.lock == nil {
+				return fmt.Errorf("%w: this server has no network lock", ErrValidation)
+			}
+			row, err := r.lock.VerifyRotation(ctx, tx, p, newPublicKey, signed.Signer, signed.Signature)
+			if err != nil {
+				return err
+			}
+			sig = &row
+		}
 		if err := tx.Peers().SetPublicKey(ctx, peerID, newPublicKey); err != nil {
 			if errors.Is(err, store.ErrConflict) {
 				return fmt.Errorf("%w: key already in use", ErrValidation)
 			}
 			return err
+		}
+		if sig != nil {
+			if err := tx.Signatures().Put(ctx, *sig); err != nil {
+				return err
+			}
 		}
 		gen, err = tx.Meta().IncrementGeneration(ctx)
 		if err != nil {

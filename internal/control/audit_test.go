@@ -73,7 +73,7 @@ func TestAuditEveryMutation(t *testing.T) {
 		t.Errorf("peer.rename: %+v", e)
 	}
 
-	gen, err := env.registry.RotateKey(ctx, res.Peer.ID, newPubKey(t))
+	gen, err := env.registry.RotateKey(ctx, res.Peer.ID, newPubKey(t), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/netip"
 
+	"github.com/thedatadudech/thawr/internal/lock"
 	"github.com/thedatadudech/thawr/internal/store"
 )
 
@@ -55,6 +56,9 @@ type NetPeer struct {
 	// ViaHub marks a static (mobile) peer: the receiver adds no
 	// WireGuard peer for it because the hub routes its address.
 	ViaHub bool
+	// Signatures are lock signatures over this peer's current record
+	// (spec 012).
+	Signatures []PeerSignature
 }
 
 // HubPeer is the server's own WireGuard interface as seen by a peer.
@@ -62,6 +66,7 @@ type HubPeer struct {
 	PublicKey  string
 	Endpoint   string
 	AllowedIPs []netip.Prefix
+	Signatures []PeerSignature
 }
 
 // FilterRule allows SrcIPv4 to reach the receiver on a port range.
@@ -85,6 +90,8 @@ type NetMap struct {
 	Filter     []FilterRule
 	// STUN lists the server's STUN listeners as host:port.
 	STUN []string
+	// Lock is the current signed lock record; nil while none was set.
+	Lock *lock.Signed
 }
 
 // Visibility decides whether two peers may see each other's keys and
@@ -162,6 +169,15 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 	if err != nil {
 		return NetMap{}, err
 	}
+	lockRec, err := LoadLockRecord(ctx, b.store)
+	if err != nil {
+		return NetMap{}, err
+	}
+	sigRows, err := b.store.Signatures().ListAll(ctx)
+	if err != nil {
+		return NetMap{}, err
+	}
+	sigs := IndexSignatures(sigRows)
 	nm := NetMap{
 		Generation: b.generation(),
 		SelfID:     self.ID,
@@ -173,7 +189,9 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 			PublicKey:  b.hub.PublicKey,
 			Endpoint:   b.hub.Endpoint,
 			AllowedIPs: []netip.Prefix{netip.PrefixFrom(b.hub.Address, 32)},
+			Signatures: sigs[lock.HubID+"\x00"+b.hub.PublicKey],
 		},
+		Lock:   lockRec,
 		Peers:  []NetPeer{},
 		Filter: append([]FilterRule{}, b.visibility.FilterFor(self)...),
 		STUN:   append([]string{}, b.hub.STUNAddrs...),
@@ -199,7 +217,7 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 		if p.Mode == store.ModeStatic {
 			nm.Hub.AllowedIPs = append(nm.Hub.AllowedIPs, netip.PrefixFrom(ip, 32))
 			nm.Peers = append(nm.Peers, NetPeer{ID: p.ID, Name: p.Name, Kind: p.Kind, Owner: owners[p.OwnerID],
-				PublicKey: p.PublicKey, IPv4: ip, Online: online, ViaHub: true})
+				PublicKey: p.PublicKey, IPv4: ip, Online: online, ViaHub: true, Signatures: sigs[p.ID+"\x00"+p.PublicKey]})
 			continue
 		}
 		var (
@@ -220,6 +238,7 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 			Endpoints:  eps,
 			Symmetric:  symmetric,
 			AllowedIPs: []netip.Prefix{netip.PrefixFrom(ip, 32)},
+			Signatures: sigs[p.ID+"\x00"+p.PublicKey],
 		})
 	}
 	return nm, nil

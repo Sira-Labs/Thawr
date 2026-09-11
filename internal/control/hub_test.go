@@ -125,7 +125,7 @@ func TestRegistryRotateLeaveTouch(t *testing.T) {
 
 	before, _ := env.registry.Generation(ctx)
 	newKey := newPubKey(t)
-	gen, err := env.registry.RotateKey(ctx, res.Peer.ID, newKey)
+	gen, err := env.registry.RotateKey(ctx, res.Peer.ID, newKey, nil)
 	if err != nil || gen != before+1 {
 		t.Fatalf("RotateKey: gen %d (before %d) err %v", gen, before, err)
 	}
@@ -133,13 +133,13 @@ func TestRegistryRotateLeaveTouch(t *testing.T) {
 	if got.PublicKey != newKey {
 		t.Error("key not rotated")
 	}
-	if _, err := env.registry.RotateKey(ctx, res.Peer.ID, other.Peer.PublicKey); !errors.Is(err, ErrValidation) {
+	if _, err := env.registry.RotateKey(ctx, res.Peer.ID, other.Peer.PublicKey, nil); !errors.Is(err, ErrValidation) {
 		t.Errorf("rotating to a key in use: %v", err)
 	}
-	if _, err := env.registry.RotateKey(ctx, res.Peer.ID, "junk"); !errors.Is(err, ErrValidation) {
+	if _, err := env.registry.RotateKey(ctx, res.Peer.ID, "junk", nil); !errors.Is(err, ErrValidation) {
 		t.Errorf("rotating to junk: %v", err)
 	}
-	if _, err := env.registry.RotateKey(ctx, "missing", newPubKey(t)); !errors.Is(err, ErrNotFound) {
+	if _, err := env.registry.RotateKey(ctx, "missing", newPubKey(t), nil); !errors.Is(err, ErrNotFound) {
 		t.Errorf("rotating missing peer: %v", err)
 	}
 
@@ -179,7 +179,7 @@ func TestNotifierCalledOnPersistentChanges(t *testing.T) {
 	if err := env.registry.Rename(ctx, env.admin, "a1", "a-one"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.registry.RotateKey(ctx, res.Peer.ID, newPubKey(t)); err != nil {
+	if _, err := env.registry.RotateKey(ctx, res.Peer.ID, newPubKey(t), nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := env.registry.Delete(ctx, env.admin, "a-one"); err != nil {

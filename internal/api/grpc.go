@@ -16,6 +16,7 @@ import (
 
 	thawrv1 "github.com/thedatadudech/thawr/internal/api/proto/thawr/v1"
 	"github.com/thedatadudech/thawr/internal/control"
+	"github.com/thedatadudech/thawr/internal/lock"
 )
 
 // Enroller is the control-plane operation behind the Enroll RPC.
@@ -39,7 +40,7 @@ type SyncHub interface {
 
 // PeerOps are the per-peer operations behind the authenticated RPCs.
 type PeerOps interface {
-	RotateKey(ctx context.Context, peerID, newPublicKey string) (int64, error)
+	RotateKey(ctx context.Context, peerID, newPublicKey string, signed *control.SignedRotation) (int64, error)
 	Leave(ctx context.Context, peerID string) error
 	Touch(ctx context.Context, peerID string) error
 	SetClientVersion(ctx context.Context, peerID, version string) error
@@ -252,7 +253,19 @@ func (s *controlServer) RotateKey(ctx context.Context, req *thawrv1.RotateKeyReq
 	if !ok {
 		return nil, status.Error(codes.Unauthenticated, "node secret required")
 	}
-	gen, err := s.deps.Peers.RotateKey(ctx, me.ID, req.GetNewPublicKey())
+	var signed *control.SignedRotation
+	if req.GetSignerKey() != "" || req.GetSignature() != "" {
+		signer, err := lock.ParsePublicKey(req.GetSignerKey())
+		if err != nil {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		}
+		sig, err := lock.ParseSignature(req.GetSignature())
+		if err != nil {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		}
+		signed = &control.SignedRotation{Signer: signer, Signature: sig}
+	}
+	gen, err := s.deps.Peers.RotateKey(ctx, me.ID, req.GetNewPublicKey(), signed)
 	if err != nil {
 		return nil, s.toStatus(err)
 	}

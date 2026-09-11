@@ -456,7 +456,7 @@ func TestDaemonHoldsChangedKey(t *testing.T) {
 	}
 
 	rotated, _ := wg.GenerateKey()
-	if _, err := cp.registry.RotateKey(context.Background(), stB.PeerID, rotated.PublicKey().String()); err != nil {
+	if _, err := cp.registry.RotateKey(context.Background(), stB.PeerID, rotated.PublicKey().String(), nil); err != nil {
 		t.Fatal(err)
 	}
 	waitApplied(t, d, func(nm NetMap) bool { return len(nm.Peers) == 0 })
