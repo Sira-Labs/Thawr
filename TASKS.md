@@ -526,7 +526,7 @@ entry.
       - Review round (CodeRabbit): the first record, or one restarting
         a lineage, needs a device an admin owns, so a member's device
         cannot hijack the lock; `add-signer` takes the candidate's key
-        or fingerprint and refuses when the server reports another, so
+        and refuses when the server reports another, so
         the server cannot promote its own key; `client up
         --lock-signer <fp>` pins the signer a fresh device must see in
         its first record, closing the first-contact gap for devices

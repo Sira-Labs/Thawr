@@ -43,8 +43,8 @@ type State struct {
 	EnrolledAt   time.Time `json:"enrolled_at"`
 	// ListenPort is chosen once so endpoint candidates stay stable.
 	ListenPort int `json:"listen_port,omitempty"`
-	// LockSigner is the lock key (or fingerprint) given at enrolment
-	// that the first lock record this device pins must name; empty
+	// LockSigner is the full lock public key given at enrolment that
+	// must have signed the first lock record this device pins; empty
 	// accepts whatever record the server offers first (spec 012).
 	LockSigner string `json:"lock_signer,omitempty"`
 }

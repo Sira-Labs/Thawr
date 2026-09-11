@@ -447,7 +447,7 @@ func (c *LocalClient) LockKey(ctx context.Context) (LockResult, error) {
 }
 
 // LockAddSigner asks the daemon to add a peer to the signer set; key is
-// the candidate's lock public key or fingerprint as read on that device.
+// the candidate's full lock public key as read on that device.
 func (c *LocalClient) LockAddSigner(ctx context.Context, name, key string) (LockResult, error) {
 	var res LockResult
 	return res, c.do(ctx, http.MethodPost, "/lock/add-signer/"+url.PathEscape(name)+"?key="+url.QueryEscape(key), &res)

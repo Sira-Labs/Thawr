@@ -276,7 +276,7 @@ Two devices behind different home routers, server on a public host.
    Enrol another with the key of some other signer (or any other valid
    key): `client lock status` there shows the
    first record refused, `client status` lists no hub and no peers,
-   and nothing works until the person fixes the fingerprint (`down
-   --forget`, enrol again). Restarting the first device with a
+   and nothing works until the person fixes the key (`down --forget`,
+   enrol again). Restarting the first device with a
    different `--lock-signer` exits 2. `lock init` from a device owned
    by a member is refused by the server.
