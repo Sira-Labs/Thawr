@@ -79,6 +79,31 @@ Thawr trades breadth for sovereignty and simplicity. It will have fewer
 features than Tailscale for a long time. The features it has must work
 without asking anyone for permission.
 
+### An identity layer for agents, not an IPsec replacement
+
+IPsec authenticates network segments or gateways, never workloads. An
+agent running in plant A that talks to a service in plant B is, to
+IPsec, "an IP from subnet A", and every process on that host looks the
+same. Agents need identity per workload:
+
+- **Who are you?** A cryptographic identity per agent or service, not
+  per host, issued and rotated automatically.
+- **What may you do?** Policy at the level "agent X may reach service Y
+  on port Z", not "subnet A may reach subnet B".
+- **Who did what?** An audit log keyed by agent identity, not by source
+  IP.
+
+That is zero trust at the workload level (the SPIFFE/SPIRE idea), and
+it is what Thawr delivers: a WireGuard tunnel per agent with its own
+key, a control plane that issues the identity, ACLs per peer, an audit
+log that names the peer, and a network lock in which the owner's own
+key, not the server, vouches for each identity. It runs *over* an
+existing IPsec tunnel between sites; double encryption is inelegant but
+harmless, and nothing in the firewall landscape has to change. The
+enterprise story is therefore not "replaces IPsec" but "adds an
+identity layer for agents on top of what you have", which IT security
+approves more readily because it takes nothing away.
+
 ## Principles
 
 1. Sovereign first: the user owns the server, the data, the keys, the

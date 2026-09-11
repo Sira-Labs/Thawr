@@ -482,9 +482,12 @@ entry.
         lint`, race tests on every package. The netns integration test
         compiles and skips here; it runs on the Linux VM. The UI
         section and the two-device flow are on the manual checklist.
-- [ ] **012 Network lock** — signed peer records with an admin-held
-      offline key (Ed25519), the third T4 phase-2 item; signed rotations
-      pass the 011 hold (spec to be written).
+- [~] **012 Network lock** — `docs/specs/012-network-lock.md`
+      An Ed25519 lock key on a device the owner controls signs each peer
+      record `(id, name, key)`; the server stores and forwards the
+      signatures; a client with the lock on holds unsigned peers and
+      accepts signed rotations without `trust` (threat model T4, third
+      phase-2 item).
 - [ ] **013 Exit nodes and subnet routers** — advertised prefixes gated
       by policy (spec to be written).
 
@@ -496,6 +499,9 @@ entry.
 - ACME TLS mode, Prometheus metrics, `thawr admin backup`.
 - Workload / agent identity: short-lived tokens issued by CI or an
   orchestrator, using the existing `kind: agent`.
+- Short-lived peer keys with automatic rotation and expiry, and binding
+  an agent identity to the process rather than the host (VISION,
+  "identity layer for agents").
 
 ## Decisions reviewed by the owner (2026-09-02: all accepted as written)
 
