@@ -1,5 +1,5 @@
 thawr 0.1.0 · alice-laptop 100.64.0.7 · server vpn.example.com:8443 v0.1.0 connected (netmap #42, 3s ago)
-WireGuard: kernel · thawr0 · listen 41820 · NAT: cone (reflexive 203.0.113.9:41820) · DNS: .thawr via resolved
+WireGuard: kernel · thawr0 · listen 41820 · NAT: cone (reflexive 203.0.113.9:41820) · DNS: .thawr via resolved · lock: off
 
 PEER          IP            KIND     OWNER   PATH                           HANDSHAKE   RX / TX
 homelab-nas   100.64.0.3    server   -       direct 198.51.100.4:51820      12s         1.2 MB / 340 kB

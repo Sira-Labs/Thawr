@@ -146,8 +146,10 @@ type Daemon struct {
 	// lock and can never overwrite a newer one with a stale snapshot.
 	applyMu    sync.Mutex
 	filterWarn sync.Once
-	// lockWarn reports a refused lock record once until it is adopted.
-	lockWarn sync.Once
+	// lockWarn reports a refused lock record once until it is adopted;
+	// selfUnsignedWarn likewise while this device's record is unsigned.
+	lockWarn         sync.Once
+	selfUnsignedWarn sync.Once
 
 	// pmu guards the path prober's state.
 	pmu           sync.Mutex
@@ -515,6 +517,7 @@ func (d *Daemon) applyLocked(ctx context.Context, nm NetMap, cache bool) error {
 	} else {
 		d.lockWarn = sync.Once{}
 	}
+	d.warnSelfUnsigned()
 	nm = applied
 	cfg, err := BuildConfig(nm, key, d.state.ListenPort, d.overlay)
 	if err != nil {
@@ -704,6 +707,21 @@ func (d *Daemon) RotateKey(ctx context.Context) error {
 		d.log.Info("key rotated; other devices hold this peer until they trust the new key", "key", wg.Fingerprint(newKey.PublicKey()), "hint", "thawr client trust "+d.state.Name)
 	}
 	return nil
+}
+
+// warnSelfUnsigned logs once, while it holds, that other devices hold
+// this one because no signer signed its record yet.
+func (d *Daemon) warnSelfUnsigned() {
+	d.mu.Lock()
+	st := d.lockStatusLocked()
+	d.mu.Unlock()
+	if st.Enabled && !st.SelfSigned {
+		d.selfUnsignedWarn.Do(func() {
+			d.log.Warn("this device is not signed by the network lock; other devices hold it until a signer signs it", "hint", "thawr client lock sign "+d.state.Name)
+		})
+		return
+	}
+	d.selfUnsignedWarn = sync.Once{}
 }
 
 // resync ends the current sync stream so the next one reports the

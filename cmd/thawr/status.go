@@ -23,7 +23,7 @@ func renderStatus(w io.Writer, st client.Status) error {
 	if _, err := fmt.Fprintf(w, "thawr %s · %s %s · server %s%s %s\n", st.Version, st.Self.Name, st.Self.IPv4, st.Server.Addr, serverVersion(st), serverState(st.Server, now)); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(w, "WireGuard: %s · %s · listen %d · NAT: %s%s%s\n\n", dash(st.WireGuard.Backend), dash(st.WireGuard.Interface), st.WireGuard.ListenPort, natLine(st.NAT), dnsLine(st.DNS), heldLine(st.Held)); err != nil {
+	if _, err := fmt.Fprintf(w, "WireGuard: %s · %s · listen %d · NAT: %s%s%s%s\n\n", dash(st.WireGuard.Backend), dash(st.WireGuard.Interface), st.WireGuard.ListenPort, natLine(st.NAT), dnsLine(st.DNS), lockLine(st.Lock), heldLine(st.Held)); err != nil {
 		return err
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
@@ -127,21 +127,44 @@ func dnsLine(d *client.DNSStatus) string {
 	}
 }
 
-// heldLine renders the header's key-change warning with the command
-// that clears it; empty when nothing is held.
+// lockLine renders the header's lock segment: "lock: on (signer)",
+// "lock: on", "lock: on, this device unsigned" or "lock: off".
+func lockLine(l client.LockStatus) string {
+	switch {
+	case !l.Enabled:
+		return " · lock: off"
+	case l.Signer:
+		return " · lock: on (signer)"
+	case !l.SelfSigned:
+		return " · lock: on, this device unsigned"
+	default:
+		return " · lock: on"
+	}
+}
+
+// heldLine renders the header's warnings for held entries with the
+// command that clears each; empty when nothing is held.
 func heldLine(held []client.HeldStatus) string {
-	if len(held) == 0 {
-		return ""
-	}
-	names := make([]string, 0, len(held))
+	var changed, unsigned []string
 	for _, h := range held {
-		names = append(names, h.Name)
+		if h.Reason == client.HeldUnsigned {
+			unsigned = append(unsigned, h.Name)
+		} else {
+			changed = append(changed, h.Name)
+		}
 	}
-	word := "keys"
-	if len(held) == 1 {
-		word = "key"
+	var s string
+	if len(changed) > 0 {
+		word := "keys"
+		if len(changed) == 1 {
+			word = "key"
+		}
+		s += fmt.Sprintf(" · %d %s changed: thawr client trust %s", len(changed), word, strings.Join(changed, " "))
 	}
-	return fmt.Sprintf(" · %d %s changed: thawr client trust %s", len(held), word, strings.Join(names, " "))
+	if len(unsigned) > 0 {
+		s += fmt.Sprintf(" · %d unsigned: thawr client lock sign %s", len(unsigned), strings.Join(unsigned, " "))
+	}
+	return s
 }
 
 // fingerprint shortens a public key for output; an unparseable key is
@@ -155,8 +178,8 @@ func fingerprint(key string) string {
 }
 
 // pathColumn renders the PATH column: "direct <endpoint>", "relay",
-// "probing", "via hub", "key changed", "idle", "unreachable" or
-// "offline".
+// "probing", "via hub", "key changed", "unsigned", "idle",
+// "unreachable" or "offline".
 func pathColumn(p client.PeerStatus) string {
 	switch p.Path {
 	case "direct":
@@ -178,7 +201,7 @@ func pathColumn(p client.PeerStatus) string {
 // handshakeColumns renders HANDSHAKE and RX / TX; peers without a
 // WireGuard session of their own show "-".
 func handshakeColumns(p client.PeerStatus, now time.Time) (handshake, rxtx string) {
-	if p.Path == client.PathHub || p.Path == client.PathKeyChanged {
+	if p.Path == client.PathHub || p.Path == client.PathKeyChanged || p.Path == client.PathUnsigned {
 		return "-", "-"
 	}
 	if p.LastHandshakeAt == nil {

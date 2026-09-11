@@ -13,7 +13,7 @@ func fakeAdminAPI(t *testing.T) string {
 	peers := []map[string]any{
 		{"id": "p1", "name": "alice-box", "kind": "human", "mode": "agent", "owner": "alice", "tags": []string{}, "public_key": "A=", "ipv4": "100.64.0.2",
 			"online": true, "created_at": "2026-09-01T10:00:00Z", "last_seen_at": "2026-09-04T09:59:30Z", "version": "0.1.0", "os": "linux/amd64",
-			"path_summary": map[string]int{"direct": 2, "relay": 1, "other": 0}},
+			"path_summary": map[string]int{"direct": 2, "relay": 1, "other": 0}, "signed": true},
 		{"id": "p2", "name": "markus-box", "kind": "server", "mode": "agent", "owner": "markus", "tags": []string{"tag:prod"}, "public_key": "M=", "ipv4": "100.64.0.3",
 			"online": false, "created_at": "2026-09-01T10:00:00Z", "version": "", "os": "", "path_summary": map[string]int{}},
 	}
@@ -44,7 +44,7 @@ func TestAdminPeerList(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d: %v", code, err)
 	}
-	for _, want := range []string{"NAME", "MODE", "LAST SEEN", "PATHS", "VERSION", "OS", "alice-box", "agent", "2 direct, 1 relay", "0.1.0", "linux/amd64", "markus-box", "offline", "never"} {
+	for _, want := range []string{"NAME", "MODE", "LAST SEEN", "PATHS", "VERSION", "OS", "SIGNED", "alice-box", "agent", "2 direct, 1 relay", "0.1.0", "linux/amd64", "yes", "markus-box", "offline", "never"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("list lacks %q:\n%s", want, out)
 		}

@@ -202,10 +202,19 @@ and shows it as "key changed" until someone runs "thawr client trust
 				return err
 			}
 			name := "<this peer>"
-			if st, err := lc.Status(cmd.Context()); err == nil && st.Self.Name != "" {
+			st, err := lc.Status(cmd.Context())
+			if err == nil && st.Self.Name != "" {
 				name = st.Self.Name
 			}
-			_, err := fmt.Fprintf(cmd.OutOrStdout(), "key rotated; other devices show this peer as \"key changed\" until they run: thawr client trust %s\n", name)
+			if err == nil && st.Lock.Enabled && st.Lock.Signer {
+				_, err := fmt.Fprintln(cmd.OutOrStdout(), "key rotated and signed; other devices switch to it without a trust step")
+				return err
+			}
+			if err == nil && st.Lock.Enabled {
+				_, err := fmt.Fprintf(cmd.OutOrStdout(), "key rotated; other devices hold this peer as unsigned until a signer runs: thawr client lock sign %s\n", name)
+				return err
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "key rotated; other devices show this peer as \"key changed\" until they run: thawr client trust %s\n", name)
 			return err
 		},
 	}
@@ -272,7 +281,7 @@ reply, 2 unknown peer, 3 client not running. --count 0 skips the echoes.`,
 	ping.Flags().BoolVar(&pingJSON, "json", false, "print the settled path as JSON")
 	addClientCommonFlags(ping, &stateDir, &socket)
 
-	cmd.AddCommand(up, down, status, rotate, trust, ping, newClientInstallCmd(deps), newClientUninstallCmd(deps))
+	cmd.AddCommand(up, down, status, rotate, trust, newClientLockCmd(&stateDir, &socket), ping, newClientInstallCmd(deps), newClientUninstallCmd(deps))
 	return cmd
 }
 
