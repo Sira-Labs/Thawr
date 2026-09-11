@@ -34,6 +34,9 @@ type Options struct {
 	// Name optionally requests the peer name.
 	Name     string
 	StateDir string
+	// LockSigner is a lock public key or fingerprint the first lock
+	// record must name (spec 012); empty trusts the first record.
+	LockSigner string
 	// Hostname defaults to os.Hostname.
 	Hostname string
 	Version  string
@@ -145,6 +148,7 @@ func Enroll(ctx context.Context, opts Options) (State, error) {
 		HubPublicKey: resp.GetHubPublicKey(),
 		HubEndpoint:  resp.GetHubEndpoint(),
 		EnrolledAt:   opts.Now(),
+		LockSigner:   strings.TrimSpace(opts.LockSigner),
 	}
 	if err := SaveKey(opts.StateDir, key); err != nil {
 		return State{}, err

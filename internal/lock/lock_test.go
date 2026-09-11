@@ -130,10 +130,11 @@ func TestLockRecordGolden(t *testing.T) {
 		t.Error("SignerKey unknown")
 	}
 	for name, bad := range map[string]Record{
-		"no signers":    {Generation: 1},
-		"empty key":     {Generation: 1, Signers: []Signer{{PeerID: "p"}}},
-		"empty peer":    {Generation: 1, Signers: []Signer{{Key: a}}},
-		"duplicate key": {Generation: 1, Signers: []Signer{{a, "p1"}, {a, "p2"}}},
+		"no signers":        {Generation: 1},
+		"empty key":         {Generation: 1, Signers: []Signer{{PeerID: "p"}}},
+		"empty peer":        {Generation: 1, Signers: []Signer{{Key: a}}},
+		"duplicate key":     {Generation: 1, Signers: []Signer{{a, "p1"}, {a, "p2"}}},
+		"duplicate peer id": {Generation: 1, Signers: []Signer{{a, "p1"}, {b, "p1"}}},
 	} {
 		if _, err := bad.Bytes(); !errors.Is(err, ErrInvalid) {
 			t.Errorf("%s: %v", name, err)

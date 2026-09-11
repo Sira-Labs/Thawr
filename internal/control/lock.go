@@ -110,11 +110,13 @@ func LoadLockRecord(ctx context.Context, st *store.Store) (*lock.Signed, error) 
 	return &rec, nil
 }
 
-// Set installs a record on behalf of by. The first record is accepted
-// as it is; later ones must pass lock.Accept against the stored one.
-// sigs are signatures by by's key in next, stored in the same
-// transaction so the record and its signatures reach every device in
-// one netmap.
+// Set installs a record on behalf of by. The first record (or the one
+// that restarts a lineage) must come from a device an admin owns:
+// otherwise any enrolled device could make itself the only signer and
+// hold everyone else. Later ones must pass lock.Accept against the
+// stored one. sigs are signatures by by's key in next, stored in the
+// same transaction so the record and its signatures reach every
+// device in one netmap.
 func (s *LockService) Set(ctx context.Context, by store.Peer, next lock.Signed, sigs []PeerSigning) error {
 	cur, err := s.Current(ctx)
 	if err != nil {
@@ -123,6 +125,11 @@ func (s *LockService) Set(ctx context.Context, by store.Peer, next lock.Signed, 
 	var curRec *lock.Record
 	if cur != nil {
 		curRec = &cur.Record
+	}
+	if curRec == nil || len(curRec.Signers) == 0 {
+		if err := s.requireAdminOwner(ctx, by); err != nil {
+			return err
+		}
 	}
 	if err := lock.Accept(curRec, next); err != nil {
 		return fmt.Errorf("%w: %w", ErrValidation, err)
@@ -178,6 +185,24 @@ func signerOf(rec lock.Signed) lock.PublicKey {
 		}
 	}
 	return lock.PublicKey{}
+}
+
+// requireAdminOwner refuses a peer whose owner is not an admin user.
+func (s *LockService) requireAdminOwner(ctx context.Context, by store.Peer) error {
+	if by.OwnerID == "" {
+		return fmt.Errorf("%w: the first lock record must come from a device owned by an admin; %s has no owner", ErrForbidden, by.Name)
+	}
+	owner, err := s.store.Users().GetByID(ctx, by.OwnerID)
+	if errors.Is(err, store.ErrNotFound) {
+		return fmt.Errorf("%w: the first lock record must come from a device owned by an admin", ErrForbidden)
+	}
+	if err != nil {
+		return err
+	}
+	if owner.Role != store.RoleAdmin {
+		return fmt.Errorf("%w: the first lock record must come from a device owned by an admin; %s belongs to %s (%s)", ErrForbidden, by.Name, owner.Name, owner.Role)
+	}
+	return nil
 }
 
 // signerKeyOf checks that the current record names by as signer with

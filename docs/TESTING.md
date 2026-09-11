@@ -259,8 +259,10 @@ Two devices behind different home routers, server on a public host.
    signed`; the desktop switches without any `trust`. `rotate-key` on
    the desktop is held as `unsigned` on the laptop until `lock sign
    --all` there.
-5. `thawr client lock key` on the desktop, then `lock add-signer
-   <desktop>` on the laptop; the desktop's header shows `(signer)` and
+5. `thawr client lock key` on the desktop prints its fingerprint; on
+   the laptop `lock add-signer <desktop> <wrong fp>` is refused with
+   "mismatch" and `lock add-signer <desktop> <that fp>` succeeds; the
+   desktop's header shows `(signer)` and
    `lock disable` there turns the lock off everywhere (`lock: off`,
    `admin lock` says `disabled at generation N`). `lock init` on either
    signer turns it on again; a non-signer's `lock init` is refused.
@@ -268,3 +270,9 @@ Two devices behind different home routers, server on a public host.
    signed by some other key (or delete it) and start again: every
    client keeps its pinned record, `client lock status` prints the
    warning, and nothing is released or held that was not before.
+7. Enrol a fresh device with `--lock-signer <laptop fp>` (from `client
+   lock status` on the laptop): it adopts the record. Enrol another
+   with `--lock-signer 00000000`: `client lock status` there shows the
+   first record refused and the lock stays off until the person fixes
+   the fingerprint (`down --forget`, enrol again). `lock init` from a
+   device owned by a member is refused by the server.

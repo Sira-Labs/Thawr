@@ -72,6 +72,15 @@ func (s *Signatures) DeletePeer(ctx context.Context, peerID string) error {
 	return nil
 }
 
+// DeleteKey removes the signatures over one of a peer's keys, used when
+// the peer rotates away from it.
+func (s *Signatures) DeleteKey(ctx context.Context, peerID, publicKey string) error {
+	if _, err := s.q.ExecContext(ctx, `DELETE FROM peer_signatures WHERE peer_id = ? AND public_key = ?`, peerID, publicKey); err != nil {
+		return fmt.Errorf("store: delete signatures of %s over %s: %w", peerID, publicKey, err)
+	}
+	return nil
+}
+
 // DeleteAll removes every signature (when the lock is disabled and
 // re-initialised).
 func (s *Signatures) DeleteAll(ctx context.Context) error {

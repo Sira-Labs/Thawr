@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -60,29 +61,33 @@ func TestPinsUpdateLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	ka, outsider := testLockKey(t), testLockKey(t)
-	if r := p.UpdateLock(nil); r != "" || p.Lock() != nil || p.Enabled() {
+	if r := p.UpdateLock(nil, ""); r != "" || p.Lock() != nil || p.Enabled() {
 		t.Fatalf("nothing offered, nothing pinned: %q", r)
 	}
 	one := signedRecord(t, ka, lock.Record{Generation: 1, Signers: []lock.Signer{{Key: ka.Public(), PeerID: "a"}}})
-	if r := p.UpdateLock(&one); r != "" || !p.Enabled() || p.Lock().Record.Generation != 1 {
+	// An expected signer from enrolment gates first contact only.
+	if r := p.UpdateLock(&one, lock.Fingerprint(outsider.Public())); r == "" || p.Lock() != nil {
+		t.Fatalf("first record without the expected signer: %q", r)
+	}
+	if r := p.UpdateLock(&one, lock.Fingerprint(ka.Public())); r != "" || !p.Enabled() || p.Lock().Record.Generation != 1 {
 		t.Fatalf("first contact: %q", r)
 	}
-	if r := p.UpdateLock(&one); r != "" {
+	if r := p.UpdateLock(&one, ""); r != "" {
 		t.Errorf("same record again: %q", r)
 	}
-	if r := p.UpdateLock(nil); r == "" || !p.Enabled() {
+	if r := p.UpdateLock(nil, ""); r == "" || !p.Enabled() {
 		t.Errorf("server offering nothing must keep the pin: %q enabled=%v", r, p.Enabled())
 	}
 	hijack := signedRecord(t, outsider, lock.Record{Generation: 5, Signers: []lock.Signer{{Key: outsider.Public(), PeerID: "x"}}})
-	if r := p.UpdateLock(&hijack); r == "" || p.Lock().Record.Generation != 1 {
+	if r := p.UpdateLock(&hijack, ""); r == "" || p.Lock().Record.Generation != 1 {
 		t.Errorf("outsider record: %q gen=%d", r, p.Lock().Record.Generation)
 	}
 	stale := signedRecord(t, ka, lock.Record{Generation: 1, Signers: []lock.Signer{{Key: ka.Public(), PeerID: "a"}, {Key: outsider.Public(), PeerID: "x"}}})
-	if r := p.UpdateLock(&stale); r == "" {
+	if r := p.UpdateLock(&stale, ""); r == "" {
 		t.Error("same generation with different content accepted")
 	}
 	two := signedRecord(t, ka, lock.Record{Generation: 2, Signers: []lock.Signer{{Key: ka.Public(), PeerID: "a"}, {Key: outsider.Public(), PeerID: "x"}}})
-	if r := p.UpdateLock(&two); r != "" || len(p.Lock().Record.Signers) != 2 {
+	if r := p.UpdateLock(&two, ""); r != "" || len(p.Lock().Record.Signers) != 2 {
 		t.Errorf("signed successor: %q", r)
 	}
 	// The pin is written by Apply and survives a reload.
@@ -94,7 +99,7 @@ func TestPinsUpdateLock(t *testing.T) {
 		t.Fatalf("reload: %+v %v", again.Lock(), err)
 	}
 	off := signedRecord(t, outsider, lock.Record{Generation: 3, Disabled: true, Signers: two.Record.Signers})
-	if r := again.UpdateLock(&off); r != "" || again.Enabled() || again.Lock().Record.Generation != 3 {
+	if r := again.UpdateLock(&off, ""); r != "" || again.Enabled() || again.Lock().Record.Generation != 3 {
 		t.Errorf("disable by the added signer: %q enabled=%v", r, again.Enabled())
 	}
 	// A pinned record that does not verify is a corrupt file, not a
@@ -312,15 +317,26 @@ func TestDaemonNetworkLock(t *testing.T) {
 	if again, err := lcB.LockKey(ctx); err != nil || again.PublicKey != kres.PublicKey {
 		t.Errorf("lock key twice: %+v %v", again, err)
 	}
+	// The server's reported key must match what the person read on b.
+	wrong := testLockKey(t)
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		res, err = lcA.LockAddSigner(ctx, "b")
-		if err == nil || time.Now().After(deadline) {
+		_, err = lcA.LockAddSigner(ctx, "b", lock.Fingerprint(wrong.Public()))
+		if le := new(LocalError); errors.As(err, &le) && le.Status == http.StatusConflict && strings.Contains(le.Message, "mismatch") {
 			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("add signer with the wrong fingerprint: %v", err)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if err != nil || res.Generation != 2 {
+	if _, err := lcA.LockAddSigner(ctx, "b", ""); err == nil {
+		t.Error("add signer without a key succeeded")
+	}
+	if st, _ := lcB.Status(ctx); st.Lock.Signer || st.Lock.Generation != 1 {
+		t.Errorf("record changed by a refused add-signer: %+v", st.Lock)
+	}
+	if res, err = lcA.LockAddSigner(ctx, "b", kres.PublicKey); err != nil || res.Generation != 2 {
 		t.Fatalf("add signer: %+v %v", res, err)
 	}
 	stB5 := waitStatus(t, lcB, "b is a signer", func(s Status) bool { return s.Lock.Signer })

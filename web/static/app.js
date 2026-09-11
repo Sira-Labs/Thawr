@@ -36,7 +36,7 @@
     const tr = document.createElement("tr");
     tr.className = "detail";
     const td = document.createElement("td");
-    td.colSpan = 8;
+    td.colSpan = 9;
     const section = (title, items) => {
       const h = document.createElement("div");
       h.className = "muted";

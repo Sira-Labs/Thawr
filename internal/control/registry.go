@@ -227,6 +227,10 @@ func (r *Registry) RotateKey(ctx context.Context, peerID, newPublicKey string, s
 			}
 			return err
 		}
+		// Signatures over the old key can never match again.
+		if err := tx.Signatures().DeleteKey(ctx, peerID, p.PublicKey); err != nil {
+			return err
+		}
 		if sig != nil {
 			if err := tx.Signatures().Put(ctx, *sig); err != nil {
 				return err

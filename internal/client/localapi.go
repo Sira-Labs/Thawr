@@ -364,7 +364,7 @@ func (d *Daemon) localHandler() http.Handler {
 		lockOp(w, res, err)
 	})
 	mux.HandleFunc("POST /lock/add-signer/{name}", func(w http.ResponseWriter, r *http.Request) {
-		res, err := d.LockAddSigner(r.Context(), r.PathValue("name"))
+		res, err := d.LockAddSigner(r.Context(), r.PathValue("name"), r.URL.Query().Get("key"))
 		lockOp(w, res, err)
 	})
 	mux.HandleFunc("POST /lock/disable", func(w http.ResponseWriter, r *http.Request) {
@@ -446,10 +446,11 @@ func (c *LocalClient) LockKey(ctx context.Context) (LockResult, error) {
 	return res, c.do(ctx, http.MethodPost, "/lock/key", &res)
 }
 
-// LockAddSigner asks the daemon to add a peer to the signer set.
-func (c *LocalClient) LockAddSigner(ctx context.Context, name string) (LockResult, error) {
+// LockAddSigner asks the daemon to add a peer to the signer set; key is
+// the candidate's lock public key or fingerprint as read on that device.
+func (c *LocalClient) LockAddSigner(ctx context.Context, name, key string) (LockResult, error) {
 	var res LockResult
-	return res, c.do(ctx, http.MethodPost, "/lock/add-signer/"+url.PathEscape(name), &res)
+	return res, c.do(ctx, http.MethodPost, "/lock/add-signer/"+url.PathEscape(name)+"?key="+url.QueryEscape(key), &res)
 }
 
 // LockDisable asks the daemon to turn the network lock off.

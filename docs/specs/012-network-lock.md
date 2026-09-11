@@ -22,6 +22,12 @@ key rotation pass on every other device without the manual `trust`
 step 011 introduced. In the words of the vision: the network, not the
 server, vouches for an identity.
 
+The protection starts once a device has pinned the lock record. The
+first record a device pins is trusted like the enrolment itself, so a
+device enrolled while the server is already hostile can be handed a
+record the attacker signs; `thawr client up --lock-signer <fp>` closes
+that by naming the signer the first record must carry.
+
 ## User story
 
 As the owner I run `thawr client lock init` on my laptop once. From
@@ -88,9 +94,11 @@ WireGuard: kernel · thawr0 · listen 41820 · NAT: cone (...) · DNS: .thawr vi
   signer_key, signature, signed_at)` with the primary key `(peer_id,
   public_key, signer_key)`; `peer_id` is a peer id or `hub`. The lock
   record and its signature live in `meta` under `lock_record`.
-- `SetLock(record, signature, signatures[])`: any node may send the
-  first record; later ones must pass `lock.Accept` against the stored
-  one. The optional signatures are by the caller's key in the new
+- `SetLock(record, signature, signatures[])`: the first record, or one
+  that restarts a lineage, is accepted only from a device an admin
+  owns (otherwise any enrolled device could make itself the sole
+  signer and hold everyone else); later ones must pass `lock.Accept`
+  against the stored one. The optional signatures are by the caller's key in the new
   record and are verified and stored in the same transaction, so a
   record and the signatures that go with it reach every device in one
   netmap. Stored, generation bumped, audit `lock.set` (actor
@@ -128,7 +136,10 @@ WireGuard: kernel · thawr0 · listen 41820 · NAT: cone (...) · DNS: .thawr vi
   `add-signer`.
 - `pins.json` gains the pinned lock record. On every netmap: none
   pinned and none offered → lock off; offered and none pinned → pin it
-  and log which signers now vouch for the network; both → `Accept`,
+  and log which signers now vouch for the network, unless the device
+  was enrolled with `--lock-signer <key-or-fingerprint>` (stored in
+  `state.json`) and the record does not name that signer, in which
+  case it is refused like any other; both → `Accept`,
   replace the pin on success, keep it and report `lock.rejected` on
   failure; **pinned but none offered → still on** with the pinned set,
   until a signed `disabled` record arrives.
@@ -145,8 +156,12 @@ WireGuard: kernel · thawr0 · listen 41820 · NAT: cone (...) · DNS: .thawr vi
 - `trust` still works for `key_changed` entries when the lock is off;
   with the lock on it answers that unsigned peers need `lock sign`.
 - Signing runs inside the daemon over the local API (`POST /lock/init`,
-  `/lock/sign/{name}`, `/lock/key`, `/lock/add-signer/{name}`,
+  `/lock/sign/{name}`, `/lock/key`, `/lock/add-signer/{name}?key=`,
   `/lock/disable`): it holds the gRPC client, the netmap and the key.
+  `add-signer` takes the candidate's lock key or fingerprint as the
+  person read it from `lock key` on that device and refuses to sign a
+  record when the key the server reports differs, so the server cannot
+  put its own key into the signer set.
   `init` sends the record **together with** its signatures over the
   hub, itself and every peer the daemon currently sees, stored in one
   transaction, so enabling never cuts a working network; peers outside

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -31,10 +30,10 @@ running.`,
 		res, err := op(client.NewLocalClient(*socket))
 		var le *client.LocalError
 		switch {
-		case errors.As(err, &le) && (le.Status == http.StatusNotFound || le.Status == http.StatusForbidden):
-			return &exitError{code: exitConfigError, err: errors.New(le.Message)}
 		case errors.As(err, &le):
-			return errors.New(le.Message)
+			// Unknown name, not a signer, lock off, refused by the
+			// server: all "refused", exit 2.
+			return &exitError{code: exitConfigError, err: errors.New(le.Message)}
 		case err != nil:
 			return &exitError{code: exitNotRunning, err: fmt.Errorf("thawr client is not running (%w)", err)}
 		}
@@ -90,18 +89,22 @@ running.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return run(cmd, func(lc *client.LocalClient) (client.LockResult, error) { return lc.LockKey(cmd.Context()) },
 				func(w io.Writer, res client.LockResult) error {
-					_, err := fmt.Fprintf(w, "lock public key %s (fingerprint %s)\nask a current signer to run: thawr client lock add-signer <this peer's name>\n", res.PublicKey, res.Signer)
+					_, err := fmt.Fprintf(w, "lock public key %s (fingerprint %s)\nask a current signer to run: thawr client lock add-signer <this peer's name> %s\n", res.PublicKey, res.Signer, res.Signer)
 					return err
 				})
 		},
 	}
 	addSigner := &cobra.Command{
-		Use:   "add-signer <name>",
+		Use:   "add-signer <name> <lock-key-or-fingerprint>",
 		Short: "Add a peer that ran `lock key` to the signer set",
-		Args:  usageArgs(cobra.ExactArgs(1)),
+		Long: `Adds a peer to the signer set. The second argument is the lock public
+key or fingerprint that "thawr client lock key" printed on that device;
+it must match what the server reports, so a server cannot slip its own
+key into the signer set.`,
+		Args: usageArgs(cobra.ExactArgs(2)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return run(cmd, func(lc *client.LocalClient) (client.LockResult, error) {
-				return lc.LockAddSigner(cmd.Context(), args[0])
+				return lc.LockAddSigner(cmd.Context(), args[0], args[1])
 			},
 				func(w io.Writer, res client.LockResult) error {
 					fp := ""

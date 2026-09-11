@@ -201,8 +201,9 @@ func TestLockEndpoint(t *testing.T) {
 		d.Lock = svc
 	})
 	ctx := context.Background()
-	alice := enrolPeer(t, env, "alice")
-	bob := enrolPeer(t, env, "markus")
+	// The signer is the admin's device; the member's is left unsigned.
+	alice := enrolPeer(t, env, "markus")
+	bob := enrolPeer(t, env, "alice")
 	_, admin := env.login("markus", "adminpassword")
 
 	if rec := env.do(env.handler, session{}, http.MethodGet, "/api/v1/lock", nil, false); rec.Code != http.StatusUnauthorized {

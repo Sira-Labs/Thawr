@@ -135,6 +135,7 @@ func (r Record) validate() error {
 		return fmt.Errorf("%w: an enabled record needs at least one signer", ErrInvalid)
 	}
 	seen := map[PublicKey]bool{}
+	seenPeer := map[string]bool{}
 	for _, s := range r.Signers {
 		if s.Key.IsZero() || s.PeerID == "" {
 			return fmt.Errorf("%w: signer needs key and peer id", ErrInvalid)
@@ -142,7 +143,12 @@ func (r Record) validate() error {
 		if seen[s.Key] {
 			return fmt.Errorf("%w: duplicate signer key %s", ErrInvalid, Fingerprint(s.Key))
 		}
-		seen[s.Key] = true
+		// One key per peer keeps SignerKey deterministic whatever
+		// order the signers arrived in.
+		if seenPeer[s.PeerID] {
+			return fmt.Errorf("%w: duplicate signer peer id %s", ErrInvalid, s.PeerID)
+		}
+		seen[s.Key], seenPeer[s.PeerID] = true, true
 	}
 	return nil
 }

@@ -443,7 +443,7 @@ reachable from the internet. Spec 010.
 | `ReportPath(PathReport) Empty` | node secret | direct/relay state per peer (for status and admin UI) |
 | `RotateKey(RotateKeyRequest) RotateKeyResponse` | node secret | Replace the WireGuard key; old key valid until next generation is acknowledged; a signer may attach its signature over the new key, stored in the same transaction |
 | `Leave(Empty) Empty` | node secret | Peer removes itself |
-| `SetLock(SetLockRequest) Empty` | node secret | Install a signed lock record (first one as is, later ones per `lock.Accept`), optionally with the signatures that go with it |
+| `SetLock(SetLockRequest) Empty` | node secret | Install a signed lock record (the first one only from a device an admin owns, later ones per `lock.Accept`), optionally with the signatures that go with it |
 | `SignPeer(SignPeerRequest) Empty` | node secret, signer | Store a signature over a peer's (or the hub's) current record |
 | `ListLockPeers(Empty) LockPeers` | node secret, signer | Every peer with its signed state and reported lock key; the one RPC that shows a peer the whole registry, and only to a signer the record names |
 
@@ -477,9 +477,9 @@ with a tiny JSON-over-HTTP API: `GET /status`, `POST /down`,
 every held one, `hub` for the hub), `POST /ping/{name}` (mark
 traffic intent, probe, answer with the settled path), and the network
 lock (spec 012): `POST /lock/init`, `POST /lock/sign/{name}` (`all`,
-`hub`), `POST /lock/key`, `POST /lock/add-signer/{name}`,
-`POST /lock/disable`, each answering with the generation and the
-fingerprints it signed.
+`hub`), `POST /lock/key`, `POST /lock/add-signer/{name}?key=<key or
+fingerprint read on that device>`, `POST /lock/disable`, each
+answering with the generation and the fingerprints it signed.
 
 `GET /status` returns the document described by `docs/status.schema.json`:
 `version`, `self`, `server`, `wireguard`, `nat`, `relay`, `filter`,
@@ -538,7 +538,7 @@ Indexes: `peers(public_key)` unique, `peers(name)` unique,
 | Path | Content | Mode |
 |---|---|---|
 | `/var/lib/thawr/client/node.key` | WireGuard private key | 0600 |
-| `/var/lib/thawr/client/state.json` | server URL, TLS fingerprint, peer id, node secret, listen port | 0600 |
+| `/var/lib/thawr/client/state.json` | server URL, TLS fingerprint, peer id, node secret, listen port, expected lock signer (`--lock-signer`) | 0600 |
 | `/var/lib/thawr/client/netmap.json` | last netmap (public keys, addresses, endpoints) | 0600 |
 | `/var/lib/thawr/client/pins.json` | accepted hub key, per-peer `(id, key)` by name, and the pinned lock record | 0600 |
 | `/var/lib/thawr/client/lock.key` | Ed25519 lock private key; only on devices that ran `lock init` or `lock key`; removed by `down --forget` | 0600 |

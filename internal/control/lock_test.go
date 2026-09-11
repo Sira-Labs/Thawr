@@ -14,10 +14,10 @@ import (
 
 type lockEnv struct {
 	*enrollEnv
-	svc    *LockService
-	hubKey string
-	pa, pb store.Peer
-	ka, kb lock.PrivateKey
+	svc        *LockService
+	hubKey     string
+	pa, pb, pc store.Peer
+	ka, kb     lock.PrivateKey
 }
 
 func newLockEnv(t *testing.T) *lockEnv {
@@ -36,9 +36,16 @@ func newLockEnv(t *testing.T) *lockEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// pc belongs to a member: it may become a signer but never start
+	// the lineage.
+	mustUser(t, env.users, "alice", store.RoleMember)
+	pc, err := env.enroll(t, env.token(t, TokenRequest{OwnerName: "alice"}), "pc")
+	if err != nil {
+		t.Fatal(err)
+	}
 	ka, _ := lock.GenerateKey(rand.Reader)
 	kb, _ := lock.GenerateKey(rand.Reader)
-	return &lockEnv{enrollEnv: env, svc: svc, hubKey: hub.PublicKey().String(), pa: pa.Peer, pb: pb.Peer, ka: ka, kb: kb}
+	return &lockEnv{enrollEnv: env, svc: svc, hubKey: hub.PublicKey().String(), pa: pa.Peer, pb: pb.Peer, pc: pc.Peer, ka: ka, kb: kb}
 }
 
 func signRecord(t *testing.T, k lock.PrivateKey, r lock.Record) lock.Signed {
@@ -79,6 +86,10 @@ func (e *lockEnv) enable(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
 	rec := signRecord(t, e.ka, lock.Record{Generation: 1, Signers: []lock.Signer{{Key: e.ka.Public(), PeerID: e.pa.ID}}})
+	member := signRecord(t, e.kb, lock.Record{Generation: 1, Signers: []lock.Signer{{Key: e.kb.Public(), PeerID: e.pc.ID}}})
+	if err := e.svc.Set(ctx, e.pc, member, nil); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("first record from a member's device: %v", err)
+	}
 	bad := PeerSigning{PeerID: lock.HubID, PublicKey: e.hubKey, Signer: e.kb.Public(), Signature: signPeer(t, e.kb, lock.HubID, lock.HubID, e.hubKey)}
 	if err := e.svc.Set(ctx, e.pa, rec, []PeerSigning{bad}); !errors.Is(err, ErrValidation) {
 		t.Fatalf("foreign signature with record: %v", err)
@@ -252,12 +263,22 @@ func TestRotateKeyStoresSignature(t *testing.T) {
 	if len(nm.Hub.Signatures) != 1 || nm.Hub.Signatures[0].Signer != e.ka.Public() {
 		t.Errorf("hub signature from enable missing: %+v", nm.Hub)
 	}
-	// An unsigned rotation drops the peer to unsigned: old-key rows do not match.
+	// An unsigned rotation drops the peer to unsigned, and the rows over
+	// the old key are pruned with it.
 	if _, err := e.registry.RotateKey(ctx, e.pa.ID, newPubKey(t), nil); err != nil {
 		t.Fatal(err)
 	}
 	if nm, _ = b.Build(ctx, e.pb.ID); len(nm.Peers[0].Signatures) != 0 {
 		t.Errorf("stale signature attached: %+v", nm.Peers[0].Signatures)
+	}
+	rows, err := e.st.Signatures().ListAll(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rows {
+		if r.PeerID == e.pa.ID {
+			t.Errorf("row over pa's old key survived the rotation: %+v", r)
+		}
 	}
 	peers, _, _ := e.svc.ListPeers(ctx)
 	for _, p := range peers {

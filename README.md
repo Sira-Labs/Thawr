@@ -54,7 +54,11 @@ lives in `docs/`; the implementation follows one spec at a time from
   you control creates a signing key the server never sees, and from
   then on every device applies only peers a signer vouched for with
   `thawr client lock sign <name>`. A server that inserts a device or
-  swaps a key can only make it show up as `unsigned`.
+  swaps a key can only make it show up as `unsigned`. That holds once
+  a device has pinned the lock record; a device enrolled afterwards
+  pins the first record it sees, so give it the signer's fingerprint
+  at enrolment (`thawr client up --lock-signer <fp>`) when the server
+  itself may be hostile.
 - Nothing phones home. It starts and runs with no internet access.
 
 ## Install

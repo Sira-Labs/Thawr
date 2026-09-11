@@ -211,12 +211,13 @@ func (p *Pins) Enabled() bool { return p.lock != nil && p.lock.Record.Enabled() 
 
 // UpdateLock reconciles the record the server offers with the pinned
 // one and returns why the offer was not adopted, empty when it was or
-// when nothing changed. The first record is pinned as offered; a later
-// one must pass lock.Accept against the pin. A server that offers
-// nothing while a record is pinned does not turn the lock off: the pin
-// stays until a signed disabled record arrives. The pin is written by
-// the next Apply.
-func (p *Pins) UpdateLock(offered *lock.Signed) string {
+// when nothing changed. The first record is pinned as offered, unless
+// expected (a lock key or fingerprint given at enrolment) names a
+// signer the record lacks; a later one must pass lock.Accept against
+// the pin. A server that offers nothing while a record is pinned does
+// not turn the lock off: the pin stays until a signed disabled record
+// arrives. The pin is written by the next Apply.
+func (p *Pins) UpdateLock(offered *lock.Signed, expected string) string {
 	switch {
 	case offered == nil && p.lock == nil:
 		return ""
@@ -229,11 +230,25 @@ func (p *Pins) UpdateLock(offered *lock.Signed) string {
 	if p.lock != nil {
 		cur = &p.lock.Record
 	}
+	if cur == nil && expected != "" && !namesSigner(offered.Record, expected) {
+		return fmt.Sprintf("first record (generation %d) refused: it does not name the signer %s given at enrolment", offered.Record.Generation, expected)
+	}
 	if err := lock.Accept(cur, *offered); err != nil {
 		return fmt.Sprintf("offered record (generation %d) refused: %v", offered.Record.Generation, err)
 	}
 	p.lock, p.dirty = offered, true
 	return ""
+}
+
+// namesSigner reports whether one of the record's signer keys is given
+// (full key or fingerprint).
+func namesSigner(r lock.Record, given string) bool {
+	for _, s := range r.Signers {
+		if matchesLockKey(s.Key, given) {
+			return true
+		}
+	}
+	return false
 }
 
 // SetLock pins a record this device produced itself and persists it.

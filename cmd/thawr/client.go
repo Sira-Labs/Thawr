@@ -29,8 +29,8 @@ func defaultClientSocket() string {
 
 // clientUpFlags are shared by `client up` and `client install`.
 type clientUpFlags struct {
-	serverURL, token, fingerprint, name, iface, logLevel, dnsMode string
-	acceptFingerprint                                             bool
+	serverURL, token, fingerprint, name, iface, logLevel, dnsMode, lockSigner string
+	acceptFingerprint                                                         bool
 }
 
 func addClientUpFlags(cmd *cobra.Command, f *clientUpFlags) {
@@ -39,6 +39,7 @@ func addClientUpFlags(cmd *cobra.Command, f *clientUpFlags) {
 	cmd.Flags().StringVar(&f.fingerprint, "fingerprint", "", "server TLS fingerprint (sha256:...) from the join command")
 	cmd.Flags().BoolVar(&f.acceptFingerprint, "accept-fingerprint", false, "trust whatever certificate the server presents now (prints it)")
 	cmd.Flags().StringVar(&f.name, "name", "", "peer name to request instead of the hostname")
+	cmd.Flags().StringVar(&f.lockSigner, "lock-signer", "", "lock key or fingerprint (from `thawr client lock status` on a signer) the first lock record must name; refuses any other record (spec 012)")
 	cmd.Flags().StringVar(&f.iface, "interface", config.DefaultInterface(), "WireGuard interface name")
 	cmd.Flags().StringVar(&f.logLevel, "log-level", "info", "debug, info, warn or error")
 	cmd.Flags().StringVar(&f.dnsMode, "dns", client.DNSOn, "<name>.thawr resolver: on (serve and register with the OS), serve (resolver only) or off")
@@ -63,7 +64,7 @@ func enrollIfNeeded(ctx context.Context, deps cliDeps, logger *slog.Logger, f cl
 		}
 		st, err := deps.enroll(ctx, client.Options{
 			Server: f.serverURL, Token: f.token, Fingerprint: f.fingerprint, AcceptFingerprint: f.acceptFingerprint,
-			Name: f.name, StateDir: stateDir, Version: version,
+			Name: f.name, StateDir: stateDir, Version: version, LockSigner: f.lockSigner,
 		})
 		if err != nil {
 			var fpErr *client.FingerprintError
@@ -192,9 +193,12 @@ server is unreachable, 2 usage error, 3 client not running.`,
 		Use:   "rotate-key",
 		Short: "Generate a new WireGuard key and register it with the server",
 		Long: `Generates a new WireGuard key, registers it with the server and
-reconfigures the interface. Every other device pins this device's key
-and shows it as "key changed" until someone runs "thawr client trust
-<this name>" there.`,
+reconfigures the interface. With the network lock off, every other
+device pins this device's key and shows it as "key changed" until
+someone runs "thawr client trust <this name>" there. With the lock on,
+a signer's new key is signed on the way and applied everywhere at once;
+any other device's new key is held as "unsigned" until a signer runs
+"thawr client lock sign <this name>".`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			lc := client.NewLocalClient(socket)

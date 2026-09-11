@@ -496,7 +496,7 @@ func (d *Daemon) applyLocked(ctx context.Context, nm NetMap, cache bool) error {
 	// The lock runs first: with it on, unsigned entries are held and
 	// signed ones are accepted into the pins, so the pin check after
 	// it only ever holds a key change the lock did not vouch for.
-	rejected := d.pins.UpdateLock(nm.Lock)
+	rejected := d.pins.UpdateLock(nm.Lock, d.state.LockSigner)
 	var held []HeldStatus
 	if d.pins.Enabled() {
 		nm, held = d.pins.HoldUnsigned(nm, d.pins.Lock().Record, now, prev)

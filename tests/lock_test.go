@@ -89,6 +89,9 @@ func TestNetworkLockHoldsUnsignedPeers(t *testing.T) {
 		!strings.Contains(string(out), "1 unsigned: thawr client lock sign carol-box") || !strings.Contains(string(out), "lock: on") {
 		t.Errorf("bob status text: %v\n%s", err, out)
 	}
+	if _, _, err := pingPathOnce(ctx, m.clients[0], m.bin, sock("alice-box"), "carol-box"); err == nil {
+		t.Error("ping of an unsigned peer succeeded")
+	}
 	if out, err := m.clients[1].cmd(ctx, m.bin, "client", "trust", "carol-box", "--socket", sock("bob-box")).CombinedOutput(); err == nil {
 		t.Errorf("trust released an unsigned peer:\n%s", out)
 	}

@@ -44,6 +44,10 @@ func lockDaemon(t *testing.T, st client.Status) string {
 			fail(w, http.StatusConflict, "client: box has not reported a lock key; run `thawr client lock key` there first")
 			return
 		}
+		if r.URL.Query().Get("key") != "cc33dd44" {
+			fail(w, http.StatusConflict, "client: lock key mismatch")
+			return
+		}
 		ok(w, client.LockResult{Generation: 2, Signer: "aa11bb22", Signed: []client.LockSigned{{Name: "nas", Fingerprint: "cc33dd44"}}})
 	})
 	mux.HandleFunc("POST /lock/disable", func(w http.ResponseWriter, _ *http.Request) {
@@ -72,8 +76,8 @@ func TestClientLockCommands(t *testing.T) {
 		{"init", []string{"lock", "init"}, 0, []string{"network lock enabled (generation 1); this device signs with aa11bb22", "signed hub (0a0a0a0a)", "signed laptop (0b0b0b0b)", "compare each fingerprint"}},
 		{"sign", []string{"lock", "sign", "nas"}, 0, []string{"signed nas (0c0c0c0c)"}},
 		{"sign all", []string{"lock", "sign", "--all"}, 0, []string{"nothing to sign"}},
-		{"key", []string{"lock", "key"}, 0, []string{"lock public key NEWPUB= (fingerprint cc33dd44)", "thawr client lock add-signer"}},
-		{"add-signer", []string{"lock", "add-signer", "nas"}, 0, []string{"added nas as signer (cc33dd44); record generation 2"}},
+		{"key", []string{"lock", "key"}, 0, []string{"lock public key NEWPUB= (fingerprint cc33dd44)", "thawr client lock add-signer <this peer's name> cc33dd44"}},
+		{"add-signer", []string{"lock", "add-signer", "nas", "cc33dd44"}, 0, []string{"added nas as signer (cc33dd44); record generation 2"}},
 		{"disable", []string{"lock", "disable"}, 0, []string{"network lock disabled (generation 3)"}},
 		{"status", []string{"lock", "status"}, 0, []string{"lock: on (generation 2) · this device is a signer", "signer alice-laptop (aa11bb22)", "signer p9 (ee55ff66)", "unsigned, held: build-box (sign with: thawr client lock sign build-box)"}},
 	}
@@ -97,8 +101,14 @@ func TestClientLockCommands(t *testing.T) {
 	if _, code, err := runCLI(t, "client", "lock", "sign", "other", "--socket", sock); code != exitConfigError || !strings.Contains(err.Error(), "not a signer") {
 		t.Errorf("not a signer: code=%d err=%v", code, err)
 	}
-	if _, code, err := runCLI(t, "client", "lock", "add-signer", "box", "--socket", sock); code != 1 || !strings.Contains(err.Error(), "has not reported a lock key") {
+	if _, code, err := runCLI(t, "client", "lock", "add-signer", "box", "cc33dd44", "--socket", sock); code != exitConfigError || !strings.Contains(err.Error(), "has not reported a lock key") {
 		t.Errorf("add-signer without key: code=%d err=%v", code, err)
+	}
+	if _, code, err := runCLI(t, "client", "lock", "add-signer", "nas", "ffffffff", "--socket", sock); code != exitConfigError || !strings.Contains(err.Error(), "mismatch") {
+		t.Errorf("add-signer with the wrong fingerprint: code=%d err=%v", code, err)
+	}
+	if _, code, _ := runCLI(t, "client", "lock", "add-signer", "nas", "--socket", sock); code != exitConfigError {
+		t.Errorf("add-signer without the key argument: code=%d", code)
 	}
 	if _, code, _ := runCLI(t, "client", "lock", "sign", "--socket", sock); code != exitConfigError {
 		t.Errorf("sign without names: code=%d", code)
