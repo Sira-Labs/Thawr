@@ -212,8 +212,8 @@ func (p *Pins) Enabled() bool { return p.lock != nil && p.lock.Record.Enabled() 
 // UpdateLock reconciles the record the server offers with the pinned
 // one and returns why the offer was not adopted, empty when it was or
 // when nothing changed. The first record is pinned as offered, unless
-// expected (a lock key or fingerprint given at enrolment) names a
-// signer the record lacks; a later one must pass lock.Accept against
+// expected (a lock public key given at enrolment) is not the key that
+// signed it; a later one must pass lock.Accept against
 // the pin. A server that offers nothing while a record is pinned does
 // not turn the lock off: the pin stays until a signed disabled record
 // arrives. The pin is written by the next Apply.
@@ -243,7 +243,7 @@ func (p *Pins) UpdateLock(offered *lock.Signed, expected string) string {
 }
 
 // firstRecordBy checks that the record is signed by the expected key
-// itself (full key or fingerprint), not merely lists it: a hostile
+// itself (the full public key), not merely lists it: a hostile
 // server could list the expected key next to its own and sign with
 // its own. It returns the reason for refusal, empty when the record
 // passes.
@@ -265,7 +265,7 @@ func firstRecordBy(offered lock.Signed, expected string) string {
 				signedBy = lock.Fingerprint(o.Key)
 			}
 		}
-		return fmt.Sprintf("first record (generation %d) refused: it lists the signer %s given at enrolment but is signed by %s; enrol with the fingerprint of the key that signed it", offered.Record.Generation, expected, signedBy)
+		return fmt.Sprintf("first record (generation %d) refused: it lists the signer %s given at enrolment but is signed by %s; enrol with the key that signed it", offered.Record.Generation, expected, signedBy)
 	}
 	return fmt.Sprintf("first record (generation %d) refused: it does not name the signer %s given at enrolment", offered.Record.Generation, expected)
 }

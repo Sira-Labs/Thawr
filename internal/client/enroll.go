@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	thawrv1 "github.com/thedatadudech/thawr/internal/api/proto/thawr/v1"
+	"github.com/thedatadudech/thawr/internal/lock"
 	"github.com/thedatadudech/thawr/internal/wg"
 )
 
@@ -34,8 +35,8 @@ type Options struct {
 	// Name optionally requests the peer name.
 	Name     string
 	StateDir string
-	// LockSigner is a lock public key or fingerprint the first lock
-	// record must name (spec 012); empty trusts the first record.
+	// LockSigner is the full lock public key that must have signed the
+	// first lock record (spec 012); empty trusts the first record.
 	LockSigner string
 	// Hostname defaults to os.Hostname.
 	Hostname string
@@ -62,6 +63,11 @@ func (e *FingerprintError) Error() string {
 func Enroll(ctx context.Context, opts Options) (State, error) {
 	if opts.Token == "" {
 		return State{}, errors.New("client: token required")
+	}
+	if ls := strings.TrimSpace(opts.LockSigner); ls != "" {
+		if _, err := lock.ParsePublicKey(ls); err != nil {
+			return State{}, fmt.Errorf("client: --lock-signer must be the full lock public key from `thawr client lock status` on a signer: %w", err)
+		}
 	}
 	if opts.StateDir == "" {
 		opts.StateDir = DefaultDir()

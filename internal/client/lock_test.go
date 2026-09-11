@@ -68,18 +68,22 @@ func TestPinsUpdateLock(t *testing.T) {
 	one := signedRecord(t, ka, lock.Record{Generation: 1, Signers: []lock.Signer{{Key: ka.Public(), PeerID: "a"}}})
 	// An expected signer from enrolment gates first contact only, and
 	// listing it is not enough: the record must be signed by it.
-	if r := p.UpdateLock(&one, lock.Fingerprint(outsider.Public())); r == "" || p.Lock() != nil {
+	if r := p.UpdateLock(&one, outsider.Public().String()); r == "" || p.Lock() != nil {
 		t.Fatalf("first record without the expected signer: %q", r)
 	}
 	both := signedRecord(t, outsider, lock.Record{Generation: 1, Signers: []lock.Signer{{Key: ka.Public(), PeerID: "a"}, {Key: outsider.Public(), PeerID: "x"}}})
-	if r := p.UpdateLock(&both, lock.Fingerprint(ka.Public())); !strings.Contains(r, "signed by "+lock.Fingerprint(outsider.Public())) || p.Lock() != nil {
+	if r := p.UpdateLock(&both, ka.Public().String()); !strings.Contains(r, "signed by "+lock.Fingerprint(outsider.Public())) || p.Lock() != nil {
 		t.Fatalf("record listing the expected signer but signed by another: %q", r)
 	}
 	if r := p.UpdateLock(&both, outsider.Public().String()); r != "" || p.Lock() == nil {
 		t.Fatalf("record signed by the expected signer (full key): %q", r)
 	}
 	p.lock, p.dirty = nil, false
-	if r := p.UpdateLock(&one, lock.Fingerprint(ka.Public())); r != "" || !p.Enabled() || p.Lock().Record.Generation != 1 {
+	// The fingerprint alone is not a key and never matches.
+	if r := p.UpdateLock(&one, lock.Fingerprint(ka.Public())); r == "" || p.Lock() != nil {
+		t.Fatalf("fingerprint accepted as expected signer: %q", r)
+	}
+	if r := p.UpdateLock(&one, ka.Public().String()); r != "" || !p.Enabled() || p.Lock().Record.Generation != 1 {
 		t.Fatalf("first contact: %q", r)
 	}
 	if r := p.UpdateLock(&one, ""); r != "" {
@@ -331,7 +335,7 @@ func TestDaemonNetworkLock(t *testing.T) {
 	wrong := testLockKey(t)
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		_, err = lcA.LockAddSigner(ctx, "b", lock.Fingerprint(wrong.Public()))
+		_, err = lcA.LockAddSigner(ctx, "b", wrong.Public().String())
 		if le := new(LocalError); errors.As(err, &le) && le.Status == http.StatusConflict && strings.Contains(le.Message, "mismatch") {
 			break
 		}
@@ -342,6 +346,9 @@ func TestDaemonNetworkLock(t *testing.T) {
 	}
 	if _, err := lcA.LockAddSigner(ctx, "b", ""); err == nil {
 		t.Error("add signer without a key succeeded")
+	}
+	if _, err := lcA.LockAddSigner(ctx, "b", lock.Fingerprint(wrong.Public())); err == nil {
+		t.Error("add signer with a fingerprint instead of a key succeeded")
 	}
 	if st, _ := lcB.Status(ctx); st.Lock.Signer || st.Lock.Generation != 1 {
 		t.Errorf("record changed by a refused add-signer: %+v", st.Lock)
@@ -405,8 +412,8 @@ func TestDaemonLockSignerFailsClosed(t *testing.T) {
 	if err := SaveLockKey(dirA, ka); err != nil {
 		t.Fatal(err)
 	}
-	cp.enrolWith(dirC, "c", func(o *Options) { o.LockSigner = lock.Fingerprint(ka.Public()) })
-	cp.enrolWith(dirD, "d", func(o *Options) { o.LockSigner = lock.Fingerprint(wrong.Public()) })
+	cp.enrolWith(dirC, "c", func(o *Options) { o.LockSigner = ka.Public().String() })
+	cp.enrolWith(dirD, "d", func(o *Options) { o.LockSigner = wrong.Public().String() })
 	a, _, stopA := startDaemon(t, dirA)
 	defer stopA()
 	c, fakeC, stopC := startDaemon(t, dirC)

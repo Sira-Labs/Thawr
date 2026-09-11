@@ -538,7 +538,10 @@ entry.
         device the flag is persisted while no record is pinned and
         refused otherwise, never ignored; `LockService.Set` reads,
         checks and writes the record in one transaction so competing
-        successors cannot both land.
+        successors cannot both land. Third round: `--lock-signer` and
+        `add-signer` take the full public key only; the 8-hex
+        fingerprint is 32 bits, enough for a person comparing screens
+        and not for authenticating a key.
       - Out of scope, listed in the spec: removing a signer, a quorum,
         rotating a lock key, short-lived keys.
 - [ ] **013 Exit nodes and subnet routers** — advertised prefixes gated

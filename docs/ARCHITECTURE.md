@@ -477,8 +477,8 @@ with a tiny JSON-over-HTTP API: `GET /status`, `POST /down`,
 every held one, `hub` for the hub), `POST /ping/{name}` (mark
 traffic intent, probe, answer with the settled path), and the network
 lock (spec 012): `POST /lock/init`, `POST /lock/sign/{name}` (`all`,
-`hub`), `POST /lock/key`, `POST /lock/add-signer/{name}?key=<key or
-fingerprint read on that device>`, `POST /lock/disable`, each
+`hub`), `POST /lock/key`, `POST /lock/add-signer/{name}?key=<full lock public key read on
+that device>`, `POST /lock/disable`, each
 answering with the generation and the fingerprints it signed.
 
 `GET /status` returns the document described by `docs/status.schema.json`:

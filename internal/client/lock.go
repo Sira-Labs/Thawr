@@ -358,14 +358,14 @@ func (d *Daemon) LockKey() (LockResult, error) {
 }
 
 // LockAddSigner adds the named peer to the signer set with a new
-// record signed by this device. expected is the candidate's lock public
-// key or its fingerprint as the person read it from `lock key` on that
-// device; the key the server reports must match it, so a server cannot
-// slip its own key into the signer set.
+// record signed by this device. expected is the candidate's full lock
+// public key as the person read it from `lock key` on that device; the
+// key the server reports must match it, so a server cannot slip its
+// own key into the signer set.
 func (d *Daemon) LockAddSigner(ctx context.Context, name, expected string) (LockResult, error) {
 	expected = strings.TrimSpace(expected)
-	if expected == "" {
-		return LockResult{}, fmt.Errorf("%w: the candidate's lock key or fingerprint is required (printed by `thawr client lock key` there)", ErrLockKeyMismatch)
+	if _, err := lock.ParsePublicKey(expected); err != nil {
+		return LockResult{}, fmt.Errorf("%w: the candidate's full lock public key is required (printed by `thawr client lock key` there): %w", ErrLockKeyMismatch, err)
 	}
 	client, k, rec, err := d.signerContext()
 	if err != nil {
@@ -389,7 +389,7 @@ func (d *Daemon) LockAddSigner(ctx context.Context, name, expected string) (Lock
 		return LockResult{}, fmt.Errorf("client: lock key of %s: %w", name, err)
 	}
 	if !matchesLockKey(key, expected) {
-		return LockResult{}, fmt.Errorf("%w: the server reports %s for %s, you gave %s; run `thawr client lock key` there and compare", ErrLockKeyMismatch, lock.Fingerprint(key), name, expected)
+		return LockResult{}, fmt.Errorf("%w: the server reports %s for %s, you gave a different key; run `thawr client lock key` there and compare", ErrLockKeyMismatch, lock.Fingerprint(key), name)
 	}
 	next := lock.Record{Generation: rec.Record.Generation + 1, Signers: append(slices.Clone(rec.Record.Signers), lock.Signer{Key: key, PeerID: p.GetId()})}
 	if err := d.setLockRecord(ctx, client, k, next, nil); err != nil {
@@ -437,12 +437,11 @@ func (d *Daemon) selfRotation(newKey wg.Key) (signer, signature string, err erro
 	return d.lockKey.Public().String(), sig.String(), nil
 }
 
-// matchesLockKey reports whether given names key: the full base64 key
-// or its fingerprint (case-insensitive hex).
+// matchesLockKey reports whether given is key, as the full base64
+// public key. The 8-hex fingerprint is for people to compare by eye;
+// it is 32 bits, which a hostile server could grind a colliding key
+// for, so it never authenticates anything.
 func matchesLockKey(key lock.PublicKey, given string) bool {
-	given = strings.TrimSpace(given)
-	if given == key.String() {
-		return true
-	}
-	return strings.EqualFold(given, lock.Fingerprint(key))
+	parsed, err := lock.ParsePublicKey(strings.TrimSpace(given))
+	return err == nil && parsed == key
 }

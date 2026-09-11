@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"net/netip"
+	"sync"
 	"testing"
 
 	"github.com/thedatadudech/thawr/internal/lock"
@@ -144,23 +145,50 @@ func TestLockSetAcceptsOnlySignedSuccessors(t *testing.T) {
 	if err := e.svc.Set(ctx, e.pa, signRecord(t, outsider, lock.Record{Generation: 9, Signers: []lock.Signer{{Key: outsider.Public(), PeerID: e.pa.ID}}}), nil); !errors.Is(err, ErrValidation) {
 		t.Errorf("hijack: %v", err)
 	}
-	if err := e.svc.Set(ctx, e.pa, signRecord(t, e.ka, two), nil); err != nil {
-		t.Fatalf("add signer: %v", err)
-	}
-	// A second successor of generation 1 loses: the check and the write
-	// share one transaction.
+	// Two successors of generation 1 race: the check and the write share
+	// one transaction, so exactly one lands and Current is that one.
 	alt := lock.Record{Generation: 2, Signers: []lock.Signer{{Key: e.ka.Public(), PeerID: e.pa.ID}}}
-	if err := e.svc.Set(ctx, e.pa, signRecord(t, e.ka, alt), nil); !errors.Is(err, ErrValidation) {
-		t.Errorf("competing successor: %v", err)
+	candidates := []lock.Signed{signRecord(t, e.ka, two), signRecord(t, e.ka, alt)}
+	results := make([]error, len(candidates))
+	var wg sync.WaitGroup
+	for i, c := range candidates {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i] = e.svc.Set(ctx, e.pa, c, nil)
+		}()
+	}
+	wg.Wait()
+	winners := 0
+	for i, err := range results {
+		switch {
+		case err == nil:
+			winners++
+			if cur, _ := e.svc.Current(ctx); cur == nil || cur.Signature != candidates[i].Signature {
+				t.Errorf("Current is not the winner: %+v", cur)
+			}
+		case !errors.Is(err, ErrValidation):
+			t.Errorf("loser failed with %v, want ErrValidation", err)
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("%d successors landed, want 1: %v", winners, results)
 	}
 	if cur, _ := e.svc.Current(ctx); cur == nil || len(cur.Record.Signers) != 2 {
-		t.Errorf("record overwritten by the competing successor: %+v", cur)
+		// The rest of the test needs pb as signer; install two if alt won.
+		if err := e.svc.Set(ctx, e.pa, signRecord(t, e.ka, lock.Record{Generation: 3, Signers: two.Signers}), nil); err != nil {
+			t.Fatalf("add signer after the race: %v", err)
+		}
 	}
 	if ok, _ := e.svc.IsSigner(ctx, e.pb.ID); !ok {
 		t.Error("pb not a signer after being added")
 	}
 	// The new signer may disable the lock.
-	if err := e.svc.Set(ctx, e.pb, signRecord(t, e.kb, lock.Record{Generation: 3, Disabled: true}), nil); err != nil {
+	cur, err = e.svc.Current(ctx)
+	if err != nil || cur == nil {
+		t.Fatalf("current before disable: %+v %v", cur, err)
+	}
+	if err := e.svc.Set(ctx, e.pb, signRecord(t, e.kb, lock.Record{Generation: cur.Record.Generation + 1, Disabled: true}), nil); err != nil {
 		t.Fatalf("disable: %v", err)
 	}
 	if ok, _ := e.svc.IsSigner(ctx, e.pa.ID); ok {

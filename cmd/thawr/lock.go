@@ -89,18 +89,19 @@ running.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return run(cmd, func(lc *client.LocalClient) (client.LockResult, error) { return lc.LockKey(cmd.Context()) },
 				func(w io.Writer, res client.LockResult) error {
-					_, err := fmt.Fprintf(w, "lock public key %s (fingerprint %s)\nask a current signer to run: thawr client lock add-signer <this peer's name> %s\n", res.PublicKey, res.Signer, res.Signer)
+					_, err := fmt.Fprintf(w, "lock public key %s (fingerprint %s)\nask a current signer to run: thawr client lock add-signer <this peer's name> %s\n", res.PublicKey, res.Signer, res.PublicKey)
 					return err
 				})
 		},
 	}
 	addSigner := &cobra.Command{
-		Use:   "add-signer <name> <lock-key-or-fingerprint>",
+		Use:   "add-signer <name> <lock-public-key>",
 		Short: "Add a peer that ran `lock key` to the signer set",
-		Long: `Adds a peer to the signer set. The second argument is the lock public
-key or fingerprint that "thawr client lock key" printed on that device;
-it must match what the server reports, so a server cannot slip its own
-key into the signer set.`,
+		Long: `Adds a peer to the signer set. The second argument is the full lock
+public key that "thawr client lock key" printed on that device; it must
+match what the server reports, so a server cannot slip its own key into
+the signer set. The 8-character fingerprint is for comparing by eye and
+is not accepted here.`,
 		Args: usageArgs(cobra.ExactArgs(2)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return run(cmd, func(lc *client.LocalClient) (client.LockResult, error) {

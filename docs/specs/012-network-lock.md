@@ -25,7 +25,7 @@ server, vouches for an identity.
 The protection starts once a device has pinned the lock record. The
 first record a device pins is trusted like the enrolment itself, so a
 device enrolled while the server is already hostile can be handed a
-record the attacker signs; `thawr client up --lock-signer <fp>` closes
+record the attacker signs; `thawr client up --lock-signer <key>` closes
 that by naming the signer the first record must carry.
 
 ## User story
@@ -139,8 +139,10 @@ WireGuard: kernel · thawr0 · listen 41820 · NAT: cone (...) · DNS: .thawr vi
 - `pins.json` gains the pinned lock record. On every netmap: none
   pinned and none offered → lock off; offered and none pinned → pin it
   and log which signers now vouch for the network, unless the device
-  was enrolled with `--lock-signer <key-or-fingerprint>` (stored in
-  `state.json`): then the first record must be **signed by** that key
+  was enrolled with `--lock-signer <lock public key>` (stored in
+  `state.json`; the full key, since the 8-hex fingerprint is 32 bits
+  and a hostile server could grind a colliding key): then the first
+  record must be **signed by** that key
   (listing it next to another signer is not enough), else it is refused
   like any other, and until a record passes the device applies
   nothing at all (no hub, no peers), so a hostile server cannot hand
@@ -165,10 +167,11 @@ WireGuard: kernel · thawr0 · listen 41820 · NAT: cone (...) · DNS: .thawr vi
 - Signing runs inside the daemon over the local API (`POST /lock/init`,
   `/lock/sign/{name}`, `/lock/key`, `/lock/add-signer/{name}?key=`,
   `/lock/disable`): it holds the gRPC client, the netmap and the key.
-  `add-signer` takes the candidate's lock key or fingerprint as the
+  `add-signer` takes the candidate's full lock public key as the
   person read it from `lock key` on that device and refuses to sign a
   record when the key the server reports differs, so the server cannot
-  put its own key into the signer set.
+  put its own key into the signer set. Fingerprints are for comparing
+  by eye and never authenticate anything.
   `init` sends the record **together with** its signatures over the
   hub, itself and every peer the daemon currently sees, stored in one
   transaction, so enabling never cuts a working network; peers outside

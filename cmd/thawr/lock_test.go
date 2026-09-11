@@ -47,7 +47,7 @@ func lockDaemon(t *testing.T, st client.Status) string {
 			fail(w, http.StatusConflict, "client: box has not reported a lock key; run `thawr client lock key` there first")
 			return
 		}
-		if r.URL.Query().Get("key") != "cc33dd44" {
+		if r.URL.Query().Get("key") != "NEWPUB=" {
 			fail(w, http.StatusConflict, "client: lock key mismatch")
 			return
 		}
@@ -79,8 +79,8 @@ func TestClientLockCommands(t *testing.T) {
 		{"init", []string{"lock", "init"}, 0, []string{"network lock enabled (generation 1); this device signs with aa11bb22", "signed hub (0a0a0a0a)", "signed laptop (0b0b0b0b)", "compare each fingerprint"}},
 		{"sign", []string{"lock", "sign", "nas"}, 0, []string{"signed nas (0c0c0c0c)"}},
 		{"sign all", []string{"lock", "sign", "--all"}, 0, []string{"nothing to sign"}},
-		{"key", []string{"lock", "key"}, 0, []string{"lock public key NEWPUB= (fingerprint cc33dd44)", "thawr client lock add-signer <this peer's name> cc33dd44"}},
-		{"add-signer", []string{"lock", "add-signer", "nas", "cc33dd44"}, 0, []string{"added nas as signer (cc33dd44); record generation 2"}},
+		{"key", []string{"lock", "key"}, 0, []string{"lock public key NEWPUB= (fingerprint cc33dd44)", "thawr client lock add-signer <this peer's name> NEWPUB="}},
+		{"add-signer", []string{"lock", "add-signer", "nas", "NEWPUB="}, 0, []string{"added nas as signer (cc33dd44); record generation 2"}},
 		{"disable", []string{"lock", "disable"}, 0, []string{"network lock disabled (generation 3)"}},
 		{"status", []string{"lock", "status"}, 0, []string{"lock: on (generation 2) · this device is a signer", "signer alice-laptop (aa11bb22)", "signer p9 (ee55ff66)", "unsigned, held: build-box (sign with: thawr client lock sign build-box)"}},
 	}
@@ -104,10 +104,10 @@ func TestClientLockCommands(t *testing.T) {
 	if _, code, err := runCLI(t, "client", "lock", "sign", "other", "--socket", sock); code != exitConfigError || !strings.Contains(err.Error(), "not a signer") {
 		t.Errorf("not a signer: code=%d err=%v", code, err)
 	}
-	if _, code, err := runCLI(t, "client", "lock", "add-signer", "box", "cc33dd44", "--socket", sock); code != exitConfigError || !strings.Contains(err.Error(), "has not reported a lock key") {
+	if _, code, err := runCLI(t, "client", "lock", "add-signer", "box", "NEWPUB=", "--socket", sock); code != exitConfigError || !strings.Contains(err.Error(), "has not reported a lock key") {
 		t.Errorf("add-signer without key: code=%d err=%v", code, err)
 	}
-	if _, code, err := runCLI(t, "client", "lock", "add-signer", "nas", "ffffffff", "--socket", sock); code != exitConfigError || !strings.Contains(err.Error(), "mismatch") {
+	if _, code, err := runCLI(t, "client", "lock", "add-signer", "nas", "OTHERPUB=", "--socket", sock); code != exitConfigError || !strings.Contains(err.Error(), "mismatch") {
 		t.Errorf("add-signer with the wrong fingerprint: code=%d err=%v", code, err)
 	}
 	if _, code, _ := runCLI(t, "client", "lock", "add-signer", "nas", "--socket", sock); code != exitConfigError {
@@ -219,21 +219,33 @@ func TestApplyLockSigner(t *testing.T) {
 	if err := client.SaveState(dir, st); err != nil {
 		t.Fatal(err)
 	}
+	k1, err := lock.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k2, err := lock.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key1, key2 := k1.Public().String(), k2.Public().String()
 	if err := applyLockSigner(dir, st, ""); err != nil {
 		t.Fatalf("empty flag: %v", err)
 	}
-	if err := applyLockSigner(dir, st, "aa11bb22"); err != nil {
+	var ee *exitError
+	if err := applyLockSigner(dir, st, lock.Fingerprint(k1.Public())); !errors.As(err, &ee) || ee.code != exitConfigError {
+		t.Errorf("fingerprint instead of a key: %v", err)
+	}
+	if err := applyLockSigner(dir, st, key1); err != nil {
 		t.Fatalf("set on an enrolled device: %v", err)
 	}
 	st, _ = client.LoadState(dir)
-	if st.LockSigner != "aa11bb22" {
+	if st.LockSigner != key1 {
 		t.Fatalf("not persisted: %+v", st)
 	}
-	if err := applyLockSigner(dir, st, "aa11bb22"); err != nil {
+	if err := applyLockSigner(dir, st, key1); err != nil {
 		t.Errorf("repeated flag: %v", err)
 	}
-	var ee *exitError
-	if err := applyLockSigner(dir, st, "cc33dd44"); !errors.As(err, &ee) || ee.code != exitConfigError {
+	if err := applyLockSigner(dir, st, key2); !errors.As(err, &ee) || ee.code != exitConfigError {
 		t.Errorf("changed flag: %v", err)
 	}
 	fresh := client.State{Server: "vpn:8443", Fingerprint: "sha256:ab", PeerID: "p2", Name: "other", IPv4: "100.64.0.3", OverlayCIDR: "100.64.0.0/10", NodeSecret: "s"}
@@ -255,7 +267,7 @@ func TestApplyLockSigner(t *testing.T) {
 	if err := pins.SetLock(lock.Signed{Record: rec, Signature: sig}); err != nil {
 		t.Fatal(err)
 	}
-	if err := applyLockSigner(dir2, fresh, "aa11bb22"); !errors.As(err, &ee) || ee.code != exitConfigError {
+	if err := applyLockSigner(dir2, fresh, key1); !errors.As(err, &ee) || ee.code != exitConfigError {
 		t.Errorf("flag after a pinned record: %v", err)
 	}
 }

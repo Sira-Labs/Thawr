@@ -15,6 +15,7 @@ import (
 
 	"github.com/thedatadudech/thawr/internal/client"
 	"github.com/thedatadudech/thawr/internal/config"
+	"github.com/thedatadudech/thawr/internal/lock"
 	"github.com/thedatadudech/thawr/internal/server"
 )
 
@@ -40,7 +41,7 @@ func addClientUpFlags(cmd *cobra.Command, f *clientUpFlags) {
 	cmd.Flags().StringVar(&f.fingerprint, "fingerprint", "", "server TLS fingerprint (sha256:...) from the join command")
 	cmd.Flags().BoolVar(&f.acceptFingerprint, "accept-fingerprint", false, "trust whatever certificate the server presents now (prints it)")
 	cmd.Flags().StringVar(&f.name, "name", "", "peer name to request instead of the hostname")
-	cmd.Flags().StringVar(&f.lockSigner, "lock-signer", "", "lock key or fingerprint (from `thawr client lock status` on a signer) the first lock record must name; refuses any other record (spec 012)")
+	cmd.Flags().StringVar(&f.lockSigner, "lock-signer", "", "full lock public key (from `thawr client lock status` on a signer) that must have signed the first lock record; nothing is applied until it arrives (spec 012)")
 	cmd.Flags().StringVar(&f.iface, "interface", config.DefaultInterface(), "WireGuard interface name")
 	cmd.Flags().StringVar(&f.logLevel, "log-level", "info", "debug, info, warn or error")
 	cmd.Flags().StringVar(&f.dnsMode, "dns", client.DNSOn, "<name>.thawr resolver: on (serve and register with the OS), serve (resolver only) or off")
@@ -91,6 +92,11 @@ func enrollIfNeeded(ctx context.Context, deps cliDeps, logger *slog.Logger, f cl
 // force that is not.
 func applyLockSigner(stateDir string, st client.State, want string) error {
 	want = strings.TrimSpace(want)
+	if want != "" {
+		if _, err := lock.ParsePublicKey(want); err != nil {
+			return &exitError{code: exitConfigError, err: fmt.Errorf("--lock-signer must be the full lock public key from `thawr client lock status` on a signer: %w", err)}
+		}
+	}
 	switch {
 	case want == "" || want == st.LockSigner:
 		return nil
@@ -232,14 +238,18 @@ any other device's new key is held as "unsigned" until a signer runs
 			}
 			name := "<this peer>"
 			st, err := lc.Status(cmd.Context())
-			if err == nil && st.Self.Name != "" {
+			if err != nil {
+				_, err := fmt.Fprintf(cmd.OutOrStdout(), "key rotated; the lock state could not be read (%v). With the network lock on, a signer must run: thawr client lock sign %s; without it, other devices run: thawr client trust %s\n", err, name, name)
+				return err
+			}
+			if st.Self.Name != "" {
 				name = st.Self.Name
 			}
-			if err == nil && st.Lock.Enabled && st.Lock.Signer {
+			if st.Lock.Enabled && st.Lock.Signer {
 				_, err := fmt.Fprintln(cmd.OutOrStdout(), "key rotated and signed; other devices switch to it without a trust step")
 				return err
 			}
-			if err == nil && st.Lock.Enabled {
+			if st.Lock.Enabled {
 				_, err := fmt.Fprintf(cmd.OutOrStdout(), "key rotated; other devices hold this peer as unsigned until a signer runs: thawr client lock sign %s\n", name)
 				return err
 			}

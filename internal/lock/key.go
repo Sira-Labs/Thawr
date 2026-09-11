@@ -98,7 +98,10 @@ func (p *PublicKey) UnmarshalText(b []byte) error {
 }
 
 // Fingerprint is the first 8 hex characters of SHA-256 over the key,
-// the form used in logs, audit rows and CLI output.
+// the form used in logs, audit rows and CLI output. It is 32 bits: fine
+// for a person comparing two screens, never for authenticating a key
+// (a hostile party can grind a collision), so every check takes the
+// full public key.
 func Fingerprint(p PublicKey) string {
 	sum := sha256.Sum256(p[:])
 	return hex.EncodeToString(sum[:4])
