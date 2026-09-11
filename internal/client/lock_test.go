@@ -227,7 +227,10 @@ func TestDaemonNetworkLock(t *testing.T) {
 	if err != nil || keyA.IsZero() || keyA.Public().String() != res.PublicKey {
 		t.Fatalf("lock key file: %v", err)
 	}
-	stA2 := waitStatus(t, lcA, "a lock on", func(s Status) bool { return s.Lock.Enabled && s.Lock.SelfSigned })
+	// Right after init the daemon re-applies the netmap it had before
+	// the server carried the record, so Rejected reads "server offers
+	// no lock record" until the next netmap; wait for that too.
+	stA2 := waitStatus(t, lcA, "a lock on", func(s Status) bool { return s.Lock.Enabled && s.Lock.SelfSigned && s.Lock.Rejected == "" })
 	if !stA2.Lock.Signer || !stA2.Lock.HasKey || stA2.Lock.Generation != 1 || len(stA2.Lock.Signers) != 1 || stA2.Lock.Signers[0].Name != "a" || stA2.Lock.Rejected != "" {
 		t.Errorf("a status: %+v", stA2.Lock)
 	}
