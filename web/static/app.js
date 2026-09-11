@@ -36,7 +36,7 @@
     const tr = document.createElement("tr");
     tr.className = "detail";
     const td = document.createElement("td");
-    td.colSpan = 8;
+    td.colSpan = 9;
     const section = (title, items) => {
       const h = document.createElement("div");
       h.className = "muted";
@@ -66,13 +66,32 @@
     return tr;
   }
 
+  // loadLock renders the network-lock line above the peers table; the
+  // server only reports it, signing happens on client devices.
+  async function loadLock() {
+    const el = $("#lock");
+    try {
+      const lock = await api("GET", "/api/v1/lock");
+      if (!lock.enabled) { el.textContent = "Network lock: off. Enable it from a device with `thawr client lock init`."; return; }
+      const signers = lock.signers.map((s) => `${s.peer} (${s.fingerprint})`).join(", ");
+      const unsigned = lock.unsigned.length ? ` Unsigned: ${lock.unsigned.join(", ")}.` : " Every peer is signed.";
+      el.textContent = `Network lock: on (generation ${lock.generation}). Signers: ${signers}.${unsigned}`;
+    } catch (e) { el.textContent = ""; }
+  }
+
+  function signedCell(p) {
+    if (p.signed === undefined) return cell("-");
+    return cell(p.signed ? "yes" : "no");
+  }
+
   async function loadPeers() {
     const peers = await api("GET", "/api/v1/peers");
+    await loadLock();
     const tbody = $("#peers tbody");
     tbody.replaceChildren();
     for (const p of peers) {
       const tr = document.createElement("tr");
-      tr.append(cell(p.name), cell(p.ipv4), cell(p.kind), cell(p.owner || "-"), cell(p.tags.join(", ") || "-"), cell(p.created_at));
+      tr.append(cell(p.name), cell(p.ipv4), cell(p.kind), cell(p.owner || "-"), cell(p.tags.join(", ") || "-"), cell(p.created_at), signedCell(p));
       tr.append(actionCell("Show", async () => {
         const next = tr.nextElementSibling;
         if (next && next.classList.contains("detail")) { next.remove(); return; }

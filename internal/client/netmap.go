@@ -11,6 +11,7 @@ import (
 
 	thawrv1 "github.com/thedatadudech/thawr/internal/api/proto/thawr/v1"
 	"github.com/thedatadudech/thawr/internal/control"
+	"github.com/thedatadudech/thawr/internal/lock"
 	"github.com/thedatadudech/thawr/internal/wg"
 )
 
@@ -40,6 +41,11 @@ type NetMap struct {
 	// Filter is the receiver-side policy: who may reach this device on
 	// which ports.
 	Filter []FilterRule `json:"filter"`
+	// SelfSignatures are the lock signatures over this device's own
+	// record; Lock is the signed lock record the server offers, nil
+	// when it has none (spec 012).
+	SelfSignatures []PeerSignature `json:"self_signatures,omitempty"`
+	Lock           *lock.Signed    `json:"lock,omitempty"`
 }
 
 // FilterRule allows Src to reach this device on a port range.
@@ -117,30 +123,43 @@ type Peer struct {
 	// ViaHub marks a static (mobile) peer reached through the hub: no
 	// WireGuard peer and no path of its own.
 	ViaHub bool `json:"via_hub"`
+	// Signatures are the network-lock signatures over this peer's
+	// current record (spec 012).
+	Signatures []PeerSignature `json:"signatures,omitempty"`
+}
+
+// PeerSignature is one lock key's signature over a peer record, as
+// strings so the cached netmap stays readable.
+type PeerSignature struct {
+	Signer    string `json:"signer"`
+	Signature string `json:"signature"`
 }
 
 // HubPeer is the server's WireGuard interface.
 type HubPeer struct {
-	PublicKey  string   `json:"public_key"`
-	Endpoint   string   `json:"endpoint"`
-	AllowedIPs []string `json:"allowed_ips"`
+	PublicKey  string          `json:"public_key"`
+	Endpoint   string          `json:"endpoint"`
+	AllowedIPs []string        `json:"allowed_ips"`
+	Signatures []PeerSignature `json:"signatures,omitempty"`
 }
 
 // NetMapFromProto converts a received netmap.
 func NetMapFromProto(m *thawrv1.NetMap, now time.Time) NetMap {
 	nm := NetMap{
-		Generation:    m.GetGeneration(),
-		SelfID:        m.GetSelf().GetId(),
-		SelfName:      m.GetSelf().GetName(),
-		SelfKind:      m.GetSelf().GetKind(),
-		SelfIPv4:      m.GetSelf().GetIpv4(),
-		Overlay:       m.GetSelf().GetOverlayCidr(),
-		Peers:         []Peer{},
-		Hub:           HubPeer{PublicKey: m.GetHub().GetPublicKey(), Endpoint: m.GetHub().GetEndpoint(), AllowedIPs: append([]string{}, m.GetHub().GetAllowedIps()...)},
-		ReceivedAt:    now,
-		ServerVersion: m.GetServerVersion(),
-		STUN:          append([]string{}, m.GetSelf().GetStunAddrs()...),
-		Filter:        []FilterRule{},
+		Generation:     m.GetGeneration(),
+		SelfID:         m.GetSelf().GetId(),
+		SelfName:       m.GetSelf().GetName(),
+		SelfKind:       m.GetSelf().GetKind(),
+		SelfIPv4:       m.GetSelf().GetIpv4(),
+		Overlay:        m.GetSelf().GetOverlayCidr(),
+		Peers:          []Peer{},
+		Hub:            HubPeer{PublicKey: m.GetHub().GetPublicKey(), Endpoint: m.GetHub().GetEndpoint(), AllowedIPs: append([]string{}, m.GetHub().GetAllowedIps()...), Signatures: signaturesFromProto(m.GetHub().GetSignatures())},
+		SelfSignatures: signaturesFromProto(m.GetSelf().GetSignatures()),
+		Lock:           lockFromProto(m.GetLock()),
+		ReceivedAt:     now,
+		ServerVersion:  m.GetServerVersion(),
+		STUN:           append([]string{}, m.GetSelf().GetStunAddrs()...),
+		Filter:         []FilterRule{},
 	}
 	for _, f := range m.GetFilter() {
 		if f.GetPortLo() > 65535 || f.GetPortHi() > 65535 {
@@ -151,13 +170,46 @@ func NetMapFromProto(m *thawrv1.NetMap, now time.Time) NetMap {
 	for _, p := range m.GetPeers() {
 		peer := Peer{ID: p.GetId(), Name: p.GetName(), Kind: p.GetKind(), Owner: p.GetOwner(), PublicKey: p.GetPublicKey(), IPv4: p.GetIpv4(),
 			Online: p.GetOnline(), Symmetric: p.GetSymmetric(), Keepalive: p.GetKeepalive(), ViaHub: p.GetViaHub(),
-			Endpoints: []Endpoint{}, AllowedIPs: append([]string{}, p.GetAllowedIps()...)}
+			Endpoints: []Endpoint{}, AllowedIPs: append([]string{}, p.GetAllowedIps()...), Signatures: signaturesFromProto(p.GetSignatures())}
 		for _, e := range p.GetEndpoints() {
 			peer.Endpoints = append(peer.Endpoints, Endpoint{Addr: e.GetAddr(), Kind: kindFromProto(e.GetKind())})
 		}
 		nm.Peers = append(nm.Peers, peer)
 	}
 	return nm
+}
+
+func signaturesFromProto(in []*thawrv1.PeerSignature) []PeerSignature {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]PeerSignature, 0, len(in))
+	for _, s := range in {
+		out = append(out, PeerSignature{Signer: s.GetSignerKey(), Signature: s.GetSignature()})
+	}
+	return out
+}
+
+// lockFromProto converts the offered lock record; a malformed one is
+// dropped, which the client treats like a server offering none.
+func lockFromProto(in *thawrv1.SignedLockRecord) *lock.Signed {
+	if in == nil || in.GetRecord() == nil {
+		return nil
+	}
+	out := lock.Signed{Record: lock.Record{Generation: in.GetRecord().GetGeneration(), Disabled: in.GetRecord().GetDisabled()}}
+	for _, sg := range in.GetRecord().GetSigners() {
+		key, err := lock.ParsePublicKey(sg.GetKey())
+		if err != nil {
+			return nil
+		}
+		out.Record.Signers = append(out.Record.Signers, lock.Signer{Key: key, PeerID: sg.GetPeerId()})
+	}
+	sig, err := lock.ParseSignature(in.GetSignature())
+	if err != nil {
+		return nil
+	}
+	out.Signature = sig
+	return &out
 }
 
 // SaveNetMap caches nm in the state directory (mode 0600).

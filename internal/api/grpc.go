@@ -16,6 +16,7 @@ import (
 
 	thawrv1 "github.com/thedatadudech/thawr/internal/api/proto/thawr/v1"
 	"github.com/thedatadudech/thawr/internal/control"
+	"github.com/thedatadudech/thawr/internal/lock"
 )
 
 // Enroller is the control-plane operation behind the Enroll RPC.
@@ -39,7 +40,7 @@ type SyncHub interface {
 
 // PeerOps are the per-peer operations behind the authenticated RPCs.
 type PeerOps interface {
-	RotateKey(ctx context.Context, peerID, newPublicKey string) (int64, error)
+	RotateKey(ctx context.Context, peerID, newPublicKey string, signed *control.SignedRotation) (int64, error)
 	Leave(ctx context.Context, peerID string) error
 	Touch(ctx context.Context, peerID string) error
 	SetClientVersion(ctx context.Context, peerID, version string) error
@@ -70,6 +71,8 @@ type GRPCDeps struct {
 	Peers     PeerOps
 	Endpoints *control.EndpointTable
 	Paths     *control.PathTable
+	// Lock enables the network-lock RPCs; nil answers Unimplemented.
+	Lock LockOps
 }
 
 // NewGRPC builds the gRPC server with the Control service registered.
@@ -135,6 +138,14 @@ func (s *controlServer) Sync(req *thawrv1.SyncRequest, stream grpc.ServerStreami
 	}
 	log := s.deps.Logger.With("peer", me.Name, "peer_id", me.ID)
 	log.Info("sync connected", "client_generation", req.GetGeneration(), "client_version", req.GetClientVersion(), "remote", remoteIP(ctx))
+	if s.deps.Lock != nil {
+		if k := req.GetLockKey(); k != "" {
+			if _, err := lock.ParsePublicKey(k); err != nil {
+				return status.Error(codes.InvalidArgument, "lock_key: "+err.Error())
+			}
+		}
+		s.deps.Lock.ReportKey(me.ID, req.GetLockKey())
+	}
 
 	wake, unsubscribe := s.deps.Sync.Subscribe(me.ID)
 	defer unsubscribe()
@@ -252,7 +263,19 @@ func (s *controlServer) RotateKey(ctx context.Context, req *thawrv1.RotateKeyReq
 	if !ok {
 		return nil, status.Error(codes.Unauthenticated, "node secret required")
 	}
-	gen, err := s.deps.Peers.RotateKey(ctx, me.ID, req.GetNewPublicKey())
+	var signed *control.SignedRotation
+	if req.GetSignerKey() != "" || req.GetSignature() != "" {
+		signer, err := lock.ParsePublicKey(req.GetSignerKey())
+		if err != nil {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		}
+		sig, err := lock.ParseSignature(req.GetSignature())
+		if err != nil {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		}
+		signed = &control.SignedRotation{Signer: signer, Signature: sig}
+	}
+	gen, err := s.deps.Peers.RotateKey(ctx, me.ID, req.GetNewPublicKey(), signed)
 	if err != nil {
 		return nil, s.toStatus(err)
 	}

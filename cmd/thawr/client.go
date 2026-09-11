@@ -8,12 +8,14 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/thedatadudech/thawr/internal/client"
 	"github.com/thedatadudech/thawr/internal/config"
+	"github.com/thedatadudech/thawr/internal/lock"
 	"github.com/thedatadudech/thawr/internal/server"
 )
 
@@ -29,8 +31,8 @@ func defaultClientSocket() string {
 
 // clientUpFlags are shared by `client up` and `client install`.
 type clientUpFlags struct {
-	serverURL, token, fingerprint, name, iface, logLevel, dnsMode string
-	acceptFingerprint                                             bool
+	serverURL, token, fingerprint, name, iface, logLevel, dnsMode, lockSigner string
+	acceptFingerprint                                                         bool
 }
 
 func addClientUpFlags(cmd *cobra.Command, f *clientUpFlags) {
@@ -39,6 +41,7 @@ func addClientUpFlags(cmd *cobra.Command, f *clientUpFlags) {
 	cmd.Flags().StringVar(&f.fingerprint, "fingerprint", "", "server TLS fingerprint (sha256:...) from the join command")
 	cmd.Flags().BoolVar(&f.acceptFingerprint, "accept-fingerprint", false, "trust whatever certificate the server presents now (prints it)")
 	cmd.Flags().StringVar(&f.name, "name", "", "peer name to request instead of the hostname")
+	cmd.Flags().StringVar(&f.lockSigner, "lock-signer", "", "full lock public key (from `thawr client lock status` on a signer) that must have signed the first lock record; nothing is applied until it arrives (spec 012)")
 	cmd.Flags().StringVar(&f.iface, "interface", config.DefaultInterface(), "WireGuard interface name")
 	cmd.Flags().StringVar(&f.logLevel, "log-level", "info", "debug, info, warn or error")
 	cmd.Flags().StringVar(&f.dnsMode, "dns", client.DNSOn, "<name>.thawr resolver: on (serve and register with the OS), serve (resolver only) or off")
@@ -55,7 +58,7 @@ func validateDNSMode(mode string) error {
 // enrollIfNeeded enrols the device when stateDir holds no enrollment,
 // using --server and --token; an enrolled device ignores a token.
 func enrollIfNeeded(ctx context.Context, deps cliDeps, logger *slog.Logger, f clientUpFlags, stateDir string) error {
-	_, err := client.LoadState(stateDir)
+	st, err := client.LoadState(stateDir)
 	switch {
 	case errors.Is(err, client.ErrNotEnrolled):
 		if f.serverURL == "" || f.token == "" {
@@ -63,7 +66,7 @@ func enrollIfNeeded(ctx context.Context, deps cliDeps, logger *slog.Logger, f cl
 		}
 		st, err := deps.enroll(ctx, client.Options{
 			Server: f.serverURL, Token: f.token, Fingerprint: f.fingerprint, AcceptFingerprint: f.acceptFingerprint,
-			Name: f.name, StateDir: stateDir, Version: version,
+			Name: f.name, StateDir: stateDir, Version: version, LockSigner: f.lockSigner,
 		})
 		if err != nil {
 			var fpErr *client.FingerprintError
@@ -79,7 +82,36 @@ func enrollIfNeeded(ctx context.Context, deps cliDeps, logger *slog.Logger, f cl
 	case f.token != "":
 		logger.Warn("already enrolled; ignoring --token")
 	}
-	return nil
+	return applyLockSigner(stateDir, st, f.lockSigner)
+}
+
+// applyLockSigner honours --lock-signer on an already enrolled device:
+// the persisted value may be repeated, an empty one may be set while
+// no lock record is pinned yet, anything else is refused rather than
+// silently ignored, so the person never believes a constraint is in
+// force that is not.
+func applyLockSigner(stateDir string, st client.State, want string) error {
+	want = strings.TrimSpace(want)
+	if want != "" {
+		if _, err := lock.ParsePublicKey(want); err != nil {
+			return &exitError{code: exitConfigError, err: fmt.Errorf("--lock-signer must be the full lock public key from `thawr client lock status` on a signer: %w", err)}
+		}
+	}
+	switch {
+	case want == "" || want == st.LockSigner:
+		return nil
+	case st.LockSigner != "":
+		return &exitError{code: exitConfigError, err: fmt.Errorf("--lock-signer %s: this device already expects %s; run `thawr client down --forget` and enrol again to change it", want, st.LockSigner)}
+	}
+	pins, err := client.LoadPins(stateDir)
+	if err != nil {
+		return err
+	}
+	if pins.Lock() != nil {
+		return &exitError{code: exitConfigError, err: errors.New("--lock-signer: this device already pinned a lock record; the flag only applies before the first record")}
+	}
+	st.LockSigner = want
+	return client.SaveState(stateDir, st)
 }
 
 func newClientCmd(deps cliDeps) *cobra.Command {
@@ -192,9 +224,12 @@ server is unreachable, 2 usage error, 3 client not running.`,
 		Use:   "rotate-key",
 		Short: "Generate a new WireGuard key and register it with the server",
 		Long: `Generates a new WireGuard key, registers it with the server and
-reconfigures the interface. Every other device pins this device's key
-and shows it as "key changed" until someone runs "thawr client trust
-<this name>" there.`,
+reconfigures the interface. With the network lock off, every other
+device pins this device's key and shows it as "key changed" until
+someone runs "thawr client trust <this name>" there. With the lock on,
+a signer's new key is signed on the way and applied everywhere at once;
+any other device's new key is held as "unsigned" until a signer runs
+"thawr client lock sign <this name>".`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			lc := client.NewLocalClient(socket)
@@ -202,10 +237,23 @@ and shows it as "key changed" until someone runs "thawr client trust
 				return err
 			}
 			name := "<this peer>"
-			if st, err := lc.Status(cmd.Context()); err == nil && st.Self.Name != "" {
+			st, err := lc.Status(cmd.Context())
+			if err != nil {
+				_, err := fmt.Fprintf(cmd.OutOrStdout(), "key rotated; the lock state could not be read (%v). With the network lock on, a signer must run: thawr client lock sign %s; without it, other devices run: thawr client trust %s\n", err, name, name)
+				return err
+			}
+			if st.Self.Name != "" {
 				name = st.Self.Name
 			}
-			_, err := fmt.Fprintf(cmd.OutOrStdout(), "key rotated; other devices show this peer as \"key changed\" until they run: thawr client trust %s\n", name)
+			if st.Lock.Enabled && st.Lock.Signer {
+				_, err := fmt.Fprintln(cmd.OutOrStdout(), "key rotated and signed; other devices switch to it without a trust step")
+				return err
+			}
+			if st.Lock.Enabled {
+				_, err := fmt.Fprintf(cmd.OutOrStdout(), "key rotated; other devices hold this peer as unsigned until a signer runs: thawr client lock sign %s\n", name)
+				return err
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "key rotated; other devices show this peer as \"key changed\" until they run: thawr client trust %s\n", name)
 			return err
 		},
 	}
@@ -272,7 +320,7 @@ reply, 2 unknown peer, 3 client not running. --count 0 skips the echoes.`,
 	ping.Flags().BoolVar(&pingJSON, "json", false, "print the settled path as JSON")
 	addClientCommonFlags(ping, &stateDir, &socket)
 
-	cmd.AddCommand(up, down, status, rotate, trust, ping, newClientInstallCmd(deps), newClientUninstallCmd(deps))
+	cmd.AddCommand(up, down, status, rotate, trust, newClientLockCmd(&stateDir, &socket), ping, newClientInstallCmd(deps), newClientUninstallCmd(deps))
 	return cmd
 }
 

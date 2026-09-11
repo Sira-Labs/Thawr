@@ -482,9 +482,68 @@ entry.
         lint`, race tests on every package. The netns integration test
         compiles and skips here; it runs on the Linux VM. The UI
         section and the two-device flow are on the manual checklist.
-- [ ] **012 Network lock** — signed peer records with an admin-held
-      offline key (Ed25519), the third T4 phase-2 item; signed rotations
-      pass the 011 hold (spec to be written).
+- [x] **012 Network lock** — `docs/specs/012-network-lock.md`
+      An Ed25519 lock key on a device the owner controls signs each peer
+      record `(id, name, key)`; the server stores and forwards the
+      signatures; a client with the lock on holds unsigned peers and
+      accepts signed rotations without `trust` (threat model T4, third
+      phase-2 item).
+      - Owner decisions: the signing key lives on a client device, never
+        the server; unsigned peers are held like a changed key, not
+        merely flagged; several signers, an existing one adds another
+        (`lock key` on the candidate, `lock add-signer` on a signer).
+      - The peer name is part of the signed record on purpose:
+        `<name>.thawr` is what people type, so a rename must be signed
+        again and a swapped name gains an attacker nothing.
+      - First contact for the lock record is trusted (pinned as
+        offered), the same model as the enrolment and the pins; every
+        later record needs a higher generation and a signature by a key
+        of the pinned set. A `disabled` record keeps the signer set, so
+        only a signer can turn the lock on again; a record without
+        signers ends its lineage and the next one starts over.
+      - `lock init` sends the record and the first signatures (hub,
+        self, every visible peer) in one `SetLock` request, stored in
+        one transaction, so no device ever sees the record without its
+        signatures and enabling never cuts a working network. The
+        server requires the record to exist before it accepts a
+        signature, which is why the plan's "signatures first" became
+        "both at once".
+      - Signatures ride in the netmap per peer, plus the receiver's own
+        (`SelfInfo.signatures`, added so a device can tell it is
+        unsigned and say so in status and logs).
+      - `ListLockPeers` is the one RPC that shows a peer the whole
+        registry, gated on the caller being a signer of the current
+        record; `lock sign` uses it so peers outside the signer's
+        policy view can be signed too.
+      - Reading the lock record inside `RotateKey`'s transaction goes
+        through the transaction store: the pool has one SQLite
+        connection and a read on it deadlocks (found the hard way).
+      - Static (ViaHub) peers stay out of scope as in 011: they have no
+        WireGuard peer on the client and are reached through the hub,
+        whose key is signed.
+      - `lock key` restarts the sync stream so the server learns the
+        new lock public key at once; reported keys are memory only.
+      - Review round (CodeRabbit): the first record, or one restarting
+        a lineage, needs a device an admin owns, so a member's device
+        cannot hijack the lock; `add-signer` takes the candidate's key
+        and refuses when the server reports another, so
+        the server cannot promote its own key; `client up
+        --lock-signer <key>` pins the signer a fresh device must see in
+        its first record, closing the first-contact gap for devices
+        enrolled after the lock; old-key signature rows are pruned on
+        rotation; duplicate signer peer ids are invalid.
+      - Second round: `--lock-signer` requires the first record to be
+        signed by that key (listing it is not enough) and the device
+        applies nothing until such a record arrives; on an enrolled
+        device the flag is persisted while no record is pinned and
+        refused otherwise, never ignored; `LockService.Set` reads,
+        checks and writes the record in one transaction so competing
+        successors cannot both land. Third round: `--lock-signer` and
+        `add-signer` take the full public key only; the 8-hex
+        fingerprint is 32 bits, enough for a person comparing screens
+        and not for authenticating a key.
+      - Out of scope, listed in the spec: removing a signer, a quorum,
+        rotating a lock key, short-lived keys.
 - [ ] **013 Exit nodes and subnet routers** — advertised prefixes gated
       by policy (spec to be written).
 
@@ -496,6 +555,9 @@ entry.
 - ACME TLS mode, Prometheus metrics, `thawr admin backup`.
 - Workload / agent identity: short-lived tokens issued by CI or an
   orchestrator, using the existing `kind: agent`.
+- Short-lived peer keys with automatic rotation and expiry, and binding
+  an agent identity to the process rather than the host (VISION,
+  "identity layer for agents").
 
 ## Decisions reviewed by the owner (2026-09-02: all accepted as written)
 

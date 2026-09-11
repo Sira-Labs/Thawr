@@ -50,6 +50,15 @@ lives in `docs/`; the implementation follows one spec at a time from
   `thawr client trust <name>`, so a compromised server cannot silently
   swap a key. Phones are reached through the hub, whose key is pinned.
   The server keeps an audit log of every change (`thawr admin audit`).
+- The network lock goes further: `thawr client lock init` on a device
+  you control creates a signing key the server never sees, and from
+  then on every device applies only peers a signer vouched for with
+  `thawr client lock sign <name>`. A server that inserts a device or
+  swaps a key can only make it show up as `unsigned`. That holds once
+  a device has pinned the lock record; a device enrolled afterwards
+  pins the first record it sees, so give it the signer's public key
+  at enrolment (`thawr client up --lock-signer <lock public key>`)
+  when the server itself may be hostile.
 - Nothing phones home. It starts and runs with no internet access.
 
 ## Install
@@ -242,7 +251,10 @@ Trust in Thawr is explicit. A device trusts the server it enrolled
 with (TLS fingerprint) and the WireGuard keys it saw first; after
 `thawr client rotate-key` on one device, every other device shows it as
 `key changed` and holds it until someone runs `thawr client trust
-<name>` there. Every control-plane change on the server lands in an
+<name>` there. With the network lock on, the server's word is not
+enough: a peer needs a signature from a signing device, held as
+`unsigned` until it has one, and a signer's own rotation is signed on
+the way. Every control-plane change on the server lands in an
 audit log (`thawr admin audit`, the UI, `GET /api/v1/audit`), kept for
 `audit.retention_days`. `docs/THREAT_MODEL.md` says what this does and
 does not protect against.

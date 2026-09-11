@@ -46,6 +46,7 @@ func statusFixture() client.Status {
 				EndpointCandidates: []client.Candidate{}},
 		},
 		Held:        []client.HeldStatus{},
+		Lock:        client.LockStatus{Signers: []client.LockSignerStatus{}},
 		RetrievedAt: now,
 	}
 }
@@ -101,11 +102,11 @@ func TestStatusDNSLine(t *testing.T) {
 		dns  *client.DNSStatus
 		want string
 	}{
-		{"off", nil, "NAT: cone (reflexive 203.0.113.9:41820)\n"},
-		{"registered", &client.DNSStatus{Listen: "100.64.0.7:53", State: client.DNSServing, Method: "hosts", Names: 3}, "· DNS: .thawr via hosts\n"},
-		{"serve only", &client.DNSStatus{Listen: "100.64.0.7:53", State: client.DNSServing, Method: "none"}, "· DNS: serving, not registered\n"},
-		{"registration failed", &client.DNSStatus{Listen: "100.64.0.7:53", State: client.DNSServing, Method: "none", Error: "resolvectl: exit 1"}, "· DNS: serving, not registered (resolvectl: exit 1)\n"},
-		{"bind failed", &client.DNSStatus{Listen: "100.64.0.7:53", State: client.DNSError, Error: "address in use"}, "· DNS: error (address in use)\n"},
+		{"off", nil, "NAT: cone (reflexive 203.0.113.9:41820) · lock: off\n"},
+		{"registered", &client.DNSStatus{Listen: "100.64.0.7:53", State: client.DNSServing, Method: "hosts", Names: 3}, "· DNS: .thawr via hosts · lock: off\n"},
+		{"serve only", &client.DNSStatus{Listen: "100.64.0.7:53", State: client.DNSServing, Method: "none"}, "· DNS: serving, not registered · lock: off\n"},
+		{"registration failed", &client.DNSStatus{Listen: "100.64.0.7:53", State: client.DNSServing, Method: "none", Error: "resolvectl: exit 1"}, "· DNS: serving, not registered (resolvectl: exit 1) · lock: off\n"},
+		{"bind failed", &client.DNSStatus{Listen: "100.64.0.7:53", State: client.DNSError, Error: "address in use"}, "· DNS: error (address in use) · lock: off\n"},
 	} {
 		st := statusFixture()
 		st.DNS = tc.dns
@@ -226,10 +227,11 @@ func TestStatusJSONSchema(t *testing.T) {
 	}
 	validate("fixture", statusFixture())
 	minimal := client.Status{Server: client.ServerStatus{State: client.ServerReconnecting}, Peers: []client.PeerStatus{}, Held: []client.HeldStatus{},
-		NAT: client.NATStatus{Type: client.NATUnknown, Reflexive: []string{}, Local: []string{}}}
+		Lock: client.LockStatus{Signers: []client.LockSignerStatus{}},
+		NAT:  client.NATStatus{Type: client.NATUnknown, Reflexive: []string{}, Local: []string{}}}
 	validate("minimal", minimal)
 	held := statusFixture()
-	held.Held = []client.HeldStatus{{Name: "homelab-nas", IPv4: "100.64.0.3", Kind: "server", PinnedKey: "NAS=", OfferedKey: "NEW=", Since: held.RetrievedAt}}
+	held.Held = []client.HeldStatus{{Name: "homelab-nas", IPv4: "100.64.0.3", Kind: "server", PinnedKey: "NAS=", OfferedKey: "NEW=", Since: held.RetrievedAt, Reason: client.HeldKeyChanged}}
 	held.Peers[0].Path, held.Peers[0].PublicKey = client.PathKeyChanged, "NEW="
 	validate("held", held)
 	bad := statusFixture()

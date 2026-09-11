@@ -5,7 +5,7 @@
   "description": "Document served on the client's local socket (GET /status) and printed by `thawr client status --json`. Fields are only ever added.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "self", "server", "wireguard", "nat", "relay", "peers", "held", "retrieved_at"],
+  "required": ["version", "self", "server", "wireguard", "nat", "relay", "peers", "held", "lock", "retrieved_at"],
   "properties": {
     "version": { "type": "string", "description": "Client binary version." },
     "self": {
@@ -92,11 +92,11 @@
     "peers": { "type": "array", "items": { "$ref": "#/$defs/peer" } },
     "held": {
       "type": "array",
-      "description": "Netmap entries whose key differs from the pinned one; held out of the tunnel until `thawr client trust <name>`.",
+      "description": "Netmap entries held out of the tunnel: the key differs from the pinned one (until `thawr client trust <name>`) or the network lock has not signed it (until a signer runs `thawr client lock sign <name>`).",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "ipv4", "kind", "owner", "pinned_key", "offered_key", "since"],
+        "required": ["name", "ipv4", "kind", "owner", "pinned_key", "offered_key", "since", "reason"],
         "properties": {
           "name": { "type": "string", "description": "Peer name, or hub." },
           "ipv4": { "type": "string" },
@@ -104,8 +104,37 @@
           "owner": { "type": "string" },
           "pinned_key": { "type": "string", "description": "The accepted WireGuard public key." },
           "offered_key": { "type": "string", "description": "The key the current netmap carries." },
-          "since": { "type": "string", "format": "date-time" }
+          "since": { "type": "string", "format": "date-time" },
+          "reason": { "type": "string", "enum": ["key_changed", "unsigned"] }
         }
+      }
+    },
+    "lock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "signer", "has_key", "generation", "signers", "rejected", "self_signed"],
+      "description": "The network lock (spec 012) as this device sees it: the pinned signer record and whether this device may sign.",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "signer": { "type": "boolean", "description": "This device holds a lock key the record names." },
+        "has_key": { "type": "boolean", "description": "A lock key exists on this device (lock init or lock key)." },
+        "generation": { "type": "integer", "minimum": 0 },
+        "signers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["peer_id", "name", "key", "fingerprint"],
+            "properties": {
+              "peer_id": { "type": "string" },
+              "name": { "type": "string", "description": "Signer's peer name when visible to this device; empty otherwise." },
+              "key": { "type": "string", "description": "Lock public key (base64)." },
+              "fingerprint": { "type": "string" }
+            }
+          }
+        },
+        "rejected": { "type": "string", "description": "Why the record the server offers (or its absence) was not adopted; empty when the pin matches." },
+        "self_signed": { "type": "boolean", "description": "This device's own record is signed while the lock is on; other devices hold it until it is." }
       }
     },
     "retrieved_at": { "type": "string", "format": "date-time" }
@@ -124,7 +153,7 @@
         "owner": { "type": "string", "description": "Owning user's name; empty when unowned." },
         "online": { "type": "boolean", "description": "The server currently has a sync stream from this peer." },
         "public_key": { "type": "string" },
-        "path": { "type": "string", "enum": ["idle", "probing", "direct", "relay", "unreachable", "offline", "hub", "key_changed"] },
+        "path": { "type": "string", "enum": ["idle", "probing", "direct", "relay", "unreachable", "offline", "hub", "key_changed", "unsigned"] },
         "path_endpoint": { "type": "string", "description": "ip:port a direct path uses; empty otherwise." },
         "probes": { "type": "integer", "minimum": 0 },
         "endpoint_candidates": {

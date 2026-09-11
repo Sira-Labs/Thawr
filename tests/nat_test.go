@@ -157,10 +157,19 @@ type clientStatus struct {
 		Name       string `json:"name"`
 		PinnedKey  string `json:"pinned_key"`
 		OfferedKey string `json:"offered_key"`
+		Reason     string `json:"reason"`
 	} `json:"held"`
+	Lock struct {
+		Enabled    bool   `json:"enabled"`
+		Signer     bool   `json:"signer"`
+		Generation uint64 `json:"generation"`
+		SelfSigned bool   `json:"self_signed"`
+		Rejected   string `json:"rejected"`
+	} `json:"lock"`
 	Peers []struct {
 		Name               string `json:"name"`
 		IPv4               string `json:"ipv4"`
+		PublicKey          string `json:"public_key"`
 		Path               string `json:"path"`
 		PathEndpoint       string `json:"path_endpoint"`
 		Probes             int    `json:"probes"`

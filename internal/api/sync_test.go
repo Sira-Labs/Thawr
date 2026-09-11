@@ -24,6 +24,10 @@ import (
 	"github.com/thedatadudech/thawr/internal/wg"
 )
 
+// testHubKey is a fixed, valid hub public key (spec 012 signs it, so
+// a placeholder string no longer does).
+const testHubKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE="
+
 // syncEnv is a full control plane on a temp store behind bufconn.
 type syncEnv struct {
 	t        *testing.T
@@ -33,6 +37,7 @@ type syncEnv struct {
 	tokens   *control.Tokens
 	client   thawrv1.ControlClient
 	admin    control.Principal
+	lock     *control.LockService
 }
 
 func newSyncEnv(t *testing.T) *syncEnv {
@@ -58,19 +63,21 @@ func newSyncEnv(t *testing.T) *syncEnv {
 		t.Fatal(err)
 	}
 	overlay := netip.MustParsePrefix("100.64.0.0/10")
-	registry := control.NewRegistry(st, quiet).WithNotifier(hub)
+	lockSvc := control.NewLockService(st, now, quiet, testHubKey).WithNotifier(hub)
+	registry := control.NewRegistry(st, quiet).WithNotifier(hub).WithLock(lockSvc)
 	enroller := control.NewEnroller(st, now, quiet, overlay, "").WithNotifier(hub)
 	endpoints := control.NewEndpointTable(now)
-	hubInfo := control.HubConfig{PublicKey: "HUB", Endpoint: "vpn:51820", Address: netip.MustParseAddr("100.64.0.1"), Overlay: overlay, STUNAddrs: []string{"vpn:3478", "vpn:3479"}}
+	hubInfo := control.HubConfig{PublicKey: testHubKey, Endpoint: "vpn:51820", Address: netip.MustParseAddr("100.64.0.1"), Overlay: overlay, STUNAddrs: []string{"vpn:3478", "vpn:3479"}}
 	builder := control.NewNetMapBuilder(st, control.OwnerVisibility{}, endpoints, hub, hubInfo, hub.Generation)
 	srv, err := NewGRPC(GRPCDeps{
-		Enroller: enroller, Hub: HubInfo{PublicKey: "HUB", Endpoint: "vpn:51820", Overlay: overlay}, Logger: quiet,
+		Enroller: enroller, Hub: HubInfo{PublicKey: testHubKey, Endpoint: "vpn:51820", Overlay: overlay}, Logger: quiet,
 		NodeAuth: registry, NetMaps: builder, Sync: hub, Peers: registry, Endpoints: endpoints, Paths: control.NewPathTable(now),
+		Lock: lockSvc,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &syncEnv{t: t, st: st, hub: hub, registry: registry, tokens: control.NewTokens(st, now, quiet),
+	return &syncEnv{t: t, st: st, hub: hub, registry: registry, tokens: control.NewTokens(st, now, quiet), lock: lockSvc,
 		client: bufconnClient(t, srv), admin: control.Principal{UserID: admin.ID, Name: admin.Name, Role: admin.Role}}
 }
 
@@ -144,7 +151,7 @@ func TestSyncStreamsOnChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first map: %v", err)
 	}
-	if first.GetSelf().GetId() != aID || first.GetSelf().GetIpv4() != "100.64.0.2" || len(first.GetPeers()) != 0 || first.GetHub().GetPublicKey() != "HUB" || first.GetKeepalive() ||
+	if first.GetSelf().GetId() != aID || first.GetSelf().GetIpv4() != "100.64.0.2" || len(first.GetPeers()) != 0 || first.GetHub().GetPublicKey() != testHubKey || first.GetKeepalive() ||
 		len(first.GetSelf().GetStunAddrs()) != 2 || first.GetSelf().GetStunAddrs()[0] != "vpn:3478" {
 		t.Errorf("first map: %+v", first)
 	}

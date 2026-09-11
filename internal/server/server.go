@@ -73,6 +73,7 @@ type Server struct {
 	tlsFingerprint string
 	device         wg.Device
 	policySvc      *control.PolicyService
+	lockSvc        *control.LockService
 	startedAt      time.Time
 	// staticSeen holds the latest hub handshake per static peer, the
 	// presence signal for phones.
@@ -236,6 +237,7 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 		Peers:     s.registry,
 		Endpoints: s.endpoints,
 		Paths:     s.paths,
+		Lock:      s.lockSvc,
 	})
 	if err != nil {
 		return err
@@ -244,7 +246,7 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 		Status: s, UI: s.deps.UI, Logger: s.log,
 		Users: s.users, Auth: s.users, Tokens: s.tokens, Peers: s.registry, Presence: s, Paths: s.paths, Endpoints: s.endpoints,
 		Join: s.JoinInfo(), Sessions: s.sessions, NodeAuth: s.registry, Relay: s.relay, Policy: s.policySvc, Audit: s.st.Audit(), Now: s.deps.Now,
-		Hub: hubInfo,
+		Lock: s.lockSvc, Hub: hubInfo,
 	}
 	webHandler, err := api.NewREST(restDeps)
 	if err != nil {
@@ -624,8 +626,9 @@ func (s *Server) buildServices(ctx context.Context) error {
 	s.policySvc.WithAuditor(auditor)
 	s.tokens = control.NewTokens(s.st, s.deps.Now, s.log).WithTagAllowed(s.policySvc.TagAllowed).WithAuditor(auditor)
 	s.enroller = control.NewEnroller(s.st, s.deps.Now, s.log, s.cfg.OverlayPrefix(), s.cfg.MinClientVersion).WithNotifier(hub).WithAuditor(auditor)
+	s.lockSvc = control.NewLockService(s.st, s.deps.Now, s.log, s.hubKey.PublicKey().String()).WithNotifier(hub).WithAuditor(auditor)
 	s.registry = control.NewRegistry(s.st, s.log).WithNotifier(hub).WithClock(s.deps.Now).
-		WithOverlay(s.cfg.OverlayPrefix()).WithTagAllowed(s.policySvc.TagAllowed).WithAuditor(auditor)
+		WithOverlay(s.cfg.OverlayPrefix()).WithTagAllowed(s.policySvc.TagAllowed).WithAuditor(auditor).WithLock(s.lockSvc)
 	s.staticSeen = map[string]time.Time{}
 	s.sessions = api.NewSessions(s.deps.Now)
 	s.relay = relay.NewServer(keyVisibility{control.NewKeyVisibility(s.st, visibility, hub.Generation)},

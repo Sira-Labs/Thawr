@@ -43,6 +43,10 @@ type State struct {
 	EnrolledAt   time.Time `json:"enrolled_at"`
 	// ListenPort is chosen once so endpoint candidates stay stable.
 	ListenPort int `json:"listen_port,omitempty"`
+	// LockSigner is the full lock public key given at enrolment that
+	// must have signed the first lock record this device pins; empty
+	// accepts whatever record the server offers first (spec 012).
+	LockSigner string `json:"lock_signer,omitempty"`
 }
 
 // DefaultDir returns the platform's state directory unless THAWR_STATE_DIR
@@ -110,10 +114,11 @@ func SaveKey(dir string, key wg.Key) error {
 	return writeSecret(dir, KeyFile, []byte(key.String()+"\n"))
 }
 
-// Forget removes the state and key so the device can enrol again.
+// Forget removes the state, the node key and the lock key so the device
+// can enrol again; pins.json stays.
 func Forget(dir string) error {
 	var errs []error
-	for _, name := range []string{StateFile, KeyFile} {
+	for _, name := range []string{StateFile, KeyFile, LockKeyFile} {
 		if err := os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			errs = append(errs, fmt.Errorf("client: remove %s: %w", name, err))
 		}

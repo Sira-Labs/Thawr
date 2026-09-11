@@ -20,6 +20,15 @@ service Control {
   rpc RotateKey(RotateKeyRequest) returns (RotateKeyResponse);
   // Leave removes the caller from the network.
   rpc Leave(Empty) returns (Empty);
+  // SetLock installs a lock record (spec 012). The first record is
+  // accepted as is; later ones must carry a higher generation and a
+  // signature by a key of the current record.
+  rpc SetLock(SetLockRequest) returns (Empty);
+  // SignPeer stores a signer's signature over a peer's current record.
+  rpc SignPeer(SignPeerRequest) returns (Empty);
+  // ListLockPeers lists every peer with its signing state. Only a peer
+  // named as signer in the current lock record may call it.
+  rpc ListLockPeers(Empty) returns (LockPeers);
 }
 
 // EnrollRequest carries the token and the client's identity.
@@ -55,6 +64,9 @@ message EnrollResponse {
 message SyncRequest {
   int64 generation = 1;
   string client_version = 2;
+  // lock_key is the caller's lock public key when it has one, so a
+  // signer can add this device with lock add-signer.
+  string lock_key = 3;
 }
 
 // NetMap is one peer's complete view of the network.
@@ -68,6 +80,9 @@ message NetMap {
   bool keepalive = 6;
   // server_version is the version string of the server that built it.
   string server_version = 7;
+  // lock is the current lock record with its signature; absent while
+  // no record was ever set.
+  SignedLockRecord lock = 8;
 }
 
 // SelfInfo describes the receiving peer.
@@ -80,6 +95,9 @@ message SelfInfo {
   repeated string stun_addrs = 5;
   // kind is the receiving peer's kind (human, server, agent).
   string kind = 6;
+  // signatures are the lock signatures over the receiver's own current
+  // record, so it can tell whether it is signed (spec 012).
+  repeated PeerSignature signatures = 7;
 }
 
 // NetPeer is one visible peer.
@@ -101,6 +119,8 @@ message NetPeer {
   // via_hub marks a static (mobile) peer reached through the hub: the
   // receiver adds no WireGuard peer for it, the hub routes its /32.
   bool via_hub = 12;
+  // signatures are lock signatures over this peer's current record.
+  repeated PeerSignature signatures = 13;
 }
 
 // EndpointKind classifies a candidate address.
@@ -122,6 +142,72 @@ message HubPeer {
   string public_key = 1;
   string endpoint = 2;
   repeated string allowed_ips = 3;
+  // signatures are lock signatures over the hub's record.
+  repeated PeerSignature signatures = 4;
+}
+
+// PeerSignature is one lock key's signature over a peer record.
+message PeerSignature {
+  // signer_key is the lock public key, base64.
+  string signer_key = 1;
+  // signature is the Ed25519 signature, base64.
+  string signature = 2;
+}
+
+// LockSigner is one device allowed to sign peer records.
+message LockSigner {
+  string key = 1;
+  string peer_id = 2;
+}
+
+// LockRecord is the trusted signer set (spec 012).
+message LockRecord {
+  uint64 generation = 1;
+  bool disabled = 2;
+  repeated LockSigner signers = 3;
+}
+
+// SignedLockRecord is a record with the signature of a lock key.
+message SignedLockRecord {
+  LockRecord record = 1;
+  string signature = 2;
+}
+
+// SetLockRequest carries the record to install.
+message SetLockRequest {
+  SignedLockRecord lock = 1;
+  // signatures are applied in the same transaction as the record, so
+  // enabling the lock never shows other devices a record without the
+  // signatures that go with it (lock init).
+  repeated SignPeerRequest signatures = 2;
+}
+
+// SignPeerRequest carries a signature over one peer's current record.
+message SignPeerRequest {
+  // peer_id is a peer id or "hub".
+  string peer_id = 1;
+  // public_key is the WireGuard key the signature covers.
+  string public_key = 2;
+  string signer_key = 3;
+  string signature = 4;
+}
+
+// LockPeers answers ListLockPeers.
+message LockPeers {
+  repeated LockPeer peers = 1;
+  LockPeer hub = 2;
+}
+
+// LockPeer is one peer as a signer sees it.
+message LockPeer {
+  string id = 1;
+  string name = 2;
+  string public_key = 3;
+  // signed reports whether the current key carries a valid signature.
+  bool signed = 4;
+  // lock_key is the lock public key the peer reported, if any.
+  string lock_key = 5;
+  string kind = 6;
 }
 
 // FilterRule allows src_ipv4 to reach the receiver on a port range.
@@ -157,6 +243,10 @@ message PathState {
 // until the next netmap is delivered.
 message RotateKeyRequest {
   string new_public_key = 1;
+  // signer_key and signature let a signer vouch for its own new key in
+  // the same call (spec 012); both optional.
+  string signer_key = 2;
+  string signature = 3;
 }
 
 // RotateKeyResponse reports the generation carrying the new key.

@@ -13,19 +13,21 @@ import (
 
 // peerJSON mirrors the admin API's peer view.
 type peerJSON struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Kind        string   `json:"kind"`
-	Mode        string   `json:"mode"`
-	Owner       string   `json:"owner"`
-	Tags        []string `json:"tags"`
-	PublicKey   string   `json:"public_key"`
-	IPv4        string   `json:"ipv4"`
-	Online      bool     `json:"online"`
-	CreatedAt   string   `json:"created_at"`
-	LastSeenAt  string   `json:"last_seen_at,omitempty"`
-	Version     string   `json:"version"`
-	OS          string   `json:"os"`
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`
+	Kind       string   `json:"kind"`
+	Mode       string   `json:"mode"`
+	Owner      string   `json:"owner"`
+	Tags       []string `json:"tags"`
+	PublicKey  string   `json:"public_key"`
+	IPv4       string   `json:"ipv4"`
+	Online     bool     `json:"online"`
+	CreatedAt  string   `json:"created_at"`
+	LastSeenAt string   `json:"last_seen_at,omitempty"`
+	Version    string   `json:"version"`
+	OS         string   `json:"os"`
+	// Signed is the network-lock state; nil while the lock is off.
+	Signed      *bool `json:"signed,omitempty"`
 	PathSummary struct {
 		Direct int `json:"direct"`
 		Relay  int `json:"relay"`
@@ -83,9 +85,9 @@ func newAdminPeerCmd(flags *adminFlags) *cobra.Command {
 			rows := make([][]string, 0, len(peers))
 			for _, p := range peers {
 				rows = append(rows, []string{p.Name, p.IPv4, p.Kind, p.Mode, dash(p.Owner), dash(strings.Join(p.Tags, ",")), onlineWord(p.Online),
-					lastSeen(p.LastSeenAt, now), pathSummaryText(p), dash(p.Version), dash(p.OS)})
+					lastSeen(p.LastSeenAt, now), pathSummaryText(p), dash(p.Version), dash(p.OS), signedWord(p.Signed)})
 			}
-			return table(cmd.OutOrStdout(), []string{"NAME", "IP", "KIND", "MODE", "OWNER", "TAGS", "STATE", "LAST SEEN", "PATHS", "VERSION", "OS"}, rows)
+			return table(cmd.OutOrStdout(), []string{"NAME", "IP", "KIND", "MODE", "OWNER", "TAGS", "STATE", "LAST SEEN", "PATHS", "VERSION", "OS", "SIGNED"}, rows)
 		},
 	}
 	list.Flags().BoolVar(&onlineOnly, "online", false, "only peers with a live sync stream")
@@ -253,7 +255,7 @@ func renderPeerDetail(w io.Writer, d peerDetailJSON, now time.Time) error {
 	lines := [][2]string{
 		{"name", d.Name}, {"ip", d.IPv4}, {"kind", d.Kind}, {"mode", d.Mode}, {"owner", dash(d.Owner)},
 		{"tags", dash(strings.Join(d.Tags, ","))}, {"state", onlineWord(d.Online)}, {"last seen", lastSeen(d.LastSeenAt, now)},
-		{"version", dash(d.Version)}, {"os", dash(d.OS)}, {"key", d.PublicKey}, {"created", d.CreatedAt}, {"nat", nat},
+		{"version", dash(d.Version)}, {"os", dash(d.OS)}, {"key", d.PublicKey}, {"created", d.CreatedAt}, {"nat", nat}, {"signed", signedWord(d.Signed)},
 	}
 	for _, l := range lines {
 		if _, err := fmt.Fprintf(w, "%-10s %s\n", l[0]+":", l[1]); err != nil {
@@ -293,4 +295,17 @@ func renderPeerDetail(w io.Writer, d peerDetailJSON, now time.Time) error {
 		}
 	}
 	return nil
+}
+
+// signedWord renders the SIGNED column: yes, no, or "-" while the lock
+// is off.
+func signedWord(s *bool) string {
+	switch {
+	case s == nil:
+		return "-"
+	case *s:
+		return "yes"
+	default:
+		return "no"
+	}
 }

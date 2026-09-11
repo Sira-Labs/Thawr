@@ -39,6 +39,7 @@ type controlPlane struct {
 	endpoints *control.EndpointTable
 	paths     *control.PathTable
 	relay     *relay.Server
+	lock      *control.LockService
 	admin     control.Principal
 	ts        *httptest.Server
 	fp        string
@@ -77,7 +78,8 @@ func newControlPlane(t *testing.T, mods ...func(*cpOptions)) *controlPlane {
 	}
 	overlay := netip.MustParsePrefix("100.64.0.0/10")
 	hubKey, _ := wg.GenerateKey()
-	registry := control.NewRegistry(st, quiet).WithNotifier(hub)
+	lockSvc := control.NewLockService(st, time.Now, quiet, hubKey.PublicKey().String()).WithNotifier(hub)
+	registry := control.NewRegistry(st, quiet).WithNotifier(hub).WithLock(lockSvc)
 	enroller := control.NewEnroller(st, time.Now, quiet, overlay, "").WithNotifier(hub)
 	endpoints := control.NewEndpointTable(time.Now)
 	paths := control.NewPathTable(time.Now)
@@ -86,7 +88,7 @@ func newControlPlane(t *testing.T, mods ...func(*cpOptions)) *controlPlane {
 	builder := control.NewNetMapBuilder(st, cpo.visibility, endpoints, hub, hubCfg, hub.Generation)
 	grpcSrv, err := api.NewGRPC(api.GRPCDeps{
 		Enroller: enroller, Hub: api.HubInfo{PublicKey: hubCfg.PublicKey, Endpoint: hubCfg.Endpoint, Overlay: overlay}, Logger: quiet,
-		NodeAuth: registry, NetMaps: builder, Sync: hub, Peers: registry, Endpoints: endpoints, Paths: paths, Version: "v0.9.0",
+		NodeAuth: registry, NetMaps: builder, Sync: hub, Peers: registry, Endpoints: endpoints, Paths: paths, Version: "v0.9.0", Lock: lockSvc,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -102,7 +104,7 @@ func newControlPlane(t *testing.T, mods ...func(*cpOptions)) *controlPlane {
 	ts.TLS = &tls.Config{MinVersion: tls.VersionTLS13, NextProtos: []string{"h2", "http/1.1"}}
 	ts.StartTLS()
 	t.Cleanup(ts.Close)
-	return &controlPlane{t: t, st: st, hub: hub, registry: registry, tokens: control.NewTokens(st, time.Now, quiet), endpoints: endpoints, paths: paths, relay: relaySrv,
+	return &controlPlane{t: t, st: st, hub: hub, registry: registry, tokens: control.NewTokens(st, time.Now, quiet), endpoints: endpoints, paths: paths, relay: relaySrv, lock: lockSvc,
 		admin: control.Principal{UserID: admin.ID, Name: admin.Name, Role: admin.Role}, ts: ts, fp: Fingerprint(ts.Certificate().Raw), hubKey: hubKey}
 }
 
@@ -118,11 +120,21 @@ func (v keyVisibility) Visible(ctx context.Context, src, dst relay.Key) (bool, e
 // enrol registers a device into dir and returns its state.
 func (cp *controlPlane) enrol(dir, host string) State {
 	cp.t.Helper()
+	return cp.enrolWith(dir, host, nil)
+}
+
+// enrolWith is enrol with the options adjusted first.
+func (cp *controlPlane) enrolWith(dir, host string, mod func(*Options)) State {
+	cp.t.Helper()
 	tok, err := cp.tokens.Create(context.Background(), cp.admin, control.TokenRequest{OwnerName: "markus", Kind: "human"})
 	if err != nil {
 		cp.t.Fatal(err)
 	}
-	st, err := Enroll(context.Background(), Options{Server: cp.ts.URL, Token: tok.Secret, Fingerprint: cp.fp, StateDir: dir, Hostname: host, Version: "0.1.0"})
+	opts := Options{Server: cp.ts.URL, Token: tok.Secret, Fingerprint: cp.fp, StateDir: dir, Hostname: host, Version: "0.1.0"}
+	if mod != nil {
+		mod(&opts)
+	}
+	st, err := Enroll(context.Background(), opts)
 	if err != nil {
 		cp.t.Fatalf("enrol %s: %v", host, err)
 	}
@@ -199,6 +211,21 @@ func startDaemon(t *testing.T, dir string, mods ...func(*DaemonOptions)) (*Daemo
 		case <-time.After(5 * time.Second):
 			t.Error("daemon did not stop")
 		}
+	}
+}
+
+// loadNetMapSettled reads the netmap cache, retrying briefly: the daemon
+// rewrites it through a temporary file and a rename on every netmap,
+// and Windows reports a read that overlaps the rename as a sharing
+// violation.
+func loadNetMapSettled(dir string) (NetMap, bool, error) {
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		nm, ok, err := LoadNetMap(dir)
+		if err == nil || time.Now().After(deadline) {
+			return nm, ok, err
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
@@ -282,7 +309,7 @@ func TestDaemonSyncAppliesAndCaches(t *testing.T) {
 	if len(last.Peers) != 2 {
 		t.Errorf("device peers after b: %d", len(last.Peers))
 	}
-	cached, ok, err := LoadNetMap(dirA)
+	cached, ok, err := loadNetMapSettled(dirA)
 	if err != nil || !ok || cached.Generation != withB.Generation {
 		t.Errorf("cache: ok=%v gen=%d err=%v", ok, cached.Generation, err)
 	}
@@ -456,7 +483,7 @@ func TestDaemonHoldsChangedKey(t *testing.T) {
 	}
 
 	rotated, _ := wg.GenerateKey()
-	if _, err := cp.registry.RotateKey(context.Background(), stB.PeerID, rotated.PublicKey().String()); err != nil {
+	if _, err := cp.registry.RotateKey(context.Background(), stB.PeerID, rotated.PublicKey().String(), nil); err != nil {
 		t.Fatal(err)
 	}
 	waitApplied(t, d, func(nm NetMap) bool { return len(nm.Peers) == 0 })

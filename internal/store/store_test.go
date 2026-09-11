@@ -25,10 +25,10 @@ func TestMigrateFresh(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SchemaVersion: %v", err)
 	}
-	if v != 3 {
-		t.Errorf("schema version: got %d, want 3", v)
+	if v != 4 {
+		t.Errorf("schema version: got %d, want 4", v)
 	}
-	for _, table := range []string{"meta", "users", "peers", "enrollment_tokens", "audit_log"} {
+	for _, table := range []string{"meta", "users", "peers", "enrollment_tokens", "audit_log", "peer_signatures"} {
 		var n int
 		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&n); err != nil || n != 1 {
 			t.Errorf("table %s missing (n=%d, err=%v)", table, n, err)
@@ -55,7 +55,7 @@ func TestMigrateIdempotent(t *testing.T) {
 	}
 	defer func() { _ = s2.Close() }()
 	v, err := s2.SchemaVersion(ctx)
-	if err != nil || v != 3 {
+	if err != nil || v != 4 {
 		t.Errorf("schema version after reopen: %d, %v", v, err)
 	}
 	if got, err := s2.Meta().Get(ctx, "marker"); err != nil || got != "kept" {

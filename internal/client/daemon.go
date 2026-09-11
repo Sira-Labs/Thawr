@@ -13,6 +13,7 @@ import (
 	"net/netip"
 	"os"
 	"slices"
+	"sort"
 	"sync"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 	"github.com/thedatadudech/thawr/internal/control"
 	"github.com/thedatadudech/thawr/internal/control/path"
 	"github.com/thedatadudech/thawr/internal/dns"
+	"github.com/thedatadudech/thawr/internal/lock"
 	"github.com/thedatadudech/thawr/internal/relay"
 	"github.com/thedatadudech/thawr/internal/wg"
 )
@@ -144,6 +146,10 @@ type Daemon struct {
 	// lock and can never overwrite a newer one with a stale snapshot.
 	applyMu    sync.Mutex
 	filterWarn sync.Once
+	// lockWarn reports a refused lock record once until it is adopted;
+	// selfUnsignedWarn likewise while this device's record is unsigned.
+	lockWarn         sync.Once
+	selfUnsignedWarn sync.Once
 
 	// pmu guards the path prober's state.
 	pmu           sync.Mutex
@@ -168,11 +174,21 @@ type Daemon struct {
 	// offered is the last netmap as received, before held entries were
 	// removed; Trust re-applies it. pins and held are what the client
 	// accepted and what it currently refuses (spec 011).
-	offered   *NetMap
-	pins      *Pins
-	held      []HeldStatus
-	connected bool
-	lastError string
+	offered *NetMap
+	pins    *Pins
+	held    []HeldStatus
+	// lockKey is this device's lock key (zero without one) and
+	// lockRejected why the server's offered lock record was not
+	// adopted (spec 012).
+	lockKey      lock.PrivateKey
+	lockRejected string
+	// resyncNow ends the current sync stream so the next one carries
+	// fresh SyncRequest fields (a new lock key); resyncWanted tells the
+	// loop to reconnect at once instead of backing off.
+	resyncNow    context.CancelFunc
+	resyncWanted bool
+	connected    bool
+	lastError    string
 	// attempt counts failed connects since the last good one,
 	// nextRetryAt is when the next try is due, unreachableSince is when
 	// the server was last heard from (zero while connected), and
@@ -226,6 +242,10 @@ func NewDaemon(opts DaemonOptions) (*Daemon, error) {
 	if err != nil {
 		return nil, err
 	}
+	lockKey, err := LoadLockKey(opts.StateDir)
+	if err != nil {
+		return nil, err
+	}
 	tlsCfg, err := PinnedTLSConfig(st.Fingerprint)
 	if err != nil {
 		return nil, err
@@ -236,7 +256,7 @@ func NewDaemon(opts DaemonOptions) (*Daemon, error) {
 	if ro.Now == nil {
 		ro.Now = opts.Now
 	}
-	return &Daemon{opts: opts, log: log, state: st, overlay: overlay.Masked(), selfIP: selfIP, key: key, pins: pins,
+	return &Daemon{opts: opts, log: log, state: st, overlay: overlay.Masked(), selfIP: selfIP, key: key, pins: pins, lockKey: lockKey,
 		mapCh: make(chan NetMap, 16), paths: map[string]*peerPath{}, pathWake: make(chan struct{}, 1), relay: relay.NewClient(ro),
 		drops: newDropWindow(5 * time.Minute)}, nil
 }
@@ -341,6 +361,14 @@ func (d *Daemon) syncLoop(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		d.mu.Lock()
+		wanted := d.resyncWanted
+		d.resyncWanted = false
+		d.mu.Unlock()
+		if wanted {
+			d.log.Info("sync restarted", "reason", "lock key changed")
+			continue
+		}
 		attempt++
 		delay := backoffDelay(attempt, d.opts.MinBackoff, d.opts.MaxBackoff)
 		msg := err.Error()
@@ -381,7 +409,14 @@ func (d *Daemon) syncOnce(ctx context.Context) error {
 
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	stream, err := client.Sync(streamCtx, &thawrv1.SyncRequest{Generation: d.generation(), ClientVersion: d.opts.Version})
+	d.mu.Lock()
+	d.resyncNow = cancel
+	var lockKey string
+	if !d.lockKey.IsZero() {
+		lockKey = d.lockKey.Public().String()
+	}
+	d.mu.Unlock()
+	stream, err := client.Sync(streamCtx, &thawrv1.SyncRequest{Generation: d.generation(), ClientVersion: d.opts.Version, LockKey: lockKey})
 	if err != nil {
 		return fmt.Errorf("sync: %w", err)
 	}
@@ -458,15 +493,40 @@ func (d *Daemon) applyLocked(ctx context.Context, nm NetMap, cache bool) error {
 	d.mu.Lock()
 	key, dev, prev := d.key, d.dev, d.held
 	offered := nm
-	applied, held, err := d.pins.Apply(nm, now, prev)
+	// The lock runs first: with it on, unsigned entries are held and
+	// signed ones are accepted into the pins, so the pin check after
+	// it only ever holds a key change the lock did not vouch for.
+	rejected := d.pins.UpdateLock(nm.Lock, d.state.LockSigner)
+	var held []HeldStatus
+	if d.state.LockSigner != "" && d.pins.Lock() == nil {
+		// Enrolled with --lock-signer and no record pinned yet: the
+		// device fails closed. Trusting first-contact keys now would
+		// let a hostile server hand it peers before the lock arrives.
+		if rejected == "" {
+			rejected = fmt.Sprintf("waiting for a lock record signed by %s; nothing is applied until it arrives", d.state.LockSigner)
+		}
+		nm.Peers, nm.Hub = nil, HubPeer{}
+	}
+	if d.pins.Enabled() {
+		nm, held = d.pins.HoldUnsigned(nm, d.pins.Lock().Record, now, prev)
+	}
+	applied, heldKeys, err := d.pins.Apply(nm, now, prev)
 	if err == nil {
-		d.offered, d.held = &offered, held
+		held = append(held, heldKeys...)
+		sort.Slice(held, func(i, j int) bool { return held[i].Name < held[j].Name })
+		d.offered, d.held, d.lockRejected = &offered, held, rejected
 	}
 	d.mu.Unlock()
 	if err != nil {
 		return err
 	}
 	d.logHeld(prev, held)
+	if rejected != "" {
+		d.lockWarn.Do(func() { d.log.Warn("lock record from server not adopted", "reason", rejected) })
+	} else {
+		d.lockWarn = sync.Once{}
+	}
+	d.warnSelfUnsigned()
 	nm = applied
 	cfg, err := BuildConfig(nm, key, d.state.ListenPort, d.overlay)
 	if err != nil {
@@ -508,7 +568,11 @@ func (d *Daemon) logHeld(prev, now []HeldStatus) {
 	}
 	for _, h := range now {
 		if before[h.Name] != h.OfferedKey {
-			d.log.Warn("peer key changed; held until trusted", "peer", h.Name, "pinned", fingerprintOf(h.PinnedKey), "offered", fingerprintOf(h.OfferedKey), "hint", "thawr client trust "+h.Name)
+			if h.Reason == HeldUnsigned {
+				d.log.Warn("peer not signed by the network lock; held until a signer signs it", "peer", h.Name, "offered", fingerprintOf(h.OfferedKey), "hint", "thawr client lock sign "+h.Name)
+			} else {
+				d.log.Warn("peer key changed; held until trusted", "peer", h.Name, "pinned", fingerprintOf(h.PinnedKey), "offered", fingerprintOf(h.OfferedKey), "hint", "thawr client trust "+h.Name)
+			}
 		}
 		delete(before, h.Name)
 	}
@@ -554,17 +618,24 @@ func selectHeld(held []HeldStatus, names []string) ([]HeldStatus, error) {
 	for _, name := range names {
 		name = stripZone(name)
 		if name == "all" {
-			accept = append(accept, held...)
+			for _, h := range held {
+				if h.Reason != HeldUnsigned {
+					accept = append(accept, h)
+				}
+			}
 			continue
 		}
 		i := slices.IndexFunc(held, func(h HeldStatus) bool { return h.Name == name })
 		if i < 0 {
 			return nil, fmt.Errorf("%w: %s is not held", ErrNotHeld, name)
 		}
+		if held[i].Reason == HeldUnsigned {
+			return nil, fmt.Errorf("%w: %s is unsigned, not merely changed; a signer must run: thawr client lock sign %s", ErrNotHeld, name, name)
+		}
 		accept = append(accept, held[i])
 	}
 	if len(accept) == 0 {
-		return nil, fmt.Errorf("%w: no key is held", ErrNotHeld)
+		return nil, fmt.Errorf("%w: no key is held for a changed key", ErrNotHeld)
 	}
 	return accept, nil
 }
@@ -623,7 +694,11 @@ func (d *Daemon) RotateKey(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if _, err := client.RotateKey(ctx, &thawrv1.RotateKeyRequest{NewPublicKey: newKey.PublicKey().String()}); err != nil {
+	signer, signature, err := d.selfRotation(newKey)
+	if err != nil {
+		return err
+	}
+	if _, err := client.RotateKey(ctx, &thawrv1.RotateKeyRequest{NewPublicKey: newKey.PublicKey().String(), SignerKey: signer, Signature: signature}); err != nil {
 		return fmt.Errorf("client: rotate key: %w", err)
 	}
 	if err := SaveKey(d.opts.StateDir, newKey); err != nil {
@@ -635,8 +710,41 @@ func (d *Daemon) RotateKey(ctx context.Context) error {
 	if err := d.reapply(ctx); err != nil {
 		return err
 	}
-	d.log.Info("key rotated; other devices hold this peer until they trust the new key", "key", wg.Fingerprint(newKey.PublicKey()), "hint", "thawr client trust "+d.state.Name)
+	if signer != "" {
+		d.log.Info("key rotated and signed; other devices switch without a trust step", "key", wg.Fingerprint(newKey.PublicKey()))
+	} else {
+		d.log.Info("key rotated; other devices hold this peer until they trust the new key", "key", wg.Fingerprint(newKey.PublicKey()), "hint", "thawr client trust "+d.state.Name)
+	}
 	return nil
+}
+
+// warnSelfUnsigned logs once, while it holds, that other devices hold
+// this one because no signer signed its record yet.
+func (d *Daemon) warnSelfUnsigned() {
+	d.mu.Lock()
+	st := d.lockStatusLocked()
+	d.mu.Unlock()
+	if st.Enabled && !st.SelfSigned {
+		d.selfUnsignedWarn.Do(func() {
+			d.log.Warn("this device is not signed by the network lock; other devices hold it until a signer signs it", "hint", "thawr client lock sign "+d.state.Name)
+		})
+		return
+	}
+	d.selfUnsignedWarn = sync.Once{}
+}
+
+// resync ends the current sync stream so the next one reports the
+// current lock key; the loop reconnects at once.
+func (d *Daemon) resync() {
+	d.mu.Lock()
+	cancel := d.resyncNow
+	if cancel != nil {
+		d.resyncWanted = true
+	}
+	d.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 // backoffDelay is exponential from min with ±20 % jitter, capped at max.

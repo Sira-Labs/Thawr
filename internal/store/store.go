@@ -64,3 +64,6 @@ func (s *Store) Tokens() *Tokens { return &Tokens{q: s.q()} }
 
 // Audit accesses the audit_log table.
 func (s *Store) Audit() *Audit { return &Audit{q: s.q()} }
+
+// Signatures accesses the peer_signatures table.
+func (s *Store) Signatures() *Signatures { return &Signatures{q: s.q()} }

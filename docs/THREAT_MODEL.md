@@ -100,7 +100,7 @@ Attacker has root on the server host or a copy of `data_dir`.
 |---|---|
 | Decrypt peer-to-peer traffic | Not possible: the server never holds peer private keys or session keys for agent peers. Relay carries ciphertext. This is the main reason for the DERP-style relay over a hub-and-spoke design |
 | Decrypt static-peer traffic | Possible: the hub terminates WireGuard for phones. Residual risk, documented in the QR export UI. Users needing end-to-end for phones must wait for a native client (non-goal v1) |
-| Distribute malicious keys (insert an attacker peer as a "visible" peer, or swap a key) | Reduced (spec 011): every client pins the hub key and each peer's `(id, key)` under its name on first sight and holds a changed key out of the tunnel, DNS and the filter until the user runs `thawr client trust <name>`; the peer shows as `key changed` in status. A swap therefore stops traffic instead of redirecting it, and a rotation is a visible, deliberate act on every other device. Residual: first contact is trusted (the enrolment already trusts the server it talks to), a new peer under a new name is accepted, and an admin who runs `trust` without asking why the key changed accepts the swap. Signed peer records with an offline admin key remove the first-contact and new-name gaps (spec 012) |
+| Distribute malicious keys (insert an attacker peer as a "visible" peer, or swap a key) | Reduced (spec 011): every client pins the hub key and each peer's `(id, key)` under its name on first sight and holds a changed key out of the tunnel, DNS and the filter until the user runs `thawr client trust <name>`; the peer shows as `key changed` in status. Closed further by the network lock (spec 012): with it on, a client applies only peers whose record `(id, name, key)` carries an Ed25519 signature by a signer named in a lock record that the signers themselves signed; the lock key lives on a client device, never on the server. An inserted peer, a renamed one or a swapped key is held as `unsigned` until a person runs `thawr client lock sign <name>` on a signer, and the server cannot turn the lock off (a disabled record must be signed too) or roll it back (records carry a generation). A signer's own rotation is signed on the way, so it needs no `trust`. Only a device an admin owns may create the first record, so a member's device cannot make itself the sole signer. Residual: the first lock record a device sees is pinned on first contact (like the enrolment), so a device enrolled while the server is already hostile can be handed the attacker's record unless it was enrolled with `--lock-signer <lock public key>`, which makes it apply nothing until a record signed by that key arrives (the full key, never the 32-bit fingerprint); a signer who signs, or adds a signer, without comparing the fingerprint with the other device's own output vouches blindly; devices enrolled before the lock stay pinned-only until signed; the admin's own signing device is the new single point (add a second signer with `lock add-signer <name> <key>`) |
 | Steal node secrets | Only SHA-256 hashes are stored; the attacker cannot impersonate existing clients from the DB alone, but as the server they can serve them anything |
 | Steal password hashes | argon2id (64 MiB, 3 iterations, 4 lanes) slows offline cracking; admins are told to use a password manager |
 | Steal enrollment tokens | Hashed; unused tokens can be revoked by deleting `data_dir` and re-issuing |
@@ -112,7 +112,8 @@ Out of scope for enforcement; the design limits blast radius: admins see
 public keys, not private keys; token secrets are shown once; every admin
 action is logged at `info` and recorded in the `audit_log` table (spec
 011: tokens, enrolments, static peers, renames, deletions, key
-rotations, user creation, logins, policy reloads), each row naming the
+rotations, user creation, logins, policy reloads; spec 012: `lock.set`
+and `peer.sign`, naming the signing peer and the fingerprints), each row naming the
 actor (a user, the admin socket, or the peer acting for itself) and the
 target (a peer, token or user id, or the policy file) with key
 fingerprints instead of keys, kept for `audit.retention_days` and listed with `thawr admin audit`,
@@ -160,13 +161,24 @@ These are checked by tests where possible.
     own transaction, without secrets or full keys, and a mutation whose
     row cannot be written does not happen (`TestAuditEveryMutation`,
     `TestAuditFailureRollsBack`).
+12. With the network lock on, a peer without a valid signature by a
+    current signer is held as `unsigned` and `trust` cannot release it;
+    a lock record not signed by a key of the pinned set, or one whose
+    generation does not increase, is refused and the pin kept; a server
+    offering no record does not turn the lock off; the server accepts
+    a record or a signature only from a signer the current record names
+    (`TestPinsHoldUnsigned`, `TestPinsUpdateLock`,
+    `TestDaemonNetworkLock`, `TestLockSetAcceptsOnlySignedSuccessors`,
+    `TestSignPeerRequiresSigner`, `TestLockRPCs`).
 
 ## Explicitly out of scope for v1
 
 - Traffic analysis resistance, metadata hiding, cover traffic.
 - Full protection against a compromised server distributing malicious
-  keys: pinning (spec 011) holds swapped keys but trusts first contact;
-  signed peer records are spec 012.
+  keys before the network lock is enabled: pinning (spec 011) holds
+  swapped keys but trusts first contact; the lock (spec 012) closes
+  that once a signer signs each device, and still trusts the first
+  lock record a device sees.
 - Hardware-backed keys, TPM attestation, device posture.
 - End-to-end encryption for static (mobile) peers.
 - Multi-tenant isolation on one server.

@@ -47,7 +47,7 @@ func TestDaemonInstallsFilter(t *testing.T) {
 		t.Fatalf("status filter: %+v err=%v", st.Filter, err)
 	}
 	// The cached netmap carries the filter too.
-	nm, ok, err := LoadNetMap(dirA)
+	nm, ok, err := loadNetMapSettled(dirA)
 	if err != nil || !ok || len(nm.Filter) != 1 || nm.Filter[0].Src != "100.64.0.99" {
 		t.Errorf("cached filter: %+v ok=%v err=%v", nm.Filter, ok, err)
 	}

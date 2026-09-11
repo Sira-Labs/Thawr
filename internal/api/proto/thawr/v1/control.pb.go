@@ -286,6 +286,9 @@ type SyncRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Generation    int64                  `protobuf:"varint,1,opt,name=generation,proto3" json:"generation,omitempty"`
 	ClientVersion string                 `protobuf:"bytes,2,opt,name=client_version,json=clientVersion,proto3" json:"client_version,omitempty"`
+	// lock_key is the caller's lock public key when it has one, so a
+	// signer can add this device with lock add-signer.
+	LockKey       string `protobuf:"bytes,3,opt,name=lock_key,json=lockKey,proto3" json:"lock_key,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -334,6 +337,13 @@ func (x *SyncRequest) GetClientVersion() string {
 	return ""
 }
 
+func (x *SyncRequest) GetLockKey() string {
+	if x != nil {
+		return x.LockKey
+	}
+	return ""
+}
+
 // NetMap is one peer's complete view of the network.
 type NetMap struct {
 	state      protoimpl.MessageState `protogen:"open.v1"`
@@ -346,6 +356,9 @@ type NetMap struct {
 	Keepalive bool `protobuf:"varint,6,opt,name=keepalive,proto3" json:"keepalive,omitempty"`
 	// server_version is the version string of the server that built it.
 	ServerVersion string `protobuf:"bytes,7,opt,name=server_version,json=serverVersion,proto3" json:"server_version,omitempty"`
+	// lock is the current lock record with its signature; absent while
+	// no record was ever set.
+	Lock          *SignedLockRecord `protobuf:"bytes,8,opt,name=lock,proto3" json:"lock,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -429,6 +442,13 @@ func (x *NetMap) GetServerVersion() string {
 	return ""
 }
 
+func (x *NetMap) GetLock() *SignedLockRecord {
+	if x != nil {
+		return x.Lock
+	}
+	return nil
+}
+
 // SelfInfo describes the receiving peer.
 type SelfInfo struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
@@ -439,7 +459,10 @@ type SelfInfo struct {
 	// stun_addrs are the server's STUN listeners as host:port (one or two).
 	StunAddrs []string `protobuf:"bytes,5,rep,name=stun_addrs,json=stunAddrs,proto3" json:"stun_addrs,omitempty"`
 	// kind is the receiving peer's kind (human, server, agent).
-	Kind          string `protobuf:"bytes,6,opt,name=kind,proto3" json:"kind,omitempty"`
+	Kind string `protobuf:"bytes,6,opt,name=kind,proto3" json:"kind,omitempty"`
+	// signatures are the lock signatures over the receiver's own current
+	// record, so it can tell whether it is signed (spec 012).
+	Signatures    []*PeerSignature `protobuf:"bytes,7,rep,name=signatures,proto3" json:"signatures,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -516,6 +539,13 @@ func (x *SelfInfo) GetKind() string {
 	return ""
 }
 
+func (x *SelfInfo) GetSignatures() []*PeerSignature {
+	if x != nil {
+		return x.Signatures
+	}
+	return nil
+}
+
 // NetPeer is one visible peer.
 type NetPeer struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
@@ -535,7 +565,9 @@ type NetPeer struct {
 	Owner string `protobuf:"bytes,11,opt,name=owner,proto3" json:"owner,omitempty"`
 	// via_hub marks a static (mobile) peer reached through the hub: the
 	// receiver adds no WireGuard peer for it, the hub routes its /32.
-	ViaHub        bool `protobuf:"varint,12,opt,name=via_hub,json=viaHub,proto3" json:"via_hub,omitempty"`
+	ViaHub bool `protobuf:"varint,12,opt,name=via_hub,json=viaHub,proto3" json:"via_hub,omitempty"`
+	// signatures are lock signatures over this peer's current record.
+	Signatures    []*PeerSignature `protobuf:"bytes,13,rep,name=signatures,proto3" json:"signatures,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -654,6 +686,13 @@ func (x *NetPeer) GetViaHub() bool {
 	return false
 }
 
+func (x *NetPeer) GetSignatures() []*PeerSignature {
+	if x != nil {
+		return x.Signatures
+	}
+	return nil
+}
+
 // Endpoint is one ip:port candidate.
 type Endpoint struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -709,10 +748,12 @@ func (x *Endpoint) GetKind() EndpointKind {
 
 // HubPeer is the server's own WireGuard interface as seen by a peer.
 type HubPeer struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	PublicKey     string                 `protobuf:"bytes,1,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
-	Endpoint      string                 `protobuf:"bytes,2,opt,name=endpoint,proto3" json:"endpoint,omitempty"`
-	AllowedIps    []string               `protobuf:"bytes,3,rep,name=allowed_ips,json=allowedIps,proto3" json:"allowed_ips,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	PublicKey  string                 `protobuf:"bytes,1,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
+	Endpoint   string                 `protobuf:"bytes,2,opt,name=endpoint,proto3" json:"endpoint,omitempty"`
+	AllowedIps []string               `protobuf:"bytes,3,rep,name=allowed_ips,json=allowedIps,proto3" json:"allowed_ips,omitempty"`
+	// signatures are lock signatures over the hub's record.
+	Signatures    []*PeerSignature `protobuf:"bytes,4,rep,name=signatures,proto3" json:"signatures,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -768,6 +809,502 @@ func (x *HubPeer) GetAllowedIps() []string {
 	return nil
 }
 
+func (x *HubPeer) GetSignatures() []*PeerSignature {
+	if x != nil {
+		return x.Signatures
+	}
+	return nil
+}
+
+// PeerSignature is one lock key's signature over a peer record.
+type PeerSignature struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// signer_key is the lock public key, base64.
+	SignerKey string `protobuf:"bytes,1,opt,name=signer_key,json=signerKey,proto3" json:"signer_key,omitempty"`
+	// signature is the Ed25519 signature, base64.
+	Signature     string `protobuf:"bytes,2,opt,name=signature,proto3" json:"signature,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PeerSignature) Reset() {
+	*x = PeerSignature{}
+	mi := &file_thawr_v1_control_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PeerSignature) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PeerSignature) ProtoMessage() {}
+
+func (x *PeerSignature) ProtoReflect() protoreflect.Message {
+	mi := &file_thawr_v1_control_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PeerSignature.ProtoReflect.Descriptor instead.
+func (*PeerSignature) Descriptor() ([]byte, []int) {
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *PeerSignature) GetSignerKey() string {
+	if x != nil {
+		return x.SignerKey
+	}
+	return ""
+}
+
+func (x *PeerSignature) GetSignature() string {
+	if x != nil {
+		return x.Signature
+	}
+	return ""
+}
+
+// LockSigner is one device allowed to sign peer records.
+type LockSigner struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	PeerId        string                 `protobuf:"bytes,2,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LockSigner) Reset() {
+	*x = LockSigner{}
+	mi := &file_thawr_v1_control_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LockSigner) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LockSigner) ProtoMessage() {}
+
+func (x *LockSigner) ProtoReflect() protoreflect.Message {
+	mi := &file_thawr_v1_control_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LockSigner.ProtoReflect.Descriptor instead.
+func (*LockSigner) Descriptor() ([]byte, []int) {
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *LockSigner) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *LockSigner) GetPeerId() string {
+	if x != nil {
+		return x.PeerId
+	}
+	return ""
+}
+
+// LockRecord is the trusted signer set (spec 012).
+type LockRecord struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Generation    uint64                 `protobuf:"varint,1,opt,name=generation,proto3" json:"generation,omitempty"`
+	Disabled      bool                   `protobuf:"varint,2,opt,name=disabled,proto3" json:"disabled,omitempty"`
+	Signers       []*LockSigner          `protobuf:"bytes,3,rep,name=signers,proto3" json:"signers,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LockRecord) Reset() {
+	*x = LockRecord{}
+	mi := &file_thawr_v1_control_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LockRecord) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LockRecord) ProtoMessage() {}
+
+func (x *LockRecord) ProtoReflect() protoreflect.Message {
+	mi := &file_thawr_v1_control_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LockRecord.ProtoReflect.Descriptor instead.
+func (*LockRecord) Descriptor() ([]byte, []int) {
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *LockRecord) GetGeneration() uint64 {
+	if x != nil {
+		return x.Generation
+	}
+	return 0
+}
+
+func (x *LockRecord) GetDisabled() bool {
+	if x != nil {
+		return x.Disabled
+	}
+	return false
+}
+
+func (x *LockRecord) GetSigners() []*LockSigner {
+	if x != nil {
+		return x.Signers
+	}
+	return nil
+}
+
+// SignedLockRecord is a record with the signature of a lock key.
+type SignedLockRecord struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Record        *LockRecord            `protobuf:"bytes,1,opt,name=record,proto3" json:"record,omitempty"`
+	Signature     string                 `protobuf:"bytes,2,opt,name=signature,proto3" json:"signature,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SignedLockRecord) Reset() {
+	*x = SignedLockRecord{}
+	mi := &file_thawr_v1_control_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SignedLockRecord) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SignedLockRecord) ProtoMessage() {}
+
+func (x *SignedLockRecord) ProtoReflect() protoreflect.Message {
+	mi := &file_thawr_v1_control_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SignedLockRecord.ProtoReflect.Descriptor instead.
+func (*SignedLockRecord) Descriptor() ([]byte, []int) {
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *SignedLockRecord) GetRecord() *LockRecord {
+	if x != nil {
+		return x.Record
+	}
+	return nil
+}
+
+func (x *SignedLockRecord) GetSignature() string {
+	if x != nil {
+		return x.Signature
+	}
+	return ""
+}
+
+// SetLockRequest carries the record to install.
+type SetLockRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Lock  *SignedLockRecord      `protobuf:"bytes,1,opt,name=lock,proto3" json:"lock,omitempty"`
+	// signatures are applied in the same transaction as the record, so
+	// enabling the lock never shows other devices a record without the
+	// signatures that go with it (lock init).
+	Signatures    []*SignPeerRequest `protobuf:"bytes,2,rep,name=signatures,proto3" json:"signatures,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetLockRequest) Reset() {
+	*x = SetLockRequest{}
+	mi := &file_thawr_v1_control_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetLockRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetLockRequest) ProtoMessage() {}
+
+func (x *SetLockRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_thawr_v1_control_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetLockRequest.ProtoReflect.Descriptor instead.
+func (*SetLockRequest) Descriptor() ([]byte, []int) {
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *SetLockRequest) GetLock() *SignedLockRecord {
+	if x != nil {
+		return x.Lock
+	}
+	return nil
+}
+
+func (x *SetLockRequest) GetSignatures() []*SignPeerRequest {
+	if x != nil {
+		return x.Signatures
+	}
+	return nil
+}
+
+// SignPeerRequest carries a signature over one peer's current record.
+type SignPeerRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// peer_id is a peer id or "hub".
+	PeerId string `protobuf:"bytes,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
+	// public_key is the WireGuard key the signature covers.
+	PublicKey     string `protobuf:"bytes,2,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
+	SignerKey     string `protobuf:"bytes,3,opt,name=signer_key,json=signerKey,proto3" json:"signer_key,omitempty"`
+	Signature     string `protobuf:"bytes,4,opt,name=signature,proto3" json:"signature,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SignPeerRequest) Reset() {
+	*x = SignPeerRequest{}
+	mi := &file_thawr_v1_control_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SignPeerRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SignPeerRequest) ProtoMessage() {}
+
+func (x *SignPeerRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_thawr_v1_control_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SignPeerRequest.ProtoReflect.Descriptor instead.
+func (*SignPeerRequest) Descriptor() ([]byte, []int) {
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *SignPeerRequest) GetPeerId() string {
+	if x != nil {
+		return x.PeerId
+	}
+	return ""
+}
+
+func (x *SignPeerRequest) GetPublicKey() string {
+	if x != nil {
+		return x.PublicKey
+	}
+	return ""
+}
+
+func (x *SignPeerRequest) GetSignerKey() string {
+	if x != nil {
+		return x.SignerKey
+	}
+	return ""
+}
+
+func (x *SignPeerRequest) GetSignature() string {
+	if x != nil {
+		return x.Signature
+	}
+	return ""
+}
+
+// LockPeers answers ListLockPeers.
+type LockPeers struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Peers         []*LockPeer            `protobuf:"bytes,1,rep,name=peers,proto3" json:"peers,omitempty"`
+	Hub           *LockPeer              `protobuf:"bytes,2,opt,name=hub,proto3" json:"hub,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LockPeers) Reset() {
+	*x = LockPeers{}
+	mi := &file_thawr_v1_control_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LockPeers) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LockPeers) ProtoMessage() {}
+
+func (x *LockPeers) ProtoReflect() protoreflect.Message {
+	mi := &file_thawr_v1_control_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LockPeers.ProtoReflect.Descriptor instead.
+func (*LockPeers) Descriptor() ([]byte, []int) {
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *LockPeers) GetPeers() []*LockPeer {
+	if x != nil {
+		return x.Peers
+	}
+	return nil
+}
+
+func (x *LockPeers) GetHub() *LockPeer {
+	if x != nil {
+		return x.Hub
+	}
+	return nil
+}
+
+// LockPeer is one peer as a signer sees it.
+type LockPeer struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Id        string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name      string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	PublicKey string                 `protobuf:"bytes,3,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
+	// signed reports whether the current key carries a valid signature.
+	Signed bool `protobuf:"varint,4,opt,name=signed,proto3" json:"signed,omitempty"`
+	// lock_key is the lock public key the peer reported, if any.
+	LockKey       string `protobuf:"bytes,5,opt,name=lock_key,json=lockKey,proto3" json:"lock_key,omitempty"`
+	Kind          string `protobuf:"bytes,6,opt,name=kind,proto3" json:"kind,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LockPeer) Reset() {
+	*x = LockPeer{}
+	mi := &file_thawr_v1_control_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LockPeer) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LockPeer) ProtoMessage() {}
+
+func (x *LockPeer) ProtoReflect() protoreflect.Message {
+	mi := &file_thawr_v1_control_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LockPeer.ProtoReflect.Descriptor instead.
+func (*LockPeer) Descriptor() ([]byte, []int) {
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *LockPeer) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *LockPeer) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *LockPeer) GetPublicKey() string {
+	if x != nil {
+		return x.PublicKey
+	}
+	return ""
+}
+
+func (x *LockPeer) GetSigned() bool {
+	if x != nil {
+		return x.Signed
+	}
+	return false
+}
+
+func (x *LockPeer) GetLockKey() string {
+	if x != nil {
+		return x.LockKey
+	}
+	return ""
+}
+
+func (x *LockPeer) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
 // FilterRule allows src_ipv4 to reach the receiver on a port range.
 // Empty filter means allow everything from visible peers (until spec 006).
 type FilterRule struct {
@@ -782,7 +1319,7 @@ type FilterRule struct {
 
 func (x *FilterRule) Reset() {
 	*x = FilterRule{}
-	mi := &file_thawr_v1_control_proto_msgTypes[8]
+	mi := &file_thawr_v1_control_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -794,7 +1331,7 @@ func (x *FilterRule) String() string {
 func (*FilterRule) ProtoMessage() {}
 
 func (x *FilterRule) ProtoReflect() protoreflect.Message {
-	mi := &file_thawr_v1_control_proto_msgTypes[8]
+	mi := &file_thawr_v1_control_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -807,7 +1344,7 @@ func (x *FilterRule) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FilterRule.ProtoReflect.Descriptor instead.
 func (*FilterRule) Descriptor() ([]byte, []int) {
-	return file_thawr_v1_control_proto_rawDescGZIP(), []int{8}
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *FilterRule) GetSrcIpv4() string {
@@ -850,7 +1387,7 @@ type EndpointReport struct {
 
 func (x *EndpointReport) Reset() {
 	*x = EndpointReport{}
-	mi := &file_thawr_v1_control_proto_msgTypes[9]
+	mi := &file_thawr_v1_control_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -862,7 +1399,7 @@ func (x *EndpointReport) String() string {
 func (*EndpointReport) ProtoMessage() {}
 
 func (x *EndpointReport) ProtoReflect() protoreflect.Message {
-	mi := &file_thawr_v1_control_proto_msgTypes[9]
+	mi := &file_thawr_v1_control_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -875,7 +1412,7 @@ func (x *EndpointReport) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EndpointReport.ProtoReflect.Descriptor instead.
 func (*EndpointReport) Descriptor() ([]byte, []int) {
-	return file_thawr_v1_control_proto_rawDescGZIP(), []int{9}
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *EndpointReport) GetEndpoints() []*Endpoint {
@@ -909,7 +1446,7 @@ type PathReport struct {
 
 func (x *PathReport) Reset() {
 	*x = PathReport{}
-	mi := &file_thawr_v1_control_proto_msgTypes[10]
+	mi := &file_thawr_v1_control_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -921,7 +1458,7 @@ func (x *PathReport) String() string {
 func (*PathReport) ProtoMessage() {}
 
 func (x *PathReport) ProtoReflect() protoreflect.Message {
-	mi := &file_thawr_v1_control_proto_msgTypes[10]
+	mi := &file_thawr_v1_control_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -934,7 +1471,7 @@ func (x *PathReport) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PathReport.ProtoReflect.Descriptor instead.
 func (*PathReport) Descriptor() ([]byte, []int) {
-	return file_thawr_v1_control_proto_rawDescGZIP(), []int{10}
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *PathReport) GetPaths() []*PathState {
@@ -957,7 +1494,7 @@ type PathState struct {
 
 func (x *PathState) Reset() {
 	*x = PathState{}
-	mi := &file_thawr_v1_control_proto_msgTypes[11]
+	mi := &file_thawr_v1_control_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -969,7 +1506,7 @@ func (x *PathState) String() string {
 func (*PathState) ProtoMessage() {}
 
 func (x *PathState) ProtoReflect() protoreflect.Message {
-	mi := &file_thawr_v1_control_proto_msgTypes[11]
+	mi := &file_thawr_v1_control_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -982,7 +1519,7 @@ func (x *PathState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PathState.ProtoReflect.Descriptor instead.
 func (*PathState) Descriptor() ([]byte, []int) {
-	return file_thawr_v1_control_proto_rawDescGZIP(), []int{11}
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *PathState) GetPeerId() string {
@@ -1009,15 +1546,19 @@ func (x *PathState) GetEndpoint() string {
 // RotateKeyRequest carries the new public key; the old one stays valid
 // until the next netmap is delivered.
 type RotateKeyRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	NewPublicKey  string                 `protobuf:"bytes,1,opt,name=new_public_key,json=newPublicKey,proto3" json:"new_public_key,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	NewPublicKey string                 `protobuf:"bytes,1,opt,name=new_public_key,json=newPublicKey,proto3" json:"new_public_key,omitempty"`
+	// signer_key and signature let a signer vouch for its own new key in
+	// the same call (spec 012); both optional.
+	SignerKey     string `protobuf:"bytes,2,opt,name=signer_key,json=signerKey,proto3" json:"signer_key,omitempty"`
+	Signature     string `protobuf:"bytes,3,opt,name=signature,proto3" json:"signature,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RotateKeyRequest) Reset() {
 	*x = RotateKeyRequest{}
-	mi := &file_thawr_v1_control_proto_msgTypes[12]
+	mi := &file_thawr_v1_control_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1029,7 +1570,7 @@ func (x *RotateKeyRequest) String() string {
 func (*RotateKeyRequest) ProtoMessage() {}
 
 func (x *RotateKeyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_thawr_v1_control_proto_msgTypes[12]
+	mi := &file_thawr_v1_control_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1042,12 +1583,26 @@ func (x *RotateKeyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RotateKeyRequest.ProtoReflect.Descriptor instead.
 func (*RotateKeyRequest) Descriptor() ([]byte, []int) {
-	return file_thawr_v1_control_proto_rawDescGZIP(), []int{12}
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *RotateKeyRequest) GetNewPublicKey() string {
 	if x != nil {
 		return x.NewPublicKey
+	}
+	return ""
+}
+
+func (x *RotateKeyRequest) GetSignerKey() string {
+	if x != nil {
+		return x.SignerKey
+	}
+	return ""
+}
+
+func (x *RotateKeyRequest) GetSignature() string {
+	if x != nil {
+		return x.Signature
 	}
 	return ""
 }
@@ -1062,7 +1617,7 @@ type RotateKeyResponse struct {
 
 func (x *RotateKeyResponse) Reset() {
 	*x = RotateKeyResponse{}
-	mi := &file_thawr_v1_control_proto_msgTypes[13]
+	mi := &file_thawr_v1_control_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1074,7 +1629,7 @@ func (x *RotateKeyResponse) String() string {
 func (*RotateKeyResponse) ProtoMessage() {}
 
 func (x *RotateKeyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_thawr_v1_control_proto_msgTypes[13]
+	mi := &file_thawr_v1_control_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1087,7 +1642,7 @@ func (x *RotateKeyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RotateKeyResponse.ProtoReflect.Descriptor instead.
 func (*RotateKeyResponse) Descriptor() ([]byte, []int) {
-	return file_thawr_v1_control_proto_rawDescGZIP(), []int{13}
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *RotateKeyResponse) GetGeneration() int64 {
@@ -1106,7 +1661,7 @@ type Empty struct {
 
 func (x *Empty) Reset() {
 	*x = Empty{}
-	mi := &file_thawr_v1_control_proto_msgTypes[14]
+	mi := &file_thawr_v1_control_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1118,7 +1673,7 @@ func (x *Empty) String() string {
 func (*Empty) ProtoMessage() {}
 
 func (x *Empty) ProtoReflect() protoreflect.Message {
-	mi := &file_thawr_v1_control_proto_msgTypes[14]
+	mi := &file_thawr_v1_control_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1131,7 +1686,7 @@ func (x *Empty) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Empty.ProtoReflect.Descriptor instead.
 func (*Empty) Descriptor() ([]byte, []int) {
-	return file_thawr_v1_control_proto_rawDescGZIP(), []int{14}
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{22}
 }
 
 var File_thawr_v1_control_proto protoreflect.FileDescriptor
@@ -1158,12 +1713,13 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"\x0ehub_public_key\x18\x06 \x01(\tR\fhubPublicKey\x12!\n" +
 	"\fhub_endpoint\x18\a \x01(\tR\vhubEndpoint\x12%\n" +
 	"\x0eserver_version\x18\b \x01(\tR\rserverVersion\x12+\n" +
-	"\x11netmap_generation\x18\t \x01(\x03R\x10netmapGeneration\"T\n" +
+	"\x11netmap_generation\x18\t \x01(\x03R\x10netmapGeneration\"o\n" +
 	"\vSyncRequest\x12\x1e\n" +
 	"\n" +
 	"generation\x18\x01 \x01(\x03R\n" +
 	"generation\x12%\n" +
-	"\x0eclient_version\x18\x02 \x01(\tR\rclientVersion\"\x91\x02\n" +
+	"\x0eclient_version\x18\x02 \x01(\tR\rclientVersion\x12\x19\n" +
+	"\block_key\x18\x03 \x01(\tR\alockKey\"\xc1\x02\n" +
 	"\x06NetMap\x12\x1e\n" +
 	"\n" +
 	"generation\x18\x01 \x01(\x03R\n" +
@@ -1173,7 +1729,8 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"\x03hub\x18\x04 \x01(\v2\x11.thawr.v1.HubPeerR\x03hub\x12,\n" +
 	"\x06filter\x18\x05 \x03(\v2\x14.thawr.v1.FilterRuleR\x06filter\x12\x1c\n" +
 	"\tkeepalive\x18\x06 \x01(\bR\tkeepalive\x12%\n" +
-	"\x0eserver_version\x18\a \x01(\tR\rserverVersion\"\x98\x01\n" +
+	"\x0eserver_version\x18\a \x01(\tR\rserverVersion\x12.\n" +
+	"\x04lock\x18\b \x01(\v2\x1a.thawr.v1.SignedLockRecordR\x04lock\"\xd1\x01\n" +
 	"\bSelfInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -1181,7 +1738,10 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"\foverlay_cidr\x18\x04 \x01(\tR\voverlayCidr\x12\x1d\n" +
 	"\n" +
 	"stun_addrs\x18\x05 \x03(\tR\tstunAddrs\x12\x12\n" +
-	"\x04kind\x18\x06 \x01(\tR\x04kind\"\xca\x02\n" +
+	"\x04kind\x18\x06 \x01(\tR\x04kind\x127\n" +
+	"\n" +
+	"signatures\x18\a \x03(\v2\x17.thawr.v1.PeerSignatureR\n" +
+	"signatures\"\x83\x03\n" +
 	"\aNetPeer\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -1197,16 +1757,63 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	" \x03(\tR\n" +
 	"allowedIps\x12\x14\n" +
 	"\x05owner\x18\v \x01(\tR\x05owner\x12\x17\n" +
-	"\avia_hub\x18\f \x01(\bR\x06viaHub\"J\n" +
+	"\avia_hub\x18\f \x01(\bR\x06viaHub\x127\n" +
+	"\n" +
+	"signatures\x18\r \x03(\v2\x17.thawr.v1.PeerSignatureR\n" +
+	"signatures\"J\n" +
 	"\bEndpoint\x12\x12\n" +
 	"\x04addr\x18\x01 \x01(\tR\x04addr\x12*\n" +
-	"\x04kind\x18\x02 \x01(\x0e2\x16.thawr.v1.EndpointKindR\x04kind\"e\n" +
+	"\x04kind\x18\x02 \x01(\x0e2\x16.thawr.v1.EndpointKindR\x04kind\"\x9e\x01\n" +
 	"\aHubPeer\x12\x1d\n" +
 	"\n" +
 	"public_key\x18\x01 \x01(\tR\tpublicKey\x12\x1a\n" +
 	"\bendpoint\x18\x02 \x01(\tR\bendpoint\x12\x1f\n" +
 	"\vallowed_ips\x18\x03 \x03(\tR\n" +
-	"allowedIps\"o\n" +
+	"allowedIps\x127\n" +
+	"\n" +
+	"signatures\x18\x04 \x03(\v2\x17.thawr.v1.PeerSignatureR\n" +
+	"signatures\"L\n" +
+	"\rPeerSignature\x12\x1d\n" +
+	"\n" +
+	"signer_key\x18\x01 \x01(\tR\tsignerKey\x12\x1c\n" +
+	"\tsignature\x18\x02 \x01(\tR\tsignature\"7\n" +
+	"\n" +
+	"LockSigner\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x17\n" +
+	"\apeer_id\x18\x02 \x01(\tR\x06peerId\"x\n" +
+	"\n" +
+	"LockRecord\x12\x1e\n" +
+	"\n" +
+	"generation\x18\x01 \x01(\x04R\n" +
+	"generation\x12\x1a\n" +
+	"\bdisabled\x18\x02 \x01(\bR\bdisabled\x12.\n" +
+	"\asigners\x18\x03 \x03(\v2\x14.thawr.v1.LockSignerR\asigners\"^\n" +
+	"\x10SignedLockRecord\x12,\n" +
+	"\x06record\x18\x01 \x01(\v2\x14.thawr.v1.LockRecordR\x06record\x12\x1c\n" +
+	"\tsignature\x18\x02 \x01(\tR\tsignature\"{\n" +
+	"\x0eSetLockRequest\x12.\n" +
+	"\x04lock\x18\x01 \x01(\v2\x1a.thawr.v1.SignedLockRecordR\x04lock\x129\n" +
+	"\n" +
+	"signatures\x18\x02 \x03(\v2\x19.thawr.v1.SignPeerRequestR\n" +
+	"signatures\"\x86\x01\n" +
+	"\x0fSignPeerRequest\x12\x17\n" +
+	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12\x1d\n" +
+	"\n" +
+	"public_key\x18\x02 \x01(\tR\tpublicKey\x12\x1d\n" +
+	"\n" +
+	"signer_key\x18\x03 \x01(\tR\tsignerKey\x12\x1c\n" +
+	"\tsignature\x18\x04 \x01(\tR\tsignature\"[\n" +
+	"\tLockPeers\x12(\n" +
+	"\x05peers\x18\x01 \x03(\v2\x12.thawr.v1.LockPeerR\x05peers\x12$\n" +
+	"\x03hub\x18\x02 \x01(\v2\x12.thawr.v1.LockPeerR\x03hub\"\x94\x01\n" +
+	"\bLockPeer\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1d\n" +
+	"\n" +
+	"public_key\x18\x03 \x01(\tR\tpublicKey\x12\x16\n" +
+	"\x06signed\x18\x04 \x01(\bR\x06signed\x12\x19\n" +
+	"\block_key\x18\x05 \x01(\tR\alockKey\x12\x12\n" +
+	"\x04kind\x18\x06 \x01(\tR\x04kind\"o\n" +
 	"\n" +
 	"FilterRule\x12\x19\n" +
 	"\bsrc_ipv4\x18\x01 \x01(\tR\asrcIpv4\x12\x14\n" +
@@ -1224,9 +1831,12 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"\tPathState\x12\x17\n" +
 	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12\x14\n" +
 	"\x05state\x18\x02 \x01(\tR\x05state\x12\x1a\n" +
-	"\bendpoint\x18\x03 \x01(\tR\bendpoint\"8\n" +
+	"\bendpoint\x18\x03 \x01(\tR\bendpoint\"u\n" +
 	"\x10RotateKeyRequest\x12$\n" +
-	"\x0enew_public_key\x18\x01 \x01(\tR\fnewPublicKey\"3\n" +
+	"\x0enew_public_key\x18\x01 \x01(\tR\fnewPublicKey\x12\x1d\n" +
+	"\n" +
+	"signer_key\x18\x02 \x01(\tR\tsignerKey\x12\x1c\n" +
+	"\tsignature\x18\x03 \x01(\tR\tsignature\"3\n" +
 	"\x11RotateKeyResponse\x12\x1e\n" +
 	"\n" +
 	"generation\x18\x01 \x01(\x03R\n" +
@@ -1236,7 +1846,7 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"\x19ENDPOINT_KIND_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13ENDPOINT_KIND_LOCAL\x10\x01\x12\x1b\n" +
 	"\x17ENDPOINT_KIND_REFLEXIVE\x10\x02\x12\x18\n" +
-	"\x14ENDPOINT_KIND_STABLE\x10\x032\xdd\x02\n" +
+	"\x14ENDPOINT_KIND_STABLE\x10\x032\x82\x04\n" +
 	"\aControl\x12;\n" +
 	"\x06Enroll\x12\x17.thawr.v1.EnrollRequest\x1a\x18.thawr.v1.EnrollResponse\x121\n" +
 	"\x04Sync\x12\x15.thawr.v1.SyncRequest\x1a\x10.thawr.v1.NetMap0\x01\x12<\n" +
@@ -1244,7 +1854,10 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"\n" +
 	"ReportPath\x12\x14.thawr.v1.PathReport\x1a\x0f.thawr.v1.Empty\x12D\n" +
 	"\tRotateKey\x12\x1a.thawr.v1.RotateKeyRequest\x1a\x1b.thawr.v1.RotateKeyResponse\x12)\n" +
-	"\x05Leave\x12\x0f.thawr.v1.Empty\x1a\x0f.thawr.v1.EmptyBDZBgithub.com/thedatadudech/thawr/internal/api/proto/thawr/v1;thawrv1b\x06proto3"
+	"\x05Leave\x12\x0f.thawr.v1.Empty\x1a\x0f.thawr.v1.Empty\x124\n" +
+	"\aSetLock\x12\x18.thawr.v1.SetLockRequest\x1a\x0f.thawr.v1.Empty\x126\n" +
+	"\bSignPeer\x12\x19.thawr.v1.SignPeerRequest\x1a\x0f.thawr.v1.Empty\x125\n" +
+	"\rListLockPeers\x12\x0f.thawr.v1.Empty\x1a\x13.thawr.v1.LockPeersBDZBgithub.com/thedatadudech/thawr/internal/api/proto/thawr/v1;thawrv1b\x06proto3"
 
 var (
 	file_thawr_v1_control_proto_rawDescOnce sync.Once
@@ -1259,7 +1872,7 @@ func file_thawr_v1_control_proto_rawDescGZIP() []byte {
 }
 
 var file_thawr_v1_control_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_thawr_v1_control_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_thawr_v1_control_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_thawr_v1_control_proto_goTypes = []any{
 	(EndpointKind)(0),         // 0: thawr.v1.EndpointKind
 	(*EnrollRequest)(nil),     // 1: thawr.v1.EnrollRequest
@@ -1270,40 +1883,64 @@ var file_thawr_v1_control_proto_goTypes = []any{
 	(*NetPeer)(nil),           // 6: thawr.v1.NetPeer
 	(*Endpoint)(nil),          // 7: thawr.v1.Endpoint
 	(*HubPeer)(nil),           // 8: thawr.v1.HubPeer
-	(*FilterRule)(nil),        // 9: thawr.v1.FilterRule
-	(*EndpointReport)(nil),    // 10: thawr.v1.EndpointReport
-	(*PathReport)(nil),        // 11: thawr.v1.PathReport
-	(*PathState)(nil),         // 12: thawr.v1.PathState
-	(*RotateKeyRequest)(nil),  // 13: thawr.v1.RotateKeyRequest
-	(*RotateKeyResponse)(nil), // 14: thawr.v1.RotateKeyResponse
-	(*Empty)(nil),             // 15: thawr.v1.Empty
+	(*PeerSignature)(nil),     // 9: thawr.v1.PeerSignature
+	(*LockSigner)(nil),        // 10: thawr.v1.LockSigner
+	(*LockRecord)(nil),        // 11: thawr.v1.LockRecord
+	(*SignedLockRecord)(nil),  // 12: thawr.v1.SignedLockRecord
+	(*SetLockRequest)(nil),    // 13: thawr.v1.SetLockRequest
+	(*SignPeerRequest)(nil),   // 14: thawr.v1.SignPeerRequest
+	(*LockPeers)(nil),         // 15: thawr.v1.LockPeers
+	(*LockPeer)(nil),          // 16: thawr.v1.LockPeer
+	(*FilterRule)(nil),        // 17: thawr.v1.FilterRule
+	(*EndpointReport)(nil),    // 18: thawr.v1.EndpointReport
+	(*PathReport)(nil),        // 19: thawr.v1.PathReport
+	(*PathState)(nil),         // 20: thawr.v1.PathState
+	(*RotateKeyRequest)(nil),  // 21: thawr.v1.RotateKeyRequest
+	(*RotateKeyResponse)(nil), // 22: thawr.v1.RotateKeyResponse
+	(*Empty)(nil),             // 23: thawr.v1.Empty
 }
 var file_thawr_v1_control_proto_depIdxs = []int32{
 	5,  // 0: thawr.v1.NetMap.self:type_name -> thawr.v1.SelfInfo
 	6,  // 1: thawr.v1.NetMap.peers:type_name -> thawr.v1.NetPeer
 	8,  // 2: thawr.v1.NetMap.hub:type_name -> thawr.v1.HubPeer
-	9,  // 3: thawr.v1.NetMap.filter:type_name -> thawr.v1.FilterRule
-	7,  // 4: thawr.v1.NetPeer.endpoints:type_name -> thawr.v1.Endpoint
-	0,  // 5: thawr.v1.Endpoint.kind:type_name -> thawr.v1.EndpointKind
-	7,  // 6: thawr.v1.EndpointReport.endpoints:type_name -> thawr.v1.Endpoint
-	12, // 7: thawr.v1.PathReport.paths:type_name -> thawr.v1.PathState
-	1,  // 8: thawr.v1.Control.Enroll:input_type -> thawr.v1.EnrollRequest
-	3,  // 9: thawr.v1.Control.Sync:input_type -> thawr.v1.SyncRequest
-	10, // 10: thawr.v1.Control.ReportEndpoints:input_type -> thawr.v1.EndpointReport
-	11, // 11: thawr.v1.Control.ReportPath:input_type -> thawr.v1.PathReport
-	13, // 12: thawr.v1.Control.RotateKey:input_type -> thawr.v1.RotateKeyRequest
-	15, // 13: thawr.v1.Control.Leave:input_type -> thawr.v1.Empty
-	2,  // 14: thawr.v1.Control.Enroll:output_type -> thawr.v1.EnrollResponse
-	4,  // 15: thawr.v1.Control.Sync:output_type -> thawr.v1.NetMap
-	15, // 16: thawr.v1.Control.ReportEndpoints:output_type -> thawr.v1.Empty
-	15, // 17: thawr.v1.Control.ReportPath:output_type -> thawr.v1.Empty
-	14, // 18: thawr.v1.Control.RotateKey:output_type -> thawr.v1.RotateKeyResponse
-	15, // 19: thawr.v1.Control.Leave:output_type -> thawr.v1.Empty
-	14, // [14:20] is the sub-list for method output_type
-	8,  // [8:14] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	17, // 3: thawr.v1.NetMap.filter:type_name -> thawr.v1.FilterRule
+	12, // 4: thawr.v1.NetMap.lock:type_name -> thawr.v1.SignedLockRecord
+	9,  // 5: thawr.v1.SelfInfo.signatures:type_name -> thawr.v1.PeerSignature
+	7,  // 6: thawr.v1.NetPeer.endpoints:type_name -> thawr.v1.Endpoint
+	9,  // 7: thawr.v1.NetPeer.signatures:type_name -> thawr.v1.PeerSignature
+	0,  // 8: thawr.v1.Endpoint.kind:type_name -> thawr.v1.EndpointKind
+	9,  // 9: thawr.v1.HubPeer.signatures:type_name -> thawr.v1.PeerSignature
+	10, // 10: thawr.v1.LockRecord.signers:type_name -> thawr.v1.LockSigner
+	11, // 11: thawr.v1.SignedLockRecord.record:type_name -> thawr.v1.LockRecord
+	12, // 12: thawr.v1.SetLockRequest.lock:type_name -> thawr.v1.SignedLockRecord
+	14, // 13: thawr.v1.SetLockRequest.signatures:type_name -> thawr.v1.SignPeerRequest
+	16, // 14: thawr.v1.LockPeers.peers:type_name -> thawr.v1.LockPeer
+	16, // 15: thawr.v1.LockPeers.hub:type_name -> thawr.v1.LockPeer
+	7,  // 16: thawr.v1.EndpointReport.endpoints:type_name -> thawr.v1.Endpoint
+	20, // 17: thawr.v1.PathReport.paths:type_name -> thawr.v1.PathState
+	1,  // 18: thawr.v1.Control.Enroll:input_type -> thawr.v1.EnrollRequest
+	3,  // 19: thawr.v1.Control.Sync:input_type -> thawr.v1.SyncRequest
+	18, // 20: thawr.v1.Control.ReportEndpoints:input_type -> thawr.v1.EndpointReport
+	19, // 21: thawr.v1.Control.ReportPath:input_type -> thawr.v1.PathReport
+	21, // 22: thawr.v1.Control.RotateKey:input_type -> thawr.v1.RotateKeyRequest
+	23, // 23: thawr.v1.Control.Leave:input_type -> thawr.v1.Empty
+	13, // 24: thawr.v1.Control.SetLock:input_type -> thawr.v1.SetLockRequest
+	14, // 25: thawr.v1.Control.SignPeer:input_type -> thawr.v1.SignPeerRequest
+	23, // 26: thawr.v1.Control.ListLockPeers:input_type -> thawr.v1.Empty
+	2,  // 27: thawr.v1.Control.Enroll:output_type -> thawr.v1.EnrollResponse
+	4,  // 28: thawr.v1.Control.Sync:output_type -> thawr.v1.NetMap
+	23, // 29: thawr.v1.Control.ReportEndpoints:output_type -> thawr.v1.Empty
+	23, // 30: thawr.v1.Control.ReportPath:output_type -> thawr.v1.Empty
+	22, // 31: thawr.v1.Control.RotateKey:output_type -> thawr.v1.RotateKeyResponse
+	23, // 32: thawr.v1.Control.Leave:output_type -> thawr.v1.Empty
+	23, // 33: thawr.v1.Control.SetLock:output_type -> thawr.v1.Empty
+	23, // 34: thawr.v1.Control.SignPeer:output_type -> thawr.v1.Empty
+	15, // 35: thawr.v1.Control.ListLockPeers:output_type -> thawr.v1.LockPeers
+	27, // [27:36] is the sub-list for method output_type
+	18, // [18:27] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_thawr_v1_control_proto_init() }
@@ -1317,7 +1954,7 @@ func file_thawr_v1_control_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_thawr_v1_control_proto_rawDesc), len(file_thawr_v1_control_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   15,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
