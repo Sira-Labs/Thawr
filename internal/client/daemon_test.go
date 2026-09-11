@@ -120,11 +120,21 @@ func (v keyVisibility) Visible(ctx context.Context, src, dst relay.Key) (bool, e
 // enrol registers a device into dir and returns its state.
 func (cp *controlPlane) enrol(dir, host string) State {
 	cp.t.Helper()
+	return cp.enrolWith(dir, host, nil)
+}
+
+// enrolWith is enrol with the options adjusted first.
+func (cp *controlPlane) enrolWith(dir, host string, mod func(*Options)) State {
+	cp.t.Helper()
 	tok, err := cp.tokens.Create(context.Background(), cp.admin, control.TokenRequest{OwnerName: "markus", Kind: "human"})
 	if err != nil {
 		cp.t.Fatal(err)
 	}
-	st, err := Enroll(context.Background(), Options{Server: cp.ts.URL, Token: tok.Secret, Fingerprint: cp.fp, StateDir: dir, Hostname: host, Version: "0.1.0"})
+	opts := Options{Server: cp.ts.URL, Token: tok.Secret, Fingerprint: cp.fp, StateDir: dir, Hostname: host, Version: "0.1.0"}
+	if mod != nil {
+		mod(&opts)
+	}
+	st, err := Enroll(context.Background(), opts)
 	if err != nil {
 		cp.t.Fatalf("enrol %s: %v", host, err)
 	}

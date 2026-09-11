@@ -532,6 +532,13 @@ entry.
         its first record, closing the first-contact gap for devices
         enrolled after the lock; old-key signature rows are pruned on
         rotation; duplicate signer peer ids are invalid.
+      - Second round: `--lock-signer` requires the first record to be
+        signed by that key (listing it is not enough) and the device
+        applies nothing until such a record arrives; on an enrolled
+        device the flag is persisted while no record is pinned and
+        refused otherwise, never ignored; `LockService.Set` reads,
+        checks and writes the record in one transaction so competing
+        successors cannot both land.
       - Out of scope, listed in the spec: removing a signer, a quorum,
         rotating a lock key, short-lived keys.
 - [ ] **013 Exit nodes and subnet routers** — advertised prefixes gated

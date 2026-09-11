@@ -230,8 +230,10 @@ func (p *Pins) UpdateLock(offered *lock.Signed, expected string) string {
 	if p.lock != nil {
 		cur = &p.lock.Record
 	}
-	if cur == nil && expected != "" && !namesSigner(offered.Record, expected) {
-		return fmt.Sprintf("first record (generation %d) refused: it does not name the signer %s given at enrolment", offered.Record.Generation, expected)
+	if cur == nil && expected != "" {
+		if r := firstRecordBy(*offered, expected); r != "" {
+			return r
+		}
 	}
 	if err := lock.Accept(cur, *offered); err != nil {
 		return fmt.Sprintf("offered record (generation %d) refused: %v", offered.Record.Generation, err)
@@ -240,15 +242,32 @@ func (p *Pins) UpdateLock(offered *lock.Signed, expected string) string {
 	return ""
 }
 
-// namesSigner reports whether one of the record's signer keys is given
-// (full key or fingerprint).
-func namesSigner(r lock.Record, given string) bool {
-	for _, s := range r.Signers {
-		if matchesLockKey(s.Key, given) {
-			return true
-		}
+// firstRecordBy checks that the record is signed by the expected key
+// itself (full key or fingerprint), not merely lists it: a hostile
+// server could list the expected key next to its own and sign with
+// its own. It returns the reason for refusal, empty when the record
+// passes.
+func firstRecordBy(offered lock.Signed, expected string) string {
+	msg, err := offered.Record.Bytes()
+	if err != nil {
+		return fmt.Sprintf("first record (generation %d) refused: %v", offered.Record.Generation, err)
 	}
-	return false
+	for _, s := range offered.Record.Signers {
+		if !matchesLockKey(s.Key, expected) {
+			continue
+		}
+		if lock.Verify(s.Key, msg, offered.Signature) {
+			return ""
+		}
+		signedBy := "an unlisted key"
+		for _, o := range offered.Record.Signers {
+			if lock.Verify(o.Key, msg, offered.Signature) {
+				signedBy = lock.Fingerprint(o.Key)
+			}
+		}
+		return fmt.Sprintf("first record (generation %d) refused: it lists the signer %s given at enrolment but is signed by %s; enrol with the fingerprint of the key that signed it", offered.Record.Generation, expected, signedBy)
+	}
+	return fmt.Sprintf("first record (generation %d) refused: it does not name the signer %s given at enrolment", offered.Record.Generation, expected)
 }
 
 // SetLock pins a record this device produced itself and persists it.

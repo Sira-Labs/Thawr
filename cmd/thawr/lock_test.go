@@ -1,13 +1,16 @@
 package main
 
 import (
+	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/thedatadudech/thawr/internal/client"
+	"github.com/thedatadudech/thawr/internal/lock"
 )
 
 // lockDaemon fakes the daemon's lock endpoints: a signer that knows
@@ -204,5 +207,55 @@ func TestAdminLock(t *testing.T) {
 	}
 	if out, _, _ := runCLI(t, "admin", "--help"); !strings.Contains(out, "lock") {
 		t.Error("admin help does not list lock")
+	}
+}
+
+// TestApplyLockSigner: --lock-signer on an enrolled device is persisted
+// while no record is pinned, accepted when repeated, and refused when
+// it would change the expectation or a record is already pinned.
+func TestApplyLockSigner(t *testing.T) {
+	dir := t.TempDir()
+	st := client.State{Server: "vpn:8443", Fingerprint: "sha256:ab", PeerID: "p1", Name: "box", IPv4: "100.64.0.2", OverlayCIDR: "100.64.0.0/10", NodeSecret: "s", ListenPort: 41820}
+	if err := client.SaveState(dir, st); err != nil {
+		t.Fatal(err)
+	}
+	if err := applyLockSigner(dir, st, ""); err != nil {
+		t.Fatalf("empty flag: %v", err)
+	}
+	if err := applyLockSigner(dir, st, "aa11bb22"); err != nil {
+		t.Fatalf("set on an enrolled device: %v", err)
+	}
+	st, _ = client.LoadState(dir)
+	if st.LockSigner != "aa11bb22" {
+		t.Fatalf("not persisted: %+v", st)
+	}
+	if err := applyLockSigner(dir, st, "aa11bb22"); err != nil {
+		t.Errorf("repeated flag: %v", err)
+	}
+	var ee *exitError
+	if err := applyLockSigner(dir, st, "cc33dd44"); !errors.As(err, &ee) || ee.code != exitConfigError {
+		t.Errorf("changed flag: %v", err)
+	}
+	fresh := client.State{Server: "vpn:8443", Fingerprint: "sha256:ab", PeerID: "p2", Name: "other", IPv4: "100.64.0.3", OverlayCIDR: "100.64.0.0/10", NodeSecret: "s"}
+	dir2 := t.TempDir()
+	if err := client.SaveState(dir2, fresh); err != nil {
+		t.Fatal(err)
+	}
+	k, err := lock.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := lock.Record{Generation: 1, Signers: []lock.Signer{{Key: k.Public(), PeerID: "p9"}}}
+	msg, _ := rec.Bytes()
+	sig, _ := lock.Sign(k, msg)
+	pins, err := client.LoadPins(dir2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pins.SetLock(lock.Signed{Record: rec, Signature: sig}); err != nil {
+		t.Fatal(err)
+	}
+	if err := applyLockSigner(dir2, fresh, "aa11bb22"); !errors.As(err, &ee) || ee.code != exitConfigError {
+		t.Errorf("flag after a pinned record: %v", err)
 	}
 }

@@ -498,6 +498,15 @@ func (d *Daemon) applyLocked(ctx context.Context, nm NetMap, cache bool) error {
 	// it only ever holds a key change the lock did not vouch for.
 	rejected := d.pins.UpdateLock(nm.Lock, d.state.LockSigner)
 	var held []HeldStatus
+	if d.state.LockSigner != "" && d.pins.Lock() == nil {
+		// Enrolled with --lock-signer and no record pinned yet: the
+		// device fails closed. Trusting first-contact keys now would
+		// let a hostile server hand it peers before the lock arrives.
+		if rejected == "" {
+			rejected = fmt.Sprintf("waiting for a lock record signed by %s; nothing is applied until it arrives", d.state.LockSigner)
+		}
+		nm.Peers, nm.Hub = nil, HubPeer{}
+	}
 	if d.pins.Enabled() {
 		nm, held = d.pins.HoldUnsigned(nm, d.pins.Lock().Record, now, prev)
 	}

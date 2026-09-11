@@ -118,22 +118,6 @@ func LoadLockRecord(ctx context.Context, st *store.Store) (*lock.Signed, error) 
 // same transaction so the record and its signatures reach every
 // device in one netmap.
 func (s *LockService) Set(ctx context.Context, by store.Peer, next lock.Signed, sigs []PeerSigning) error {
-	cur, err := s.Current(ctx)
-	if err != nil {
-		return err
-	}
-	var curRec *lock.Record
-	if cur != nil {
-		curRec = &cur.Record
-	}
-	if curRec == nil || len(curRec.Signers) == 0 {
-		if err := s.requireAdminOwner(ctx, by); err != nil {
-			return err
-		}
-	}
-	if err := lock.Accept(curRec, next); err != nil {
-		return fmt.Errorf("%w: %w", ErrValidation, err)
-	}
 	signerKey, isSigner := next.Record.SignerKey(by.ID)
 	if len(sigs) > 0 && (!isSigner || !next.Record.Enabled()) {
 		return fmt.Errorf("%w: only a signer of the new record may attach signatures", ErrValidation)
@@ -143,7 +127,26 @@ func (s *LockService) Set(ctx context.Context, by store.Peer, next lock.Signed, 
 		return fmt.Errorf("control: encode lock record: %w", err)
 	}
 	var gen int64
+	// The current record is read, checked and replaced in one
+	// transaction, so two valid successors of the same record cannot
+	// both land: the second sees the first and fails lock.Accept.
 	err = s.store.InTx(ctx, func(tx *store.Store) error {
+		cur, err := LoadLockRecord(ctx, tx)
+		if err != nil {
+			return err
+		}
+		var curRec *lock.Record
+		if cur != nil {
+			curRec = &cur.Record
+		}
+		if curRec == nil || len(curRec.Signers) == 0 {
+			if err := s.requireAdminOwner(ctx, tx, by); err != nil {
+				return err
+			}
+		}
+		if err := lock.Accept(curRec, next); err != nil {
+			return fmt.Errorf("%w: %w", ErrValidation, err)
+		}
 		if err := tx.Meta().Set(ctx, store.MetaLockRecord, string(data)); err != nil {
 			return err
 		}
@@ -187,12 +190,13 @@ func signerOf(rec lock.Signed) lock.PublicKey {
 	return lock.PublicKey{}
 }
 
-// requireAdminOwner refuses a peer whose owner is not an admin user.
-func (s *LockService) requireAdminOwner(ctx context.Context, by store.Peer) error {
+// requireAdminOwner refuses a peer whose owner is not an admin user; it
+// reads through st (the transaction store inside Set).
+func (s *LockService) requireAdminOwner(ctx context.Context, st *store.Store, by store.Peer) error {
 	if by.OwnerID == "" {
 		return fmt.Errorf("%w: the first lock record must come from a device owned by an admin; %s has no owner", ErrForbidden, by.Name)
 	}
-	owner, err := s.store.Users().GetByID(ctx, by.OwnerID)
+	owner, err := st.Users().GetByID(ctx, by.OwnerID)
 	if errors.Is(err, store.ErrNotFound) {
 		return fmt.Errorf("%w: the first lock record must come from a device owned by an admin", ErrForbidden)
 	}

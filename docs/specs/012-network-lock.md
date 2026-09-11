@@ -98,7 +98,9 @@ WireGuard: kernel · thawr0 · listen 41820 · NAT: cone (...) · DNS: .thawr vi
   that restarts a lineage, is accepted only from a device an admin
   owns (otherwise any enrolled device could make itself the sole
   signer and hold everyone else); later ones must pass `lock.Accept`
-  against the stored one. The optional signatures are by the caller's key in the new
+  against the stored one. The stored record is read, checked and
+  replaced in one transaction, so two successors of the same record
+  cannot both land. The optional signatures are by the caller's key in the new
   record and are verified and stored in the same transaction, so a
   record and the signatures that go with it reach every device in one
   netmap. Stored, generation bumped, audit `lock.set` (actor
@@ -138,8 +140,13 @@ WireGuard: kernel · thawr0 · listen 41820 · NAT: cone (...) · DNS: .thawr vi
   pinned and none offered → lock off; offered and none pinned → pin it
   and log which signers now vouch for the network, unless the device
   was enrolled with `--lock-signer <key-or-fingerprint>` (stored in
-  `state.json`) and the record does not name that signer, in which
-  case it is refused like any other; both → `Accept`,
+  `state.json`): then the first record must be **signed by** that key
+  (listing it next to another signer is not enough), else it is refused
+  like any other, and until a record passes the device applies
+  nothing at all (no hub, no peers), so a hostile server cannot hand
+  it peers before the lock arrives. The flag is accepted on an already
+  enrolled device only while no record is pinned, and never silently
+  ignored; both → `Accept`,
   replace the pin on success, keep it and report `lock.rejected` on
   failure; **pinned but none offered → still on** with the pinned set,
   until a signed `disabled` record arrives.

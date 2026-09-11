@@ -147,6 +147,15 @@ func TestLockSetAcceptsOnlySignedSuccessors(t *testing.T) {
 	if err := e.svc.Set(ctx, e.pa, signRecord(t, e.ka, two), nil); err != nil {
 		t.Fatalf("add signer: %v", err)
 	}
+	// A second successor of generation 1 loses: the check and the write
+	// share one transaction.
+	alt := lock.Record{Generation: 2, Signers: []lock.Signer{{Key: e.ka.Public(), PeerID: e.pa.ID}}}
+	if err := e.svc.Set(ctx, e.pa, signRecord(t, e.ka, alt), nil); !errors.Is(err, ErrValidation) {
+		t.Errorf("competing successor: %v", err)
+	}
+	if cur, _ := e.svc.Current(ctx); cur == nil || len(cur.Record.Signers) != 2 {
+		t.Errorf("record overwritten by the competing successor: %+v", cur)
+	}
 	if ok, _ := e.svc.IsSigner(ctx, e.pb.ID); !ok {
 		t.Error("pb not a signer after being added")
 	}

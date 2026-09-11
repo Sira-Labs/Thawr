@@ -273,6 +273,8 @@ Two devices behind different home routers, server on a public host.
 7. Enrol a fresh device with `--lock-signer <laptop fp>` (from `client
    lock status` on the laptop): it adopts the record. Enrol another
    with `--lock-signer 00000000`: `client lock status` there shows the
-   first record refused and the lock stays off until the person fixes
-   the fingerprint (`down --forget`, enrol again). `lock init` from a
-   device owned by a member is refused by the server.
+   first record refused, `client status` lists no hub and no peers,
+   and nothing works until the person fixes the fingerprint (`down
+   --forget`, enrol again). Restarting the first device with a
+   different `--lock-signer` exits 2. `lock init` from a device owned
+   by a member is refused by the server.

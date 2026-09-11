@@ -13,6 +13,7 @@ import (
 	"github.com/thedatadudech/thawr/internal/lock"
 	"github.com/thedatadudech/thawr/internal/store"
 	"github.com/thedatadudech/thawr/internal/wg"
+	"github.com/thedatadudech/thawr/internal/wg/wgtest"
 )
 
 func testLockKey(t *testing.T) lock.PrivateKey {
@@ -65,10 +66,19 @@ func TestPinsUpdateLock(t *testing.T) {
 		t.Fatalf("nothing offered, nothing pinned: %q", r)
 	}
 	one := signedRecord(t, ka, lock.Record{Generation: 1, Signers: []lock.Signer{{Key: ka.Public(), PeerID: "a"}}})
-	// An expected signer from enrolment gates first contact only.
+	// An expected signer from enrolment gates first contact only, and
+	// listing it is not enough: the record must be signed by it.
 	if r := p.UpdateLock(&one, lock.Fingerprint(outsider.Public())); r == "" || p.Lock() != nil {
 		t.Fatalf("first record without the expected signer: %q", r)
 	}
+	both := signedRecord(t, outsider, lock.Record{Generation: 1, Signers: []lock.Signer{{Key: ka.Public(), PeerID: "a"}, {Key: outsider.Public(), PeerID: "x"}}})
+	if r := p.UpdateLock(&both, lock.Fingerprint(ka.Public())); !strings.Contains(r, "signed by "+lock.Fingerprint(outsider.Public())) || p.Lock() != nil {
+		t.Fatalf("record listing the expected signer but signed by another: %q", r)
+	}
+	if r := p.UpdateLock(&both, outsider.Public().String()); r != "" || p.Lock() == nil {
+		t.Fatalf("record signed by the expected signer (full key): %q", r)
+	}
+	p.lock, p.dirty = nil, false
 	if r := p.UpdateLock(&one, lock.Fingerprint(ka.Public())); r != "" || !p.Enabled() || p.Lock().Record.Generation != 1 {
 		t.Fatalf("first contact: %q", r)
 	}
@@ -380,5 +390,61 @@ func TestForgetRemovesLockKey(t *testing.T) {
 	}
 	if _, err := LoadPins(dir); err != nil {
 		t.Errorf("pins after forget: %v", err)
+	}
+}
+
+// TestDaemonLockSignerFailsClosed: a device enrolled with --lock-signer
+// applies nothing until a record signed by that key arrives, and never
+// when the record is signed by another key.
+func TestDaemonLockSignerFailsClosed(t *testing.T) {
+	cp := newControlPlane(t)
+	ctx := context.Background()
+	ka, wrong := testLockKey(t), testLockKey(t)
+	dirA, dirC, dirD := t.TempDir(), t.TempDir(), t.TempDir()
+	cp.enrol(dirA, "a")
+	if err := SaveLockKey(dirA, ka); err != nil {
+		t.Fatal(err)
+	}
+	cp.enrolWith(dirC, "c", func(o *Options) { o.LockSigner = lock.Fingerprint(ka.Public()) })
+	cp.enrolWith(dirD, "d", func(o *Options) { o.LockSigner = lock.Fingerprint(wrong.Public()) })
+	a, _, stopA := startDaemon(t, dirA)
+	defer stopA()
+	c, fakeC, stopC := startDaemon(t, dirC)
+	defer stopC()
+	d, fakeD, stopD := startDaemon(t, dirD)
+	defer stopD()
+	waitApplied(t, a, func(nm NetMap) bool { return len(nm.Peers) == 2 })
+	lcA, lcC, lcD := NewLocalClient(a.opts.Socket), NewLocalClient(c.opts.Socket), NewLocalClient(d.opts.Socket)
+	for _, x := range []struct {
+		lc   *LocalClient
+		fake *wgtest.Fake
+		name string
+	}{{lcC, fakeC, "c"}, {lcD, fakeD, "d"}} {
+		st := waitStatus(t, x.lc, x.name+" waiting for the lock", func(s Status) bool {
+			return s.Server.State == ServerConnected && strings.Contains(s.Lock.Rejected, "waiting for a lock record")
+		})
+		if st.Lock.Enabled || len(st.Peers) != 0 || st.Hub != nil {
+			t.Errorf("%s before the lock: %+v", x.name, st)
+		}
+		if last, _ := x.fake.Last(); len(last.Peers) != 0 {
+			t.Errorf("%s device before the lock: %+v", x.name, last.Peers)
+		}
+	}
+	if _, err := lcA.LockInit(ctx); err != nil {
+		t.Fatalf("lock init: %v", err)
+	}
+	stC := waitStatus(t, lcC, "c adopts the record", func(s Status) bool { return s.Lock.Enabled && len(s.Peers) == 2 })
+	if stC.Lock.Rejected != "" || len(stC.Held) != 0 {
+		t.Errorf("c after the lock: %+v", stC.Lock)
+	}
+	if last, _ := fakeC.Last(); len(last.Peers) != 3 {
+		t.Errorf("c device after the lock: %+v", last.Peers)
+	}
+	stD := waitStatus(t, lcD, "d refuses the record", func(s Status) bool { return strings.Contains(s.Lock.Rejected, "does not name the signer") })
+	if stD.Lock.Enabled || len(stD.Peers) != 0 {
+		t.Errorf("d after the lock: %+v", stD)
+	}
+	if last, _ := fakeD.Last(); len(last.Peers) != 0 {
+		t.Errorf("d device after a foreign record: %+v", last.Peers)
 	}
 }

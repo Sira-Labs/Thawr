@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -56,7 +57,7 @@ func validateDNSMode(mode string) error {
 // enrollIfNeeded enrols the device when stateDir holds no enrollment,
 // using --server and --token; an enrolled device ignores a token.
 func enrollIfNeeded(ctx context.Context, deps cliDeps, logger *slog.Logger, f clientUpFlags, stateDir string) error {
-	_, err := client.LoadState(stateDir)
+	st, err := client.LoadState(stateDir)
 	switch {
 	case errors.Is(err, client.ErrNotEnrolled):
 		if f.serverURL == "" || f.token == "" {
@@ -80,7 +81,31 @@ func enrollIfNeeded(ctx context.Context, deps cliDeps, logger *slog.Logger, f cl
 	case f.token != "":
 		logger.Warn("already enrolled; ignoring --token")
 	}
-	return nil
+	return applyLockSigner(stateDir, st, f.lockSigner)
+}
+
+// applyLockSigner honours --lock-signer on an already enrolled device:
+// the persisted value may be repeated, an empty one may be set while
+// no lock record is pinned yet, anything else is refused rather than
+// silently ignored, so the person never believes a constraint is in
+// force that is not.
+func applyLockSigner(stateDir string, st client.State, want string) error {
+	want = strings.TrimSpace(want)
+	switch {
+	case want == "" || want == st.LockSigner:
+		return nil
+	case st.LockSigner != "":
+		return &exitError{code: exitConfigError, err: fmt.Errorf("--lock-signer %s: this device already expects %s; run `thawr client down --forget` and enrol again to change it", want, st.LockSigner)}
+	}
+	pins, err := client.LoadPins(stateDir)
+	if err != nil {
+		return err
+	}
+	if pins.Lock() != nil {
+		return &exitError{code: exitConfigError, err: errors.New("--lock-signer: this device already pinned a lock record; the flag only applies before the first record")}
+	}
+	st.LockSigner = want
+	return client.SaveState(stateDir, st)
 }
 
 func newClientCmd(deps cliDeps) *cobra.Command {
