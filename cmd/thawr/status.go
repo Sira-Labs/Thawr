@@ -23,7 +23,7 @@ func renderStatus(w io.Writer, st client.Status) error {
 	if _, err := fmt.Fprintf(w, "thawr %s · %s %s · server %s%s %s\n", st.Version, st.Self.Name, st.Self.IPv4, st.Server.Addr, serverVersion(st), serverState(st.Server, now)); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(w, "WireGuard: %s · %s · listen %d · NAT: %s%s%s%s\n\n", dash(st.WireGuard.Backend), dash(st.WireGuard.Interface), st.WireGuard.ListenPort, natLine(st.NAT), dnsLine(st.DNS), lockLine(st.Lock), heldLine(st.Held)); err != nil {
+	if _, err := fmt.Fprintf(w, "WireGuard: %s · %s · listen %d · NAT: %s%s%s%s\n%s\n", dash(st.WireGuard.Backend), dash(st.WireGuard.Interface), st.WireGuard.ListenPort, natLine(st.NAT), dnsLine(st.DNS), lockLine(st.Lock), heldLine(st.Held), routesLine(st)); err != nil {
 		return err
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)

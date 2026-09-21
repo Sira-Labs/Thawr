@@ -55,6 +55,8 @@ type peerDetailJSON struct {
 		PortLo uint16 `json:"port_lo"`
 		PortHi uint16 `json:"port_hi"`
 	} `json:"filter"`
+	// Routes are the prefixes the peer advertises (spec 013).
+	Routes []routeJSON `json:"routes"`
 }
 
 func newAdminPeerCmd(flags *adminFlags) *cobra.Command {
@@ -131,7 +133,7 @@ func newAdminPeerCmd(flags *adminFlags) *cobra.Command {
 			return err
 		},
 	}
-	cmd.AddCommand(list, show, newAdminAddMobileCmd(flags), rename, del)
+	cmd.AddCommand(list, show, newAdminAddMobileCmd(flags), rename, del, newAdminPeerRoutesCmd(flags))
 	return cmd
 }
 
@@ -291,6 +293,18 @@ func renderPeerDetail(w io.Writer, d peerDetailJSON, now time.Time) error {
 			ports = fmt.Sprintf("%d-%d", f.PortLo, f.PortHi)
 		}
 		if _, err := fmt.Fprintf(w, "  %s -> %s %s\n", f.Src, f.Proto, ports); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintf(w, "\nRoutes advertised (%d):\n", len(d.Routes)); err != nil {
+		return err
+	}
+	for _, r := range d.Routes {
+		state := "pending approval"
+		if r.Approved {
+			state = "approved by " + r.ApprovedBy
+		}
+		if _, err := fmt.Fprintf(w, "  %s (%s)\n", r.Prefix, state); err != nil {
 			return err
 		}
 	}
