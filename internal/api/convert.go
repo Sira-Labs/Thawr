@@ -70,7 +70,7 @@ func netMapToProto(nm control.NetMap) *thawrv1.NetMap {
 		np := &thawrv1.NetPeer{
 			Id: p.ID, Name: p.Name, Kind: p.Kind, Owner: p.Owner, PublicKey: p.PublicKey, Ipv4: p.IPv4.String(),
 			Online: p.Online, Endpoints: endpointsToProto(p.Endpoints), Symmetric: p.Symmetric, Keepalive: p.Keepalive, ViaHub: p.ViaHub,
-			Signatures: signaturesToProto(p.Signatures),
+			Signatures: signaturesToProto(p.Signatures), ExitNode: p.ExitNode,
 		}
 		for _, a := range p.AllowedIPs {
 			np.AllowedIps = append(np.AllowedIps, a.String())
@@ -79,6 +79,12 @@ func netMapToProto(nm control.NetMap) *thawrv1.NetMap {
 	}
 	for _, f := range nm.Filter {
 		out.Filter = append(out.Filter, &thawrv1.FilterRule{SrcIpv4: f.SrcIPv4.String(), Proto: f.Proto, PortLo: uint32(f.PortLo), PortHi: uint32(f.PortHi)})
+	}
+	for _, f := range nm.Forward {
+		out.Forward = append(out.Forward, &thawrv1.ForwardRule{SrcIpv4: f.SrcIPv4.String(), DstCidr: f.Dst.String(), Proto: f.Proto, PortLo: uint32(f.PortLo), PortHi: uint32(f.PortHi)})
+	}
+	for _, a := range nm.SelfAdvertised {
+		out.Self.Advertised = append(out.Self.Advertised, &thawrv1.AdvertisedRoute{Prefix: a.Prefix.String(), Approved: a.Approved})
 	}
 	return out
 }

@@ -37,6 +37,8 @@ type RESTDeps struct {
 	Audit AuditService
 	// Lock enables GET /api/v1/lock and the signed field of peer views.
 	Lock LockView
+	// Routes enables the advertised-route endpoints (spec 013).
+	Routes RoutesOps
 	// Now is the clock for relative audit queries; defaults to time.Now.
 	Now  func() time.Time
 	Join JoinInfo
@@ -108,6 +110,10 @@ func NewREST(deps RESTDeps) (http.Handler, error) {
 		}
 		if deps.Lock != nil {
 			mux.HandleFunc("GET /api/v1/lock", h.requireAuth(h.handleShowLock))
+		}
+		if deps.Routes != nil {
+			mux.HandleFunc("GET /api/v1/peers/{name}/routes", h.requireAuth(h.handleListRoutes))
+			mux.HandleFunc("PUT /api/v1/peers/{name}/routes/{prefix...}", h.requireAdmin(h.handleSetRoute))
 		}
 	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) {
