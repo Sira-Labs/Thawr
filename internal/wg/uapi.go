@@ -20,6 +20,9 @@ func renderUAPI(cfg Config, remove []Key) string {
 	if cfg.ListenPort > 0 {
 		fmt.Fprintf(&b, "listen_port=%d\n", cfg.ListenPort)
 	}
+	if cfg.FwMark != 0 {
+		fmt.Fprintf(&b, "fwmark=%d\n", cfg.FwMark)
+	}
 	for _, k := range remove {
 		b.WriteString(renderRemoveUAPI(k))
 	}

@@ -39,8 +39,41 @@ type Status struct {
 	// Peers (or Hub) with path key_changed or unsigned.
 	Held []HeldStatus `json:"held"`
 	// Lock is the network lock as this device sees it (spec 012).
-	Lock        LockStatus `json:"lock"`
-	RetrievedAt time.Time  `json:"retrieved_at"`
+	Lock LockStatus `json:"lock"`
+	// Routes are the prefixes reached through peers, ExitNode the exit
+	// node in use and Advertised what this device offers to carry
+	// (spec 013).
+	Routes      []RouteStatus      `json:"routes"`
+	ExitNode    ExitNodeStatus     `json:"exit_node"`
+	Advertised  []AdvertisedStatus `json:"advertised"`
+	RetrievedAt time.Time          `json:"retrieved_at"`
+}
+
+// RouteStatus is one prefix routed through the peer Via.
+type RouteStatus struct {
+	Prefix string `json:"prefix"`
+	Via    string `json:"via"`
+}
+
+// Exit-node states.
+const (
+	ExitStateOff         = "off"
+	ExitStateActive      = "active"
+	ExitStateUnavailable = "unavailable"
+)
+
+// ExitNodeStatus is the selected exit node and whether it carries the
+// default route right now.
+type ExitNodeStatus struct {
+	Name  string `json:"name"`
+	State string `json:"state"`
+}
+
+// AdvertisedStatus is one prefix this device advertises and whether an
+// admin approved it.
+type AdvertisedStatus struct {
+	Prefix   string `json:"prefix"`
+	Approved bool   `json:"approved"`
 }
 
 // SelfStatus identifies this device.
@@ -163,6 +196,7 @@ func (d *Daemon) Status(ctx context.Context) Status {
 	now := d.opts.Now()
 	d.mu.Lock()
 	nm, dev, held := d.netmap, d.dev, d.held
+	exitNode, advertised := d.exitNode, d.advertised
 	lockSt := d.lockStatusLocked()
 	srv := ServerStatus{Addr: d.state.Server, State: ServerReconnecting, Attempt: d.attempt, LastError: d.lastError,
 		NextRetryAt: timePtr(d.nextRetryAt), UnreachableSince: timePtr(d.unreachableSince), LastMessageAt: timePtr(d.lastMessage)}
@@ -179,6 +213,13 @@ func (d *Daemon) Status(ctx context.Context) Status {
 		WireGuard: WGStatus{Interface: d.opts.Interface, ListenPort: d.state.ListenPort},
 		NAT:       NATStatus{Type: NATUnknown, Reflexive: []string{}, Local: []string{}},
 		Peers:     []PeerStatus{}, Held: []HeldStatus{}, Lock: lockSt, RetrievedAt: now,
+		Routes: []RouteStatus{}, ExitNode: ExitNodeStatus{Name: exitNode, State: ExitStateOff}, Advertised: []AdvertisedStatus{},
+	}
+	if exitNode != "" {
+		st.ExitNode.State = ExitStateUnavailable
+	}
+	for _, a := range advertised {
+		st.Advertised = append(st.Advertised, AdvertisedStatus(a))
 	}
 	for _, h := range held {
 		st.Held = append(st.Held, h)
@@ -259,6 +300,16 @@ func (d *Daemon) Status(ctx context.Context) Status {
 				ps.PathEndpoint = ep.String()
 			}
 		}
+		for _, a := range p.AllowedIPs {
+			if pfx, err := netip.ParsePrefix(a); err == nil && (pfx.Bits() != 32 || pfx.Addr().String() != p.IPv4) {
+				st.Routes = append(st.Routes, RouteStatus{Prefix: pfx.String(), Via: p.Name})
+			}
+		}
+		if p.ExitNode && p.Name == exitNode {
+			// The default route is the client's own addition (spec 013).
+			st.ExitNode.State = ExitStateActive
+			st.Routes = append(st.Routes, RouteStatus{Prefix: wg.ExitRoute.String(), Via: p.Name})
+		}
 		// The server's presence verdict wins only while no path is in
 		// use: a direct path outlives a server outage.
 		if !p.Online && (ps.Path == string(path.Idle) || ps.Path == string(path.Unreachable)) {
@@ -331,6 +382,17 @@ func (d *Daemon) localHandler() http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, TrustResult{Trusted: accepted})
+	})
+	mux.HandleFunc("POST /exit-node/{name}", func(w http.ResponseWriter, r *http.Request) {
+		res, err := d.SetExitNode(r.Context(), r.PathValue("name"))
+		switch {
+		case errors.Is(err, ErrNotExitNode):
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		case err != nil:
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		default:
+			writeJSON(w, http.StatusOK, res)
+		}
 	})
 	mux.HandleFunc("POST /rotate-key", func(w http.ResponseWriter, r *http.Request) {
 		if err := d.RotateKey(r.Context()); err != nil {
@@ -423,6 +485,13 @@ type TrustResult struct {
 func (c *LocalClient) Trust(ctx context.Context, name string) (TrustResult, error) {
 	var res TrustResult
 	return res, c.do(ctx, http.MethodPost, "/trust/"+url.PathEscape(name), &res)
+}
+
+// SetExitNode asks the daemon to route internet traffic through the
+// named peer, or ExitNodeOff for none.
+func (c *LocalClient) SetExitNode(ctx context.Context, name string) (ExitNodeStatus, error) {
+	var res ExitNodeStatus
+	return res, c.do(ctx, http.MethodPost, "/exit-node/"+url.PathEscape(name), &res)
 }
 
 // LockInit asks the daemon to enable the network lock with this

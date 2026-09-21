@@ -40,6 +40,8 @@ type controlPlane struct {
 	paths     *control.PathTable
 	relay     *relay.Server
 	lock      *control.LockService
+	routes    *control.RoutesService
+	users     *control.Users
 	admin     control.Principal
 	ts        *httptest.Server
 	fp        string
@@ -49,6 +51,11 @@ type controlPlane struct {
 // cpOptions tune the test control plane.
 type cpOptions struct {
 	visibility control.Visibility
+	// policy, when set, replaces visibility with the compiled policy
+	// document (routes need one, spec 013); users are created before it
+	// loads so the policy may name them.
+	policy string
+	users  []string
 }
 
 func newControlPlane(t *testing.T, mods ...func(*cpOptions)) *controlPlane {
@@ -81,6 +88,23 @@ func newControlPlane(t *testing.T, mods ...func(*cpOptions)) *controlPlane {
 	lockSvc := control.NewLockService(st, time.Now, quiet, hubKey.PublicKey().String()).WithNotifier(hub)
 	registry := control.NewRegistry(st, quiet).WithNotifier(hub).WithLock(lockSvc)
 	enroller := control.NewEnroller(st, time.Now, quiet, overlay, "").WithNotifier(hub)
+	routesSvc := control.NewRoutesService(st, quiet, time.Now, overlay).WithNotifier(hub)
+	for _, u := range cpo.users {
+		if _, err := users.Create(ctx, control.LocalAdmin, u, store.RoleMember, u+"password"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if cpo.policy != "" {
+		path := filepath.Join(t.TempDir(), "policy.yaml")
+		if err := os.WriteFile(path, []byte(cpo.policy), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		ps := control.NewPolicyService(st, quiet, path, hub).WithOverlay(overlay)
+		if err := ps.LoadInitial(ctx); err != nil {
+			t.Fatal(err)
+		}
+		cpo.visibility = control.PolicyVisibility{Load: ps.Load}
+	}
 	endpoints := control.NewEndpointTable(time.Now)
 	paths := control.NewPathTable(time.Now)
 	hubCfg := control.HubConfig{PublicKey: hubKey.PublicKey().String(), Endpoint: "127.0.0.1:51820", Address: netip.MustParseAddr("100.64.0.1"), Overlay: overlay,
@@ -88,7 +112,7 @@ func newControlPlane(t *testing.T, mods ...func(*cpOptions)) *controlPlane {
 	builder := control.NewNetMapBuilder(st, cpo.visibility, endpoints, hub, hubCfg, hub.Generation)
 	grpcSrv, err := api.NewGRPC(api.GRPCDeps{
 		Enroller: enroller, Hub: api.HubInfo{PublicKey: hubCfg.PublicKey, Endpoint: hubCfg.Endpoint, Overlay: overlay}, Logger: quiet,
-		NodeAuth: registry, NetMaps: builder, Sync: hub, Peers: registry, Endpoints: endpoints, Paths: paths, Version: "v0.9.0", Lock: lockSvc,
+		NodeAuth: registry, NetMaps: builder, Sync: hub, Peers: registry, Endpoints: endpoints, Paths: paths, Version: "v0.9.0", Lock: lockSvc, Routes: routesSvc,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -104,7 +128,7 @@ func newControlPlane(t *testing.T, mods ...func(*cpOptions)) *controlPlane {
 	ts.TLS = &tls.Config{MinVersion: tls.VersionTLS13, NextProtos: []string{"h2", "http/1.1"}}
 	ts.StartTLS()
 	t.Cleanup(ts.Close)
-	return &controlPlane{t: t, st: st, hub: hub, registry: registry, tokens: control.NewTokens(st, time.Now, quiet), endpoints: endpoints, paths: paths, relay: relaySrv, lock: lockSvc,
+	return &controlPlane{t: t, st: st, hub: hub, registry: registry, tokens: control.NewTokens(st, time.Now, quiet), endpoints: endpoints, paths: paths, relay: relaySrv, lock: lockSvc, routes: routesSvc, users: users,
 		admin: control.Principal{UserID: admin.ID, Name: admin.Name, Role: admin.Role}, ts: ts, fp: Fingerprint(ts.Certificate().Raw), hubKey: hubKey}
 }
 
@@ -126,7 +150,17 @@ func (cp *controlPlane) enrol(dir, host string) State {
 // enrolWith is enrol with the options adjusted first.
 func (cp *controlPlane) enrolWith(dir, host string, mod func(*Options)) State {
 	cp.t.Helper()
-	tok, err := cp.tokens.Create(context.Background(), cp.admin, control.TokenRequest{OwnerName: "markus", Kind: "human"})
+	return cp.enrolOwned(dir, host, "markus", mod)
+}
+
+// enrolOwned enrols a device for the named user, creating a member of
+// that name when it does not exist yet.
+func (cp *controlPlane) enrolOwned(dir, host, owner string, mod func(*Options)) State {
+	cp.t.Helper()
+	if _, err := cp.users.Create(context.Background(), cp.admin, owner, store.RoleMember, owner+"password"); err != nil && !errors.Is(err, store.ErrConflict) && !errors.Is(err, control.ErrValidation) {
+		cp.t.Fatal(err)
+	}
+	tok, err := cp.tokens.Create(context.Background(), cp.admin, control.TokenRequest{OwnerName: owner, Kind: "human"})
 	if err != nil {
 		cp.t.Fatal(err)
 	}
@@ -174,8 +208,9 @@ func startDaemon(t *testing.T, dir string, mods ...func(*DaemonOptions)) (*Daemo
 	}
 	opts := DaemonOptions{
 		StateDir: dir, Socket: socket, Interface: "thawr0",
-		OpenDevice: func(context.Context, wg.Options) (wg.Device, error) { return fake, nil },
-		Logger:     slog.New(slog.NewTextHandler(logOut, &slog.HandlerOptions{Level: slog.LevelDebug})), Version: "0.1.0",
+		OpenDevice:    func(context.Context, wg.Options) (wg.Device, error) { return fake, nil },
+		EnableForward: func() (func() error, error) { return func() error { return nil }, nil },
+		Logger:        slog.New(slog.NewTextHandler(logOut, &slog.HandlerOptions{Level: slog.LevelDebug})), Version: "0.1.0",
 		MinBackoff: 50 * time.Millisecond, MaxBackoff: 200 * time.Millisecond, EndpointInterval: time.Hour, LocalPoll: time.Hour,
 		Endpoints: func(port int, _ string) []netip.AddrPort {
 			return []netip.AddrPort{netip.AddrPortFrom(netip.MustParseAddr("192.0.2.10"), uint16(port))}

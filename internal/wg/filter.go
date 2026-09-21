@@ -27,6 +27,16 @@ type FilterRule struct {
 	Hi    uint16
 }
 
+// ForwardRule lets packets from Src reach the prefix Dst through this
+// host, which forwards them as a subnet router or exit node (spec 013).
+type ForwardRule struct {
+	Src   netip.Prefix
+	Dst   netip.Prefix
+	Proto string
+	Lo    uint16
+	Hi    uint16
+}
+
 // FilterHook selects what the filter sees: everything arriving for
 // this host (a client) or what the host forwards to other peers (the
 // hub in front of static peers).
@@ -50,6 +60,17 @@ type FilterSet struct {
 	Local   netip.Addr
 	Visible []netip.Addr
 	Rules   []FilterRule
+	// Forward opens the forwarding path for a router (spec 013): packets
+	// arriving over the interface for an address that is not Local pass
+	// only when a forward rule matches. Masquerade lists the destination
+	// prefixes whose forwarded packets get this host's address on the
+	// way out, for sources inside MasqueradeFrom (the overlay).
+	Forward        []ForwardRule
+	Masquerade     []netip.Prefix
+	MasqueradeFrom netip.Prefix
+	// routerOnly skips the input chain (the userspace filter handles
+	// it) and installs only the router chains.
+	routerOnly bool
 }
 
 // FilterStats are the counters shown in status.
@@ -101,6 +122,7 @@ type compiledFilter struct {
 	local   netip.Addr
 	visible map[netip.Addr]bool
 	rules   []FilterRule
+	forward []ForwardRule
 }
 
 // flowKey identifies a flow from this host's point of view.
@@ -118,7 +140,7 @@ func newPacketFilter(now func() time.Time) *packetFilter {
 
 // Set installs a filter set atomically for subsequent packets.
 func (f *packetFilter) Set(set FilterSet) {
-	c := &compiledFilter{hook: set.Hook, local: set.Local, visible: make(map[netip.Addr]bool, len(set.Visible)), rules: append([]FilterRule(nil), set.Rules...)}
+	c := &compiledFilter{hook: set.Hook, local: set.Local, visible: make(map[netip.Addr]bool, len(set.Visible)), rules: append([]FilterRule(nil), set.Rules...), forward: append([]ForwardRule(nil), set.Forward...)}
 	for _, a := range set.Visible {
 		c.visible[a] = true
 	}
@@ -249,6 +271,11 @@ func (f *packetFilter) allow(b []byte) bool {
 	if f.reply(p) {
 		return true
 	}
+	if c.hook == HookInput && c.local.IsValid() && p.dst != c.local {
+		// Not for this host: the kernel forwards it, so only a forward
+		// rule may let it in (spec 013).
+		return c.forwardAllows(p)
+	}
 	if p.proto == protoICMP && c.visible[p.src] {
 		switch p.sport {
 		case icmpEchoRequest, icmpUnreachable, icmpTimeExceed, icmpParamProb:
@@ -276,6 +303,33 @@ func (f *packetFilter) allow(b []byte) bool {
 				return true
 			}
 		}
+	}
+	return false
+}
+
+// forwardAllows reports whether a forward rule lets p through this
+// host toward another network.
+func (c *compiledFilter) forwardAllows(p packet) bool {
+	for i := range c.forward {
+		r := &c.forward[i]
+		if !r.Src.Contains(p.src) || !r.Dst.Contains(p.dst) {
+			continue
+		}
+		if portsAllow(p, r.Proto, r.Lo, r.Hi) {
+			return true
+		}
+	}
+	return false
+}
+
+// portsAllow applies a rule's protocol and port range to p.
+func portsAllow(p packet, proto string, lo, hi uint16) bool {
+	switch {
+	case p.proto == protoICMP:
+		return proto == ProtoICMP || (proto == ProtoAny && lo <= 1 && hi == 65535)
+	case p.proto == protoTCP && (proto == ProtoTCP || proto == ProtoAny),
+		p.proto == protoUDP && (proto == ProtoUDP || proto == ProtoAny):
+		return p.dport >= lo && p.dport <= hi
 	}
 	return false
 }

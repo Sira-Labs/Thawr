@@ -2,8 +2,10 @@ package wg
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +29,13 @@ type userspaceDevice struct {
 
 	mu     sync.Mutex
 	closed bool
+	routes routeTable
+	nft    routerNAT
+}
+
+// SetRoutes installs the routes reached through the interface.
+func (u *userspaceDevice) SetRoutes(_ context.Context, prefixes []netip.Prefix) error {
+	return u.routes.set(u.name, prefixes)
 }
 
 func openUserspace(_ context.Context, opts Options) (Device, error) {
@@ -67,9 +76,14 @@ func openUserspace(_ context.Context, opts Options) (Device, error) {
 
 // SetFilter installs the receiver-side filter between the device and
 // the TUN.
-func (u *userspaceDevice) SetFilter(_ context.Context, set FilterSet) error {
+func (u *userspaceDevice) SetFilter(ctx context.Context, set FilterSet) error {
 	u.filter.Set(set)
-	return nil
+	if set.Interface == "" {
+		set.Interface = u.name
+	}
+	// Forwarding and masquerade happen in the kernel even with a
+	// userspace tunnel; the TUN is an ordinary interface to it.
+	return u.nft.set(ctx, set)
 }
 
 // FilterStats reports the userspace filter counters.
@@ -171,7 +185,14 @@ func (u *userspaceDevice) Close() error {
 		return nil
 	}
 	u.closed = true
+	var errs []error
+	if err := u.routes.clear(u.name); err != nil {
+		errs = append(errs, err)
+	}
+	if err := u.nft.remove(); err != nil {
+		errs = append(errs, err)
+	}
 	// Closing the device also closes the TUN, which removes the interface.
 	u.dev.Close()
-	return nil
+	return errors.Join(errs...)
 }

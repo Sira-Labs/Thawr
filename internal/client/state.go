@@ -47,6 +47,12 @@ type State struct {
 	// must have signed the first lock record this device pins; empty
 	// accepts whatever record the server offers first (spec 012).
 	LockSigner string `json:"lock_signer,omitempty"`
+	// AdvertiseRoutes are the prefixes this device offers to carry as a
+	// subnet router or exit node (0.0.0.0/0), reported to the server at
+	// every connect; ExitNode names the peer whose exit node this
+	// device uses, empty for none (spec 013).
+	AdvertiseRoutes []string `json:"advertise_routes,omitempty"`
+	ExitNode        string   `json:"exit_node,omitempty"`
 }
 
 // DefaultDir returns the platform's state directory unless THAWR_STATE_DIR

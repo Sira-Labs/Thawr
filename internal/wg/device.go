@@ -51,6 +51,10 @@ type Config struct {
 	ListenPort int
 	Addresses  []netip.Prefix
 	Peers      []Peer
+	// FwMark marks the tunnel's own packets so policy routing keeps
+	// them out of the tunnel while an exit node carries the default
+	// route (Linux, spec 013); zero leaves the mark unset.
+	FwMark uint32
 }
 
 // Peer is one remote WireGuard peer.
@@ -91,6 +95,15 @@ type Device interface {
 	Close() error
 }
 
+// Routable is implemented by devices that install OS routes through
+// the interface for prefixes reached via peers (spec 013). The default
+// route 0.0.0.0/0 is the exit node: on Linux it goes into a policy
+// routing table keyed by the interface's fwmark, elsewhere it is
+// refused.
+type Routable interface {
+	SetRoutes(ctx context.Context, prefixes []netip.Prefix) error
+}
+
 // STUNCapable is implemented by devices that can send STUN requests
 // from their own WireGuard socket (the userspace adapter). The kernel
 // adapter cannot share its socket, so callers fall back to a separate
@@ -113,6 +126,16 @@ type Options struct {
 
 // DefaultMTU is WireGuard's conventional MTU for IPv4 over Ethernet.
 const DefaultMTU = 1420
+
+// Errors of the router and exit-node features (spec 013).
+var (
+	// ErrRouterUnsupported means this platform cannot forward and
+	// masquerade for other peers in this release (Linux only).
+	ErrRouterUnsupported = errors.New("wg: subnet routers and exit nodes need Linux in this release")
+	// ErrExitNodeUnsupported means this platform cannot route its
+	// default route through a peer in this release (Linux only).
+	ErrExitNodeUnsupported = errors.New("wg: using an exit node needs Linux in this release")
+)
 
 // Errors returned by Open.
 var (

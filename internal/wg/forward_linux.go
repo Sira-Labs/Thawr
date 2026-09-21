@@ -2,12 +2,33 @@ package wg
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 
 	"github.com/google/nftables"
 	"github.com/google/nftables/expr"
 )
+
+// routerNAT installs, for a userspace tunnel on Linux, the forward and
+// nat chains a router needs; the input filter itself stays in
+// userspace. Nothing is installed while the set carries no forward
+// rule and no masquerade prefix, so plain clients never touch
+// nftables.
+type routerNAT struct {
+	nft nftFilter
+}
+
+func (r *routerNAT) set(ctx context.Context, set FilterSet) error {
+	if len(set.Forward) == 0 && len(set.Masquerade) == 0 {
+		return r.nft.remove()
+	}
+	set.Rules, set.Visible = nil, nil
+	set.Hook = HookInput
+	return r.nft.SetFilter(ctx, FilterSet{Interface: set.Interface, Hook: HookInput, Local: set.Local, Forward: set.Forward, Masquerade: set.Masquerade, MasqueradeFrom: set.MasqueradeFrom, routerOnly: true})
+}
+
+func (r *routerNAT) remove() error { return r.nft.remove() }
 
 // AllowForward lets packets that the hub forwards from iface back to
 // iface pass every foreign forward chain whose policy is drop. Docker

@@ -5,7 +5,7 @@
   "description": "Document served on the client's local socket (GET /status) and printed by `thawr client status --json`. Fields are only ever added.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "self", "server", "wireguard", "nat", "relay", "peers", "held", "lock", "retrieved_at"],
+  "required": ["version", "self", "server", "wireguard", "nat", "relay", "peers", "held", "lock", "routes", "exit_node", "advertised", "retrieved_at"],
   "properties": {
     "version": { "type": "string", "description": "Client binary version." },
     "self": {
@@ -135,6 +135,41 @@
         },
         "rejected": { "type": "string", "description": "Why the record the server offers (or its absence) was not adopted; empty when the pin matches." },
         "self_signed": { "type": "boolean", "description": "This device's own record is signed while the lock is on; other devices hold it until it is." }
+      }
+    },
+    "routes": {
+      "type": "array",
+      "description": "Prefixes reached through peers (spec 013), the exit node's default route included while one is active.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["prefix", "via"],
+        "properties": {
+          "prefix": { "type": "string" },
+          "via": { "type": "string", "description": "Name of the peer carrying the prefix." }
+        }
+      }
+    },
+    "exit_node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "state"],
+      "properties": {
+        "name": { "type": "string", "description": "Selected exit node; empty when none." },
+        "state": { "type": "string", "enum": ["off", "active", "unavailable"] }
+      }
+    },
+    "advertised": {
+      "type": "array",
+      "description": "Prefixes this device offers to carry and whether an admin approved them.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["prefix", "approved"],
+        "properties": {
+          "prefix": { "type": "string" },
+          "approved": { "type": "boolean" }
+        }
       }
     },
     "retrieved_at": { "type": "string", "format": "date-time" }

@@ -141,3 +141,40 @@ func TestFilterForwardHookAndDst(t *testing.T) {
 		t.Error("unset filter dropped a reply")
 	}
 }
+
+func TestUserspaceFilterForward(t *testing.T) {
+	now := time.Date(2026, 9, 22, 1, 0, 0, 0, time.UTC)
+	f := newPacketFilter(func() time.Time { return now })
+	f.Set(FilterSet{
+		Interface: "thawr0", Local: netip.MustParseAddr(self),
+		Forward: []ForwardRule{
+			{Src: netip.MustParsePrefix(peerA + "/32"), Dst: netip.MustParsePrefix("10.1.0.0/24"), Proto: ProtoAny, Lo: 22, Hi: 22},
+			{Src: netip.MustParsePrefix(peerB + "/32"), Dst: netip.MustParsePrefix("0.0.0.0/0"), Proto: ProtoAny, Lo: 1, Hi: 65535},
+		},
+	})
+	syn := uint8(0x02)
+	cases := []struct {
+		name string
+		pkt  []byte
+		want bool
+	}{
+		{"forward allowed", mkPacket(protoTCP, peerA, "10.1.0.20", 40000, 22, syn), true},
+		{"forward wrong port", mkPacket(protoTCP, peerA, "10.1.0.20", 40000, 80, syn), false},
+		{"forward outside prefix", mkPacket(protoTCP, peerA, "10.2.0.20", 40000, 22, syn), false},
+		{"exit node any", mkPacket(protoUDP, peerB, "1.1.1.1", 5000, 53, 0), true},
+		{"exit node icmp", mkPacket(protoICMP, peerB, "1.1.1.1", icmpEchoRequest, 7, 0), true},
+		{"not a forwarder for A to internet", mkPacket(protoUDP, peerA, "1.1.1.1", 5000, 53, 0), false},
+		{"to this host still needs a rule", mkPacket(protoTCP, peerA, self, 40000, 22, syn), false},
+	}
+	for _, tc := range cases {
+		if got := f.Inbound(tc.pkt); got != tc.want {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	// The LAN host's reply, read from the TUN, opens the return path for
+	// the rest of the flow.
+	f.Outbound(mkPacket(protoTCP, "10.1.0.20", peerA, 22, 40000, 0x12))
+	if !f.Inbound(mkPacket(protoTCP, peerA, "10.1.0.20", 40000, 22, 0x10)) {
+		t.Error("established forward flow dropped")
+	}
+}
