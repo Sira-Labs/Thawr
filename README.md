@@ -240,6 +240,7 @@ and it creates the tag on `main` for you. Tags containing a `-`
 | `docs/specs/` | One spec per feature with acceptance criteria and tests |
 | `docs/roadmap/` | Roadmap with phases and exit criteria (`roadmap.md`), weekly sprint plan (`sprints.md`) |
 | `TASKS.md` | Backlog, status and the decisions taken per spec |
+| `CHANGELOG.md` | Notable changes per release |
 | `CLAUDE.md` | Working agreement for AI-assisted sessions |
 
 ## Contributing and security
