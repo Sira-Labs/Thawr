@@ -67,3 +67,6 @@ func (s *Store) Audit() *Audit { return &Audit{q: s.q()} }
 
 // Signatures accesses the peer_signatures table.
 func (s *Store) Signatures() *Signatures { return &Signatures{q: s.q()} }
+
+// Routes returns the advertised-routes accessor (spec 013).
+func (s *Store) Routes() *Routes { return &Routes{q: s.q()} }

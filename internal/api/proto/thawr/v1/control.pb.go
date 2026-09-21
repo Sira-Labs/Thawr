@@ -358,7 +358,10 @@ type NetMap struct {
 	ServerVersion string `protobuf:"bytes,7,opt,name=server_version,json=serverVersion,proto3" json:"server_version,omitempty"`
 	// lock is the current lock record with its signature; absent while
 	// no record was ever set.
-	Lock          *SignedLockRecord `protobuf:"bytes,8,opt,name=lock,proto3" json:"lock,omitempty"`
+	Lock *SignedLockRecord `protobuf:"bytes,8,opt,name=lock,proto3" json:"lock,omitempty"`
+	// forward lists the rules the receiver installs on its forwarding
+	// path as a subnet router or exit node (spec 013).
+	Forward       []*ForwardRule `protobuf:"bytes,9,rep,name=forward,proto3" json:"forward,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -449,6 +452,13 @@ func (x *NetMap) GetLock() *SignedLockRecord {
 	return nil
 }
 
+func (x *NetMap) GetForward() []*ForwardRule {
+	if x != nil {
+		return x.Forward
+	}
+	return nil
+}
+
 // SelfInfo describes the receiving peer.
 type SelfInfo struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
@@ -462,7 +472,10 @@ type SelfInfo struct {
 	Kind string `protobuf:"bytes,6,opt,name=kind,proto3" json:"kind,omitempty"`
 	// signatures are the lock signatures over the receiver's own current
 	// record, so it can tell whether it is signed (spec 012).
-	Signatures    []*PeerSignature `protobuf:"bytes,7,rep,name=signatures,proto3" json:"signatures,omitempty"`
+	Signatures []*PeerSignature `protobuf:"bytes,7,rep,name=signatures,proto3" json:"signatures,omitempty"`
+	// advertised lists the prefixes the receiver advertises as the server
+	// knows them, with their approval (spec 013).
+	Advertised    []*AdvertisedRoute `protobuf:"bytes,8,rep,name=advertised,proto3" json:"advertised,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -546,6 +559,13 @@ func (x *SelfInfo) GetSignatures() []*PeerSignature {
 	return nil
 }
 
+func (x *SelfInfo) GetAdvertised() []*AdvertisedRoute {
+	if x != nil {
+		return x.Advertised
+	}
+	return nil
+}
+
 // NetPeer is one visible peer.
 type NetPeer struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
@@ -567,7 +587,10 @@ type NetPeer struct {
 	// receiver adds no WireGuard peer for it, the hub routes its /32.
 	ViaHub bool `protobuf:"varint,12,opt,name=via_hub,json=viaHub,proto3" json:"via_hub,omitempty"`
 	// signatures are lock signatures over this peer's current record.
-	Signatures    []*PeerSignature `protobuf:"bytes,13,rep,name=signatures,proto3" json:"signatures,omitempty"`
+	Signatures []*PeerSignature `protobuf:"bytes,13,rep,name=signatures,proto3" json:"signatures,omitempty"`
+	// exit_node marks a peer the receiver may route its internet traffic
+	// through; the receiver adds 0.0.0.0/0 only when it selects it.
+	ExitNode      bool `protobuf:"varint,14,opt,name=exit_node,json=exitNode,proto3" json:"exit_node,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -691,6 +714,13 @@ func (x *NetPeer) GetSignatures() []*PeerSignature {
 		return x.Signatures
 	}
 	return nil
+}
+
+func (x *NetPeer) GetExitNode() bool {
+	if x != nil {
+		return x.ExitNode
+	}
+	return false
 }
 
 // Endpoint is one ip:port candidate.
@@ -1375,6 +1405,229 @@ func (x *FilterRule) GetPortHi() uint32 {
 	return 0
 }
 
+// ForwardRule allows src_ipv4 to reach dst_cidr through the receiver on
+// a port range (spec 013).
+type ForwardRule struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SrcIpv4       string                 `protobuf:"bytes,1,opt,name=src_ipv4,json=srcIpv4,proto3" json:"src_ipv4,omitempty"`
+	DstCidr       string                 `protobuf:"bytes,2,opt,name=dst_cidr,json=dstCidr,proto3" json:"dst_cidr,omitempty"`
+	Proto         string                 `protobuf:"bytes,3,opt,name=proto,proto3" json:"proto,omitempty"`
+	PortLo        uint32                 `protobuf:"varint,4,opt,name=port_lo,json=portLo,proto3" json:"port_lo,omitempty"`
+	PortHi        uint32                 `protobuf:"varint,5,opt,name=port_hi,json=portHi,proto3" json:"port_hi,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ForwardRule) Reset() {
+	*x = ForwardRule{}
+	mi := &file_thawr_v1_control_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ForwardRule) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ForwardRule) ProtoMessage() {}
+
+func (x *ForwardRule) ProtoReflect() protoreflect.Message {
+	mi := &file_thawr_v1_control_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ForwardRule.ProtoReflect.Descriptor instead.
+func (*ForwardRule) Descriptor() ([]byte, []int) {
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *ForwardRule) GetSrcIpv4() string {
+	if x != nil {
+		return x.SrcIpv4
+	}
+	return ""
+}
+
+func (x *ForwardRule) GetDstCidr() string {
+	if x != nil {
+		return x.DstCidr
+	}
+	return ""
+}
+
+func (x *ForwardRule) GetProto() string {
+	if x != nil {
+		return x.Proto
+	}
+	return ""
+}
+
+func (x *ForwardRule) GetPortLo() uint32 {
+	if x != nil {
+		return x.PortLo
+	}
+	return 0
+}
+
+func (x *ForwardRule) GetPortHi() uint32 {
+	if x != nil {
+		return x.PortHi
+	}
+	return 0
+}
+
+// AdvertiseRoutesRequest carries the caller's complete advertised set;
+// an empty list withdraws everything.
+type AdvertiseRoutesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Prefixes      []string               `protobuf:"bytes,1,rep,name=prefixes,proto3" json:"prefixes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdvertiseRoutesRequest) Reset() {
+	*x = AdvertiseRoutesRequest{}
+	mi := &file_thawr_v1_control_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdvertiseRoutesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdvertiseRoutesRequest) ProtoMessage() {}
+
+func (x *AdvertiseRoutesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_thawr_v1_control_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdvertiseRoutesRequest.ProtoReflect.Descriptor instead.
+func (*AdvertiseRoutesRequest) Descriptor() ([]byte, []int) {
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *AdvertiseRoutesRequest) GetPrefixes() []string {
+	if x != nil {
+		return x.Prefixes
+	}
+	return nil
+}
+
+// AdvertisedRoutes lists a peer's advertised prefixes.
+type AdvertisedRoutes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Routes        []*AdvertisedRoute     `protobuf:"bytes,1,rep,name=routes,proto3" json:"routes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdvertisedRoutes) Reset() {
+	*x = AdvertisedRoutes{}
+	mi := &file_thawr_v1_control_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdvertisedRoutes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdvertisedRoutes) ProtoMessage() {}
+
+func (x *AdvertisedRoutes) ProtoReflect() protoreflect.Message {
+	mi := &file_thawr_v1_control_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdvertisedRoutes.ProtoReflect.Descriptor instead.
+func (*AdvertisedRoutes) Descriptor() ([]byte, []int) {
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *AdvertisedRoutes) GetRoutes() []*AdvertisedRoute {
+	if x != nil {
+		return x.Routes
+	}
+	return nil
+}
+
+// AdvertisedRoute is one advertised prefix and whether an admin
+// approved it.
+type AdvertisedRoute struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Prefix        string                 `protobuf:"bytes,1,opt,name=prefix,proto3" json:"prefix,omitempty"`
+	Approved      bool                   `protobuf:"varint,2,opt,name=approved,proto3" json:"approved,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdvertisedRoute) Reset() {
+	*x = AdvertisedRoute{}
+	mi := &file_thawr_v1_control_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdvertisedRoute) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdvertisedRoute) ProtoMessage() {}
+
+func (x *AdvertisedRoute) ProtoReflect() protoreflect.Message {
+	mi := &file_thawr_v1_control_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdvertisedRoute.ProtoReflect.Descriptor instead.
+func (*AdvertisedRoute) Descriptor() ([]byte, []int) {
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *AdvertisedRoute) GetPrefix() string {
+	if x != nil {
+		return x.Prefix
+	}
+	return ""
+}
+
+func (x *AdvertisedRoute) GetApproved() bool {
+	if x != nil {
+		return x.Approved
+	}
+	return false
+}
+
 // EndpointReport replaces the caller's candidates.
 type EndpointReport struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1387,7 +1640,7 @@ type EndpointReport struct {
 
 func (x *EndpointReport) Reset() {
 	*x = EndpointReport{}
-	mi := &file_thawr_v1_control_proto_msgTypes[17]
+	mi := &file_thawr_v1_control_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1399,7 +1652,7 @@ func (x *EndpointReport) String() string {
 func (*EndpointReport) ProtoMessage() {}
 
 func (x *EndpointReport) ProtoReflect() protoreflect.Message {
-	mi := &file_thawr_v1_control_proto_msgTypes[17]
+	mi := &file_thawr_v1_control_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1412,7 +1665,7 @@ func (x *EndpointReport) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EndpointReport.ProtoReflect.Descriptor instead.
 func (*EndpointReport) Descriptor() ([]byte, []int) {
-	return file_thawr_v1_control_proto_rawDescGZIP(), []int{17}
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *EndpointReport) GetEndpoints() []*Endpoint {
@@ -1446,7 +1699,7 @@ type PathReport struct {
 
 func (x *PathReport) Reset() {
 	*x = PathReport{}
-	mi := &file_thawr_v1_control_proto_msgTypes[18]
+	mi := &file_thawr_v1_control_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1458,7 +1711,7 @@ func (x *PathReport) String() string {
 func (*PathReport) ProtoMessage() {}
 
 func (x *PathReport) ProtoReflect() protoreflect.Message {
-	mi := &file_thawr_v1_control_proto_msgTypes[18]
+	mi := &file_thawr_v1_control_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1471,7 +1724,7 @@ func (x *PathReport) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PathReport.ProtoReflect.Descriptor instead.
 func (*PathReport) Descriptor() ([]byte, []int) {
-	return file_thawr_v1_control_proto_rawDescGZIP(), []int{18}
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *PathReport) GetPaths() []*PathState {
@@ -1494,7 +1747,7 @@ type PathState struct {
 
 func (x *PathState) Reset() {
 	*x = PathState{}
-	mi := &file_thawr_v1_control_proto_msgTypes[19]
+	mi := &file_thawr_v1_control_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1506,7 +1759,7 @@ func (x *PathState) String() string {
 func (*PathState) ProtoMessage() {}
 
 func (x *PathState) ProtoReflect() protoreflect.Message {
-	mi := &file_thawr_v1_control_proto_msgTypes[19]
+	mi := &file_thawr_v1_control_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1519,7 +1772,7 @@ func (x *PathState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PathState.ProtoReflect.Descriptor instead.
 func (*PathState) Descriptor() ([]byte, []int) {
-	return file_thawr_v1_control_proto_rawDescGZIP(), []int{19}
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *PathState) GetPeerId() string {
@@ -1558,7 +1811,7 @@ type RotateKeyRequest struct {
 
 func (x *RotateKeyRequest) Reset() {
 	*x = RotateKeyRequest{}
-	mi := &file_thawr_v1_control_proto_msgTypes[20]
+	mi := &file_thawr_v1_control_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1570,7 +1823,7 @@ func (x *RotateKeyRequest) String() string {
 func (*RotateKeyRequest) ProtoMessage() {}
 
 func (x *RotateKeyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_thawr_v1_control_proto_msgTypes[20]
+	mi := &file_thawr_v1_control_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1583,7 +1836,7 @@ func (x *RotateKeyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RotateKeyRequest.ProtoReflect.Descriptor instead.
 func (*RotateKeyRequest) Descriptor() ([]byte, []int) {
-	return file_thawr_v1_control_proto_rawDescGZIP(), []int{20}
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *RotateKeyRequest) GetNewPublicKey() string {
@@ -1617,7 +1870,7 @@ type RotateKeyResponse struct {
 
 func (x *RotateKeyResponse) Reset() {
 	*x = RotateKeyResponse{}
-	mi := &file_thawr_v1_control_proto_msgTypes[21]
+	mi := &file_thawr_v1_control_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1629,7 +1882,7 @@ func (x *RotateKeyResponse) String() string {
 func (*RotateKeyResponse) ProtoMessage() {}
 
 func (x *RotateKeyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_thawr_v1_control_proto_msgTypes[21]
+	mi := &file_thawr_v1_control_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1642,7 +1895,7 @@ func (x *RotateKeyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RotateKeyResponse.ProtoReflect.Descriptor instead.
 func (*RotateKeyResponse) Descriptor() ([]byte, []int) {
-	return file_thawr_v1_control_proto_rawDescGZIP(), []int{21}
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *RotateKeyResponse) GetGeneration() int64 {
@@ -1661,7 +1914,7 @@ type Empty struct {
 
 func (x *Empty) Reset() {
 	*x = Empty{}
-	mi := &file_thawr_v1_control_proto_msgTypes[22]
+	mi := &file_thawr_v1_control_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1673,7 +1926,7 @@ func (x *Empty) String() string {
 func (*Empty) ProtoMessage() {}
 
 func (x *Empty) ProtoReflect() protoreflect.Message {
-	mi := &file_thawr_v1_control_proto_msgTypes[22]
+	mi := &file_thawr_v1_control_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1686,7 +1939,7 @@ func (x *Empty) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Empty.ProtoReflect.Descriptor instead.
 func (*Empty) Descriptor() ([]byte, []int) {
-	return file_thawr_v1_control_proto_rawDescGZIP(), []int{22}
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{26}
 }
 
 var File_thawr_v1_control_proto protoreflect.FileDescriptor
@@ -1719,7 +1972,7 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"generation\x18\x01 \x01(\x03R\n" +
 	"generation\x12%\n" +
 	"\x0eclient_version\x18\x02 \x01(\tR\rclientVersion\x12\x19\n" +
-	"\block_key\x18\x03 \x01(\tR\alockKey\"\xc1\x02\n" +
+	"\block_key\x18\x03 \x01(\tR\alockKey\"\xf2\x02\n" +
 	"\x06NetMap\x12\x1e\n" +
 	"\n" +
 	"generation\x18\x01 \x01(\x03R\n" +
@@ -1730,7 +1983,8 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"\x06filter\x18\x05 \x03(\v2\x14.thawr.v1.FilterRuleR\x06filter\x12\x1c\n" +
 	"\tkeepalive\x18\x06 \x01(\bR\tkeepalive\x12%\n" +
 	"\x0eserver_version\x18\a \x01(\tR\rserverVersion\x12.\n" +
-	"\x04lock\x18\b \x01(\v2\x1a.thawr.v1.SignedLockRecordR\x04lock\"\xd1\x01\n" +
+	"\x04lock\x18\b \x01(\v2\x1a.thawr.v1.SignedLockRecordR\x04lock\x12/\n" +
+	"\aforward\x18\t \x03(\v2\x15.thawr.v1.ForwardRuleR\aforward\"\x8c\x02\n" +
 	"\bSelfInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -1741,7 +1995,10 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"\x04kind\x18\x06 \x01(\tR\x04kind\x127\n" +
 	"\n" +
 	"signatures\x18\a \x03(\v2\x17.thawr.v1.PeerSignatureR\n" +
-	"signatures\"\x83\x03\n" +
+	"signatures\x129\n" +
+	"\n" +
+	"advertised\x18\b \x03(\v2\x19.thawr.v1.AdvertisedRouteR\n" +
+	"advertised\"\xa0\x03\n" +
 	"\aNetPeer\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -1760,7 +2017,8 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"\avia_hub\x18\f \x01(\bR\x06viaHub\x127\n" +
 	"\n" +
 	"signatures\x18\r \x03(\v2\x17.thawr.v1.PeerSignatureR\n" +
-	"signatures\"J\n" +
+	"signatures\x12\x1b\n" +
+	"\texit_node\x18\x0e \x01(\bR\bexitNode\"J\n" +
 	"\bEndpoint\x12\x12\n" +
 	"\x04addr\x18\x01 \x01(\tR\x04addr\x12*\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x16.thawr.v1.EndpointKindR\x04kind\"\x9e\x01\n" +
@@ -1819,7 +2077,20 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"\bsrc_ipv4\x18\x01 \x01(\tR\asrcIpv4\x12\x14\n" +
 	"\x05proto\x18\x02 \x01(\tR\x05proto\x12\x17\n" +
 	"\aport_lo\x18\x03 \x01(\rR\x06portLo\x12\x17\n" +
-	"\aport_hi\x18\x04 \x01(\rR\x06portHi\"\x81\x01\n" +
+	"\aport_hi\x18\x04 \x01(\rR\x06portHi\"\x8b\x01\n" +
+	"\vForwardRule\x12\x19\n" +
+	"\bsrc_ipv4\x18\x01 \x01(\tR\asrcIpv4\x12\x19\n" +
+	"\bdst_cidr\x18\x02 \x01(\tR\adstCidr\x12\x14\n" +
+	"\x05proto\x18\x03 \x01(\tR\x05proto\x12\x17\n" +
+	"\aport_lo\x18\x04 \x01(\rR\x06portLo\x12\x17\n" +
+	"\aport_hi\x18\x05 \x01(\rR\x06portHi\"4\n" +
+	"\x16AdvertiseRoutesRequest\x12\x1a\n" +
+	"\bprefixes\x18\x01 \x03(\tR\bprefixes\"E\n" +
+	"\x10AdvertisedRoutes\x121\n" +
+	"\x06routes\x18\x01 \x03(\v2\x19.thawr.v1.AdvertisedRouteR\x06routes\"E\n" +
+	"\x0fAdvertisedRoute\x12\x16\n" +
+	"\x06prefix\x18\x01 \x01(\tR\x06prefix\x12\x1a\n" +
+	"\bapproved\x18\x02 \x01(\bR\bapproved\"\x81\x01\n" +
 	"\x0eEndpointReport\x120\n" +
 	"\tendpoints\x18\x01 \x03(\v2\x12.thawr.v1.EndpointR\tendpoints\x12\x1c\n" +
 	"\tsymmetric\x18\x02 \x01(\bR\tsymmetric\x12\x1f\n" +
@@ -1846,7 +2117,7 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"\x19ENDPOINT_KIND_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13ENDPOINT_KIND_LOCAL\x10\x01\x12\x1b\n" +
 	"\x17ENDPOINT_KIND_REFLEXIVE\x10\x02\x12\x18\n" +
-	"\x14ENDPOINT_KIND_STABLE\x10\x032\x82\x04\n" +
+	"\x14ENDPOINT_KIND_STABLE\x10\x032\xd3\x04\n" +
 	"\aControl\x12;\n" +
 	"\x06Enroll\x12\x17.thawr.v1.EnrollRequest\x1a\x18.thawr.v1.EnrollResponse\x121\n" +
 	"\x04Sync\x12\x15.thawr.v1.SyncRequest\x1a\x10.thawr.v1.NetMap0\x01\x12<\n" +
@@ -1857,7 +2128,8 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"\x05Leave\x12\x0f.thawr.v1.Empty\x1a\x0f.thawr.v1.Empty\x124\n" +
 	"\aSetLock\x12\x18.thawr.v1.SetLockRequest\x1a\x0f.thawr.v1.Empty\x126\n" +
 	"\bSignPeer\x12\x19.thawr.v1.SignPeerRequest\x1a\x0f.thawr.v1.Empty\x125\n" +
-	"\rListLockPeers\x12\x0f.thawr.v1.Empty\x1a\x13.thawr.v1.LockPeersBDZBgithub.com/thedatadudech/thawr/internal/api/proto/thawr/v1;thawrv1b\x06proto3"
+	"\rListLockPeers\x12\x0f.thawr.v1.Empty\x1a\x13.thawr.v1.LockPeers\x12O\n" +
+	"\x0fAdvertiseRoutes\x12 .thawr.v1.AdvertiseRoutesRequest\x1a\x1a.thawr.v1.AdvertisedRoutesBDZBgithub.com/thedatadudech/thawr/internal/api/proto/thawr/v1;thawrv1b\x06proto3"
 
 var (
 	file_thawr_v1_control_proto_rawDescOnce sync.Once
@@ -1872,32 +2144,36 @@ func file_thawr_v1_control_proto_rawDescGZIP() []byte {
 }
 
 var file_thawr_v1_control_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_thawr_v1_control_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
+var file_thawr_v1_control_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
 var file_thawr_v1_control_proto_goTypes = []any{
-	(EndpointKind)(0),         // 0: thawr.v1.EndpointKind
-	(*EnrollRequest)(nil),     // 1: thawr.v1.EnrollRequest
-	(*EnrollResponse)(nil),    // 2: thawr.v1.EnrollResponse
-	(*SyncRequest)(nil),       // 3: thawr.v1.SyncRequest
-	(*NetMap)(nil),            // 4: thawr.v1.NetMap
-	(*SelfInfo)(nil),          // 5: thawr.v1.SelfInfo
-	(*NetPeer)(nil),           // 6: thawr.v1.NetPeer
-	(*Endpoint)(nil),          // 7: thawr.v1.Endpoint
-	(*HubPeer)(nil),           // 8: thawr.v1.HubPeer
-	(*PeerSignature)(nil),     // 9: thawr.v1.PeerSignature
-	(*LockSigner)(nil),        // 10: thawr.v1.LockSigner
-	(*LockRecord)(nil),        // 11: thawr.v1.LockRecord
-	(*SignedLockRecord)(nil),  // 12: thawr.v1.SignedLockRecord
-	(*SetLockRequest)(nil),    // 13: thawr.v1.SetLockRequest
-	(*SignPeerRequest)(nil),   // 14: thawr.v1.SignPeerRequest
-	(*LockPeers)(nil),         // 15: thawr.v1.LockPeers
-	(*LockPeer)(nil),          // 16: thawr.v1.LockPeer
-	(*FilterRule)(nil),        // 17: thawr.v1.FilterRule
-	(*EndpointReport)(nil),    // 18: thawr.v1.EndpointReport
-	(*PathReport)(nil),        // 19: thawr.v1.PathReport
-	(*PathState)(nil),         // 20: thawr.v1.PathState
-	(*RotateKeyRequest)(nil),  // 21: thawr.v1.RotateKeyRequest
-	(*RotateKeyResponse)(nil), // 22: thawr.v1.RotateKeyResponse
-	(*Empty)(nil),             // 23: thawr.v1.Empty
+	(EndpointKind)(0),              // 0: thawr.v1.EndpointKind
+	(*EnrollRequest)(nil),          // 1: thawr.v1.EnrollRequest
+	(*EnrollResponse)(nil),         // 2: thawr.v1.EnrollResponse
+	(*SyncRequest)(nil),            // 3: thawr.v1.SyncRequest
+	(*NetMap)(nil),                 // 4: thawr.v1.NetMap
+	(*SelfInfo)(nil),               // 5: thawr.v1.SelfInfo
+	(*NetPeer)(nil),                // 6: thawr.v1.NetPeer
+	(*Endpoint)(nil),               // 7: thawr.v1.Endpoint
+	(*HubPeer)(nil),                // 8: thawr.v1.HubPeer
+	(*PeerSignature)(nil),          // 9: thawr.v1.PeerSignature
+	(*LockSigner)(nil),             // 10: thawr.v1.LockSigner
+	(*LockRecord)(nil),             // 11: thawr.v1.LockRecord
+	(*SignedLockRecord)(nil),       // 12: thawr.v1.SignedLockRecord
+	(*SetLockRequest)(nil),         // 13: thawr.v1.SetLockRequest
+	(*SignPeerRequest)(nil),        // 14: thawr.v1.SignPeerRequest
+	(*LockPeers)(nil),              // 15: thawr.v1.LockPeers
+	(*LockPeer)(nil),               // 16: thawr.v1.LockPeer
+	(*FilterRule)(nil),             // 17: thawr.v1.FilterRule
+	(*ForwardRule)(nil),            // 18: thawr.v1.ForwardRule
+	(*AdvertiseRoutesRequest)(nil), // 19: thawr.v1.AdvertiseRoutesRequest
+	(*AdvertisedRoutes)(nil),       // 20: thawr.v1.AdvertisedRoutes
+	(*AdvertisedRoute)(nil),        // 21: thawr.v1.AdvertisedRoute
+	(*EndpointReport)(nil),         // 22: thawr.v1.EndpointReport
+	(*PathReport)(nil),             // 23: thawr.v1.PathReport
+	(*PathState)(nil),              // 24: thawr.v1.PathState
+	(*RotateKeyRequest)(nil),       // 25: thawr.v1.RotateKeyRequest
+	(*RotateKeyResponse)(nil),      // 26: thawr.v1.RotateKeyResponse
+	(*Empty)(nil),                  // 27: thawr.v1.Empty
 }
 var file_thawr_v1_control_proto_depIdxs = []int32{
 	5,  // 0: thawr.v1.NetMap.self:type_name -> thawr.v1.SelfInfo
@@ -1905,42 +2181,47 @@ var file_thawr_v1_control_proto_depIdxs = []int32{
 	8,  // 2: thawr.v1.NetMap.hub:type_name -> thawr.v1.HubPeer
 	17, // 3: thawr.v1.NetMap.filter:type_name -> thawr.v1.FilterRule
 	12, // 4: thawr.v1.NetMap.lock:type_name -> thawr.v1.SignedLockRecord
-	9,  // 5: thawr.v1.SelfInfo.signatures:type_name -> thawr.v1.PeerSignature
-	7,  // 6: thawr.v1.NetPeer.endpoints:type_name -> thawr.v1.Endpoint
-	9,  // 7: thawr.v1.NetPeer.signatures:type_name -> thawr.v1.PeerSignature
-	0,  // 8: thawr.v1.Endpoint.kind:type_name -> thawr.v1.EndpointKind
-	9,  // 9: thawr.v1.HubPeer.signatures:type_name -> thawr.v1.PeerSignature
-	10, // 10: thawr.v1.LockRecord.signers:type_name -> thawr.v1.LockSigner
-	11, // 11: thawr.v1.SignedLockRecord.record:type_name -> thawr.v1.LockRecord
-	12, // 12: thawr.v1.SetLockRequest.lock:type_name -> thawr.v1.SignedLockRecord
-	14, // 13: thawr.v1.SetLockRequest.signatures:type_name -> thawr.v1.SignPeerRequest
-	16, // 14: thawr.v1.LockPeers.peers:type_name -> thawr.v1.LockPeer
-	16, // 15: thawr.v1.LockPeers.hub:type_name -> thawr.v1.LockPeer
-	7,  // 16: thawr.v1.EndpointReport.endpoints:type_name -> thawr.v1.Endpoint
-	20, // 17: thawr.v1.PathReport.paths:type_name -> thawr.v1.PathState
-	1,  // 18: thawr.v1.Control.Enroll:input_type -> thawr.v1.EnrollRequest
-	3,  // 19: thawr.v1.Control.Sync:input_type -> thawr.v1.SyncRequest
-	18, // 20: thawr.v1.Control.ReportEndpoints:input_type -> thawr.v1.EndpointReport
-	19, // 21: thawr.v1.Control.ReportPath:input_type -> thawr.v1.PathReport
-	21, // 22: thawr.v1.Control.RotateKey:input_type -> thawr.v1.RotateKeyRequest
-	23, // 23: thawr.v1.Control.Leave:input_type -> thawr.v1.Empty
-	13, // 24: thawr.v1.Control.SetLock:input_type -> thawr.v1.SetLockRequest
-	14, // 25: thawr.v1.Control.SignPeer:input_type -> thawr.v1.SignPeerRequest
-	23, // 26: thawr.v1.Control.ListLockPeers:input_type -> thawr.v1.Empty
-	2,  // 27: thawr.v1.Control.Enroll:output_type -> thawr.v1.EnrollResponse
-	4,  // 28: thawr.v1.Control.Sync:output_type -> thawr.v1.NetMap
-	23, // 29: thawr.v1.Control.ReportEndpoints:output_type -> thawr.v1.Empty
-	23, // 30: thawr.v1.Control.ReportPath:output_type -> thawr.v1.Empty
-	22, // 31: thawr.v1.Control.RotateKey:output_type -> thawr.v1.RotateKeyResponse
-	23, // 32: thawr.v1.Control.Leave:output_type -> thawr.v1.Empty
-	23, // 33: thawr.v1.Control.SetLock:output_type -> thawr.v1.Empty
-	23, // 34: thawr.v1.Control.SignPeer:output_type -> thawr.v1.Empty
-	15, // 35: thawr.v1.Control.ListLockPeers:output_type -> thawr.v1.LockPeers
-	27, // [27:36] is the sub-list for method output_type
-	18, // [18:27] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	18, // 5: thawr.v1.NetMap.forward:type_name -> thawr.v1.ForwardRule
+	9,  // 6: thawr.v1.SelfInfo.signatures:type_name -> thawr.v1.PeerSignature
+	21, // 7: thawr.v1.SelfInfo.advertised:type_name -> thawr.v1.AdvertisedRoute
+	7,  // 8: thawr.v1.NetPeer.endpoints:type_name -> thawr.v1.Endpoint
+	9,  // 9: thawr.v1.NetPeer.signatures:type_name -> thawr.v1.PeerSignature
+	0,  // 10: thawr.v1.Endpoint.kind:type_name -> thawr.v1.EndpointKind
+	9,  // 11: thawr.v1.HubPeer.signatures:type_name -> thawr.v1.PeerSignature
+	10, // 12: thawr.v1.LockRecord.signers:type_name -> thawr.v1.LockSigner
+	11, // 13: thawr.v1.SignedLockRecord.record:type_name -> thawr.v1.LockRecord
+	12, // 14: thawr.v1.SetLockRequest.lock:type_name -> thawr.v1.SignedLockRecord
+	14, // 15: thawr.v1.SetLockRequest.signatures:type_name -> thawr.v1.SignPeerRequest
+	16, // 16: thawr.v1.LockPeers.peers:type_name -> thawr.v1.LockPeer
+	16, // 17: thawr.v1.LockPeers.hub:type_name -> thawr.v1.LockPeer
+	21, // 18: thawr.v1.AdvertisedRoutes.routes:type_name -> thawr.v1.AdvertisedRoute
+	7,  // 19: thawr.v1.EndpointReport.endpoints:type_name -> thawr.v1.Endpoint
+	24, // 20: thawr.v1.PathReport.paths:type_name -> thawr.v1.PathState
+	1,  // 21: thawr.v1.Control.Enroll:input_type -> thawr.v1.EnrollRequest
+	3,  // 22: thawr.v1.Control.Sync:input_type -> thawr.v1.SyncRequest
+	22, // 23: thawr.v1.Control.ReportEndpoints:input_type -> thawr.v1.EndpointReport
+	23, // 24: thawr.v1.Control.ReportPath:input_type -> thawr.v1.PathReport
+	25, // 25: thawr.v1.Control.RotateKey:input_type -> thawr.v1.RotateKeyRequest
+	27, // 26: thawr.v1.Control.Leave:input_type -> thawr.v1.Empty
+	13, // 27: thawr.v1.Control.SetLock:input_type -> thawr.v1.SetLockRequest
+	14, // 28: thawr.v1.Control.SignPeer:input_type -> thawr.v1.SignPeerRequest
+	27, // 29: thawr.v1.Control.ListLockPeers:input_type -> thawr.v1.Empty
+	19, // 30: thawr.v1.Control.AdvertiseRoutes:input_type -> thawr.v1.AdvertiseRoutesRequest
+	2,  // 31: thawr.v1.Control.Enroll:output_type -> thawr.v1.EnrollResponse
+	4,  // 32: thawr.v1.Control.Sync:output_type -> thawr.v1.NetMap
+	27, // 33: thawr.v1.Control.ReportEndpoints:output_type -> thawr.v1.Empty
+	27, // 34: thawr.v1.Control.ReportPath:output_type -> thawr.v1.Empty
+	26, // 35: thawr.v1.Control.RotateKey:output_type -> thawr.v1.RotateKeyResponse
+	27, // 36: thawr.v1.Control.Leave:output_type -> thawr.v1.Empty
+	27, // 37: thawr.v1.Control.SetLock:output_type -> thawr.v1.Empty
+	27, // 38: thawr.v1.Control.SignPeer:output_type -> thawr.v1.Empty
+	15, // 39: thawr.v1.Control.ListLockPeers:output_type -> thawr.v1.LockPeers
+	20, // 40: thawr.v1.Control.AdvertiseRoutes:output_type -> thawr.v1.AdvertisedRoutes
+	31, // [31:41] is the sub-list for method output_type
+	21, // [21:31] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_thawr_v1_control_proto_init() }
@@ -1954,7 +2235,7 @@ func file_thawr_v1_control_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_thawr_v1_control_proto_rawDesc), len(file_thawr_v1_control_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   23,
+			NumMessages:   27,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

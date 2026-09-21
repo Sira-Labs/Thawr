@@ -25,8 +25,8 @@ func TestMigrateFresh(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SchemaVersion: %v", err)
 	}
-	if v != 4 {
-		t.Errorf("schema version: got %d, want 4", v)
+	if v != 5 {
+		t.Errorf("schema version: got %d, want 5", v)
 	}
 	for _, table := range []string{"meta", "users", "peers", "enrollment_tokens", "audit_log", "peer_signatures"} {
 		var n int
@@ -55,7 +55,7 @@ func TestMigrateIdempotent(t *testing.T) {
 	}
 	defer func() { _ = s2.Close() }()
 	v, err := s2.SchemaVersion(ctx)
-	if err != nil || v != 4 {
+	if err != nil || v != 5 {
 		t.Errorf("schema version after reopen: %d, %v", v, err)
 	}
 	if got, err := s2.Meta().Get(ctx, "marker"); err != nil || got != "kept" {
