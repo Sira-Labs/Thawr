@@ -21,12 +21,14 @@ Mecca where the Prophet Muhammad ﷺ and Abu Bakr found shelter during the
 Hijra: hidden, protected, reachable only by those who belong.
 
 Status: release candidate. `v0.1.0-rc3` runs a hub on a VPS with a
-Mac and a phone as peers; specs 001–009 (enrollment, key distribution,
-NAT traversal, relay, ACL policy, status, mobile QR, release and install)
-are implemented and covered by unit and netns integration tests. Config
+Mac and a phone as peers; specs 001–012 (enrollment, key distribution,
+NAT traversal, relay, ACL policy, status, mobile QR, release and
+install, DNS names, key pinning and audit log, network lock) are
+implemented and covered by unit and netns integration tests. Config
 keys and the admin API may still change before `v0.1.0`. The design
 lives in `docs/`; the implementation follows one spec at a time from
-`docs/specs/` and is tracked in `TASKS.md`.
+`docs/specs/`, is tracked in `TASKS.md`, and the phases and weekly
+sprints are in `docs/roadmap/`.
 
 ## What you get
 
@@ -236,7 +238,8 @@ and it creates the tag on `main` for you. Tags containing a `-`
 | `docs/adr/` | Architecture decision records |
 | `docs/THREAT_MODEL.md` | Assets, attackers, mitigations, out of scope |
 | `docs/specs/` | One spec per feature with acceptance criteria and tests |
-| `TASKS.md` | Backlog and status |
+| `docs/roadmap/` | Roadmap with phases and exit criteria (`roadmap.md`), weekly sprint plan (`sprints.md`) |
+| `TASKS.md` | Backlog, status and the decisions taken per spec |
 | `CLAUDE.md` | Working agreement for AI-assisted sessions |
 
 ## Contributing and security
@@ -245,7 +248,10 @@ and it creates the tag on `main` for you. Tags containing a `-`
 change per commit, `make test lint` clean, Developer Certificate of
 Origin sign-off. Pull requests that add cryptographic code are declined
 on principle (ADR 0004). Report vulnerabilities privately as described
-in `SECURITY.md`, not in a public issue.
+in `SECURITY.md`, not in a public issue. The
+[milestones](https://github.com/thedatadudech/Thawr/milestones) show
+what is planned next; `docs/roadmap/` has the phases and the sprint
+plan behind them.
 
 Trust in Thawr is explicit. A device trusts the server it enrolled
 with (TLS fingerprint) and the WireGuard keys it saw first; after

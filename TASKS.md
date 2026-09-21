@@ -2,7 +2,10 @@
 
 Status legend: `[ ]` open, `[~]` in progress, `[x]` done. One spec per
 session; mark it here and add one line per non-obvious decision below the
-entry.
+entry. Phases, exit criteria and the progress log per sprint are in
+`docs/roadmap/roadmap.md`; the weekly sprint plan with dated stories is
+`docs/roadmap/sprints.md` (sprints 4 onward; sprints 1–3 below were spec
+batches).
 
 ## Phase 0 — Documents
 
@@ -545,9 +548,9 @@ entry.
       - Out of scope, listed in the spec: removing a signer, a quorum,
         rotating a lock key, short-lived keys.
 - [ ] **013 Exit nodes and subnet routers** — advertised prefixes gated
-      by policy (spec to be written).
+      by policy (spec to be written; sprint 5 in `docs/roadmap/sprints.md`).
 
-## Phase 2 candidates (not scheduled)
+## Phase 2 candidates (scheduled as specs 014–021 in `docs/roadmap/`)
 
 - OIDC identity provider plugin (ADR 0006).
 - IPv6 overlay.

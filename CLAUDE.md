@@ -17,6 +17,9 @@ specs; only the one you implement plus any it references.
    commit; a spec may take several commits.
 5. Mark the spec done in `TASKS.md` and add one line per non-obvious
    decision under that spec's entry (these are the session notes).
+   When a sprint closes, add its line to the progress log in
+   `docs/roadmap/roadmap.md`; the sprint's stories are in
+   `docs/roadmap/sprints.md`.
 6. Do not start the next spec. Do not refactor code the spec does not touch.
 7. Ask before deviating from any ADR in `docs/adr/` or any fixed decision
    in `docs/ARCHITECTURE.md`. If a spec contradicts an ADR, stop and ask.
