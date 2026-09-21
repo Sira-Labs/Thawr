@@ -72,6 +72,12 @@ carried specs 001–009.
   `client lock init|status|sign|key|add-signer|disable`, `admin lock`,
   a SIGNED column, `client up --lock-signer <key>` for devices enrolled
   while the server may already be hostile (spec 012).
+- Subnet routers and exit nodes: `client up --advertise-routes` and
+  `--advertise-exit-node` (Linux), admin approval with `admin peer
+  routes approve|revoke|list`, policy `dst` CIDRs outside the overlay
+  and `internet`, routes installed through `thawr0`, `client exit-node
+  <name>|off|status` with fwmark policy routing on Linux, forward and
+  masquerade rules on the router, `Routes:` line in status (spec 013).
 - CI on Linux, macOS and Windows with race tests, cross-builds for five
   targets, a reproducibility check of the archives and `govulncheck`;
   release workflow from a tag or by hand; Dependabot; issue and pull

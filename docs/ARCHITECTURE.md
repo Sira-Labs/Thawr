@@ -431,6 +431,47 @@ on, first answer wins, no cache. Both resolvers drop queries from
 outside the overlay and listen on overlay addresses only, so neither is
 reachable from the internet. Spec 010.
 
+### 4.9 Routes: subnet routers and exit nodes
+
+A peer that runs `client up --advertise-routes 10.1.0.0/24` or
+`--advertise-exit-node` (the prefix `0.0.0.0/0`) reports its complete
+advertised set through `AdvertiseRoutes` at every connect; the server
+stores the prefixes unapproved in `peer_routes` and audits every
+change. Nothing moves until an admin approves a prefix (`thawr admin
+peer routes approve <name> <prefix>`) and the policy grants it: a `dst`
+CIDR outside the overlay is a subnet route, `internet` is any approved
+exit node, and the ports apply to the destination behind the router.
+The compiler turns such a rule into forward rules per source peer and
+router (the rule's own CIDR, not the advertised one) and makes the
+router visible to the source without opening a port on the router
+itself. The source's netmap carries the prefix as an extra `AllowedIP`
+of the router (one router per prefix; the lowest peer id wins when
+several advertise it) or the `exit_node` flag; the router's netmap
+carries the forward rules and its own advertisements with their
+approval.
+
+The client installs an OS route through `thawr0` for every extra
+`AllowedIP` and removes it when it leaves the netmap or the daemon
+stops. `thawr client exit-node <name>` adds `0.0.0.0/0` to that peer
+and, on Linux, marks the tunnel's own packets with a fwmark and sends
+everything else to a routing table whose only route is the default
+through `thawr0` (the wg-quick scheme), so the WireGuard endpoint and
+the control connection stay outside the tunnel; the choice is
+persisted and shown as `active` or `unavailable` (peer held, offline
+or no longer approved: traffic then leaves the normal way, no kill
+switch). A router enables `ip_forward` while it runs and extends its
+`inet thawr` table with a forward chain (policy drop; established
+flows and the forward rules from the netmap pass) and a nat chain
+that masquerades overlay sources toward the prefixes it advertises.
+The router takes the prefixes it forwards from its own state, never
+from the netmap, so a server that invents a route on a peer sends
+traffic into a drop rule. With `wireguard-go` on Linux the userspace
+filter passes forwarded packets whose destination a forward rule
+covers and the same nftables chains handle forwarding and nat.
+Routers and exit-node use need Linux in this release; the flags and
+`exit-node` refuse elsewhere, plain subnet routes are installed on
+every platform. Spec 013.
+
 ## 5. Wire interfaces
 
 ### gRPC `thawr.v1.Control`
@@ -446,6 +487,7 @@ reachable from the internet. Spec 010.
 | `SetLock(SetLockRequest) Empty` | node secret | Install a signed lock record (the first one only from a device an admin owns, later ones per `lock.Accept`), optionally with the signatures that go with it |
 | `SignPeer(SignPeerRequest) Empty` | node secret, signer | Store a signature over a peer's (or the hub's) current record |
 | `ListLockPeers(Empty) LockPeers` | node secret, signer | Every peer with its signed state and reported lock key; the one RPC that shows a peer the whole registry, and only to a signer the record names |
+| `AdvertiseRoutes(AdvertiseRoutesRequest) AdvertisedRoutes` | node secret | Replace the caller's advertised prefixes; the reply carries their approval (spec 013) |
 
 Node secret travels as gRPC metadata `authorization: Bearer <secret>`.
 Every message carries `client_version`; the server rejects versions older
@@ -460,7 +502,9 @@ device's lock public key, if it has one, so a signer can add it.
 `POST /policy/check`, `POST /policy/reload`, `GET /audit` (admins;
 `since`, `before_id`, `action`, `actor`, `limit`), `GET /lock` (the
 signer set and the unsigned peers; peer views carry `signed` while the
-lock is on). JSON bodies. Browser
+lock is on), `GET /peers/{name}/routes` and `PUT
+/peers/{name}/routes/{prefix}` with `{"approved": bool}` (admins; the
+peer detail lists `routes`). JSON bodies. Browser
 sessions are in memory (12 h) behind one `HttpOnly`, `Secure`,
 `SameSite=Strict` cookie; the session's CSRF token is returned by
 `/login` and `/me` and must be sent as `X-CSRF-Token` on mutating calls.
@@ -524,7 +568,9 @@ JSON; appended inside the mutation's transaction, pruned after
 `audit.retention_days`), `peer_signatures` (`peer_id` or `hub`,
 `public_key`, `signer_key`, `signature`, `signed_at`; rows for a
 peer's old key stop matching after a rotation and go with the peer on
-delete). Endpoints, relay sessions and path state are ephemeral
+delete), `peer_routes` (`peer_id`, `prefix`, `advertised_at`,
+`approved_at`, `approved_by`; foreign key on `peers` with cascade, so
+the rows go with the peer). Endpoints, relay sessions and path state are ephemeral
 and kept in memory in `control.EndpointTable`; a restart simply waits for
 clients to re-report. Migrations are `NNNN_name.sql` files embedded and
 applied in a transaction with the version recorded in `meta`.
@@ -538,7 +584,7 @@ Indexes: `peers(public_key)` unique, `peers(name)` unique,
 | Path | Content | Mode |
 |---|---|---|
 | `/var/lib/thawr/client/node.key` | WireGuard private key | 0600 |
-| `/var/lib/thawr/client/state.json` | server URL, TLS fingerprint, peer id, node secret, listen port, expected lock signer (`--lock-signer`) | 0600 |
+| `/var/lib/thawr/client/state.json` | server URL, TLS fingerprint, peer id, node secret, listen port, expected lock signer (`--lock-signer`), advertised routes and the selected exit node (spec 013) | 0600 |
 | `/var/lib/thawr/client/netmap.json` | last netmap (public keys, addresses, endpoints) | 0600 |
 | `/var/lib/thawr/client/pins.json` | accepted hub key, per-peer `(id, key)` by name, and the pinned lock record | 0600 |
 | `/var/lib/thawr/client/lock.key` | Ed25519 lock private key; only on devices that ran `lock init` or `lock key`; removed by `down --forget` | 0600 |
@@ -577,5 +623,6 @@ Windows with Go 1.26 or newer (the minimum required by the gRPC and
 ## 9. Non-goals restated
 
 No own cryptography, no Layer 2, no hosted control plane, no native
-mobile apps in v1, no exit nodes or subnet routers
-(phase 2), no IPv6 overlay (phase 2; schema reserves `ipv6`).
+mobile apps in v1, no routers or exit-node use outside Linux in this
+release (spec 013), no IPv6 overlay (spec 015; schema reserves
+`ipv6`).

@@ -47,6 +47,12 @@ sprints are in `docs/roadmap/`.
   (nftables with kernel WireGuard, a userspace filter otherwise).
   `thawr admin policy check`, `reload` and `show` manage it live.
 - Phones use the official WireGuard app via a QR code.
+- Subnet routers and exit nodes: a Linux peer advertises the prefixes
+  behind it (`client up --advertise-routes 10.1.0.0/24`) or itself as
+  exit node, an admin approves (`thawr admin peer routes approve`), the
+  policy says who may use it (`dst: ["10.1.0.0/24:22"]`,
+  `"internet:*"`), and `thawr client exit-node <name>` sends a laptop's
+  internet through the peer at home.
 - Every device pins the hub's key and the key of every peer it reaches
   directly: a key that changes is held out of the tunnel until you run
   `thawr client trust <name>`, so a compromised server cannot silently
