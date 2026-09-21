@@ -1,0 +1,11 @@
+# CodeRabbit configuration. Schema: https://coderabbit.ai/integrations/schema.v2.json
+#
+# Reviews are triggered by hand with `@coderabbitai review` on the pull
+# request (the repository is below the star threshold for automatic
+# reviews). The docstring-coverage pre-merge check is off: Go doc
+# comments are enforced by golangci-lint on exported identifiers, and
+# the check counted unexported helpers against the threshold.
+reviews:
+  pre_merge_checks:
+    docstrings:
+      mode: off
