@@ -3,15 +3,18 @@ package policy
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"sort"
 )
 
 // Registry is what validation needs to know about the world: existing
-// user names, peer names and tags.
+// user names, peer names and tags, and the overlay prefix that tells a
+// peer-selecting CIDR from a subnet route (spec 013).
 type Registry struct {
-	Users []string
-	Peers []string
-	Tags  []string
+	Users   []string
+	Peers   []string
+	Tags    []string
+	Overlay netip.Prefix
 }
 
 // Validate checks the policy against the registry. Unknown users and
@@ -49,7 +52,13 @@ func (p *Policy) Validate(reg Registry) (warnings []string, err error) {
 			if !peers[sel.Name] {
 				warnings = append(warnings, fmt.Sprintf("%s: no peer named %q yet", where, sel.Name))
 			}
-		case SelAny, SelSelf, SelCIDR:
+		case SelCIDR:
+			// Inside the overlay it selects peers, outside it is a route;
+			// a prefix that contains the overlay is neither.
+			if reg.Overlay.IsValid() && sel.Prefix.Overlaps(reg.Overlay) && !reg.Overlay.Contains(sel.Prefix.Addr()) {
+				errs = append(errs, fmt.Errorf("%s: %s overlaps the overlay %s", where, sel.Prefix, reg.Overlay))
+			}
+		case SelAny, SelSelf, SelInternet:
 		}
 	}
 	for _, tag := range sortedKeys(p.TagOwners) {

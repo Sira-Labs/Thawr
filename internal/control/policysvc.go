@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,6 +36,8 @@ type PolicyService struct {
 	path     string
 	notifier Notifier
 	audit    *Auditor
+	// overlay tells a peer-selecting CIDR from a subnet route (spec 013).
+	overlay netip.Prefix
 	// reloadMu serialises Reload end to end: transaction, publication,
 	// notification and report, so two reloads cannot interleave.
 	reloadMu sync.Mutex
@@ -55,6 +58,13 @@ func NewPolicyService(st *store.Store, log *slog.Logger, path string, notifier N
 // WithAuditor records reloads in the audit log.
 func (s *PolicyService) WithAuditor(a *Auditor) *PolicyService {
 	s.audit = a
+	return s
+}
+
+// WithOverlay sets the overlay prefix: a dst CIDR outside it is a
+// subnet route, one inside it selects peers (spec 013).
+func (s *PolicyService) WithOverlay(overlay netip.Prefix) *PolicyService {
+	s.overlay = overlay
 	return s
 }
 
@@ -135,7 +145,7 @@ func (s *PolicyService) Check(ctx context.Context, data []byte) PolicyReport {
 	if cerr != nil {
 		return PolicyReport{Hash: p.Hash, Warnings: nonNil(warnings), Errors: []string{cerr.Error()}}
 	}
-	return PolicyReport{Hash: p.Hash, Summary: policy.Compile(p, peers).Summary(), Warnings: nonNil(warnings)}
+	return PolicyReport{Hash: p.Hash, Summary: policy.CompileWith(p, peers, s.overlay).Summary(), Warnings: nonNil(warnings)}
 }
 
 // Show reports the effective policy with its source.
@@ -176,7 +186,7 @@ func (s *PolicyService) Compiled(ctx context.Context) *policy.Compiled {
 		}
 		return policy.Compile(policy.Empty(), nil)
 	}
-	s.compiled, s.cacheGen, s.cacheKey = policy.Compile(s.current, peers), gen, key
+	s.compiled, s.cacheGen, s.cacheKey = policy.CompileWith(s.current, peers, s.overlay), gen, key
 	return s.compiled
 }
 
@@ -214,8 +224,12 @@ func (s *PolicyService) registry(ctx context.Context) ([]policy.Peer, policy.Reg
 	if err != nil {
 		return nil, policy.Registry{}, fmt.Errorf("control: policy: list peers: %w", err)
 	}
+	routeRows, err := s.store.Routes().ListAll(ctx)
+	if err != nil {
+		return nil, policy.Registry{}, fmt.Errorf("control: policy: list routes: %w", err)
+	}
 	names := make(map[string]string, len(users))
-	reg := policy.Registry{}
+	reg := policy.Registry{Overlay: s.overlay}
 	for _, u := range users {
 		names[u.ID] = u.Name
 		reg.Users = append(reg.Users, u.Name)
@@ -230,7 +244,7 @@ func (s *PolicyService) registry(ctx context.Context) ([]policy.Peer, policy.Reg
 			}
 		}
 	}
-	return PolicyPeers(peers, names), reg, nil
+	return PolicyPeers(peers, names, ApprovedRoutes(routeRows)), reg, nil
 }
 
 // errorLines splits a joined validation error into one line per problem.

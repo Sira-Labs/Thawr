@@ -30,6 +30,23 @@ func (v PolicyVisibility) FilterFor(dst store.Peer) []FilterRule {
 	return filterRules(c.FilterFor(dst.ID))
 }
 
+// Routing implements Visibility.
+func (v PolicyVisibility) Routing(self store.Peer) Routing {
+	c := v.Load()
+	if c == nil {
+		return Routing{}
+	}
+	var r Routing
+	for _, rt := range c.RoutesFor(self.ID) {
+		r.Routes = append(r.Routes, Route{Prefix: rt.Prefix, Via: rt.Via})
+	}
+	r.ExitNodes = c.ExitNodesFor(self.ID)
+	for _, f := range c.ForwardFor(self.ID) {
+		r.Forward = append(r.Forward, ForwardRule{SrcIPv4: f.Src, Dst: f.Dst, Proto: f.Proto, PortLo: f.Lo, PortHi: f.Hi})
+	}
+	return r
+}
+
 // filterRules converts compiled rules to netmap rules.
 func filterRules(rules []policy.FilterRule) []FilterRule {
 	out := make([]FilterRule, 0, len(rules))
@@ -40,11 +57,12 @@ func filterRules(rules []policy.FilterRule) []FilterRule {
 }
 
 // PolicyPeers converts registered peers into what the compiler needs;
-// names resolves owner IDs to user names.
-func PolicyPeers(peers []store.Peer, names map[string]string) []policy.Peer {
+// names resolves owner IDs to user names, routes holds the approved
+// prefixes per peer id (spec 013).
+func PolicyPeers(peers []store.Peer, names map[string]string, routes map[string][]netip.Prefix) []policy.Peer {
 	out := make([]policy.Peer, 0, len(peers))
 	for _, p := range peers {
-		pp := policy.Peer{ID: p.ID, Name: p.Name, Owner: names[p.OwnerID], Tags: p.Tags}
+		pp := policy.Peer{ID: p.ID, Name: p.Name, Owner: names[p.OwnerID], Tags: p.Tags, Routes: routes[p.ID]}
 		if a, err := netip.ParseAddr(p.IPv4); err == nil {
 			pp.IPv4 = a
 		}
