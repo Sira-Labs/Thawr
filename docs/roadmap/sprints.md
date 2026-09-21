@@ -60,7 +60,7 @@ and only when an admin approved it and the policy allows it.
 | S5-1 | Spec 013 written: `client up --advertise-routes 10.1.0.0/24`, `--advertise-exit-node`, `--exit-node <name>`; approval by `thawr admin peer routes approve <name> <prefix>`; policy `routes:` selector gating who may use a route; threat-model row for a hijacked prefix (an approved route is part of the signed peer record under the lock) | M | spec merged with acceptance criteria and test names |
 | S5-2 | Control plane: advertised and approved prefixes on peers (migration 0005), netmap carries approved routes as extra `AllowedIPs`, policy compiler gates them, audit actions `route.advertise`, `route.approve`, `route.revoke` | M | unit tests in `internal/control`, `internal/store`, `internal/api` |
 | S5-3 | Client: install routes for approved prefixes, exit-node selection with the default route through the peer and the hub and server addresses excluded; router side enables forwarding and masquerade (Linux, nftables; userspace filter passes routed traffic) | M | fake-device tests; netns test: host behind a router pinged from a client, client's egress leaves through the exit node |
-| S5-4 | CLI, REST and UI: `admin peer routes list|approve|revoke`, ROUTES line in `client status`, routes column in `admin peer show` and the peers table | S | transcript in the PR, schema updated |
+| S5-4 | CLI, REST and UI: `admin peer routes list`, `approve` and `revoke`, ROUTES line in `client status`, routes column in `admin peer show` and the peers table | S | transcript in the PR, schema updated |
 | S5-5 | macOS and Windows: routes installed through the platform adapter (`route`, `netsh`), exit node on macOS documented as best effort until tested | S | manual checklist section for 013 |
 | S5-6 | Docs: ARCHITECTURE §4.9 routes, README paragraph, `TASKS.md` entry | M | docs merged |
 
@@ -126,7 +126,7 @@ and the agent goes away when its job does.
 |---|---|---|---|
 | S10-1 | Spec 018 written: service accounts, API tokens (scoped, hashed, expiring, created and revoked by an admin), `POST /api/v1/tokens` with a TTL and `kind: agent`, ephemeral peers (`--ephemeral`, deleted after `offline_ttl`), audit rows naming the service account | M | spec merged |
 | S10-2 | Store and control: `service_accounts`, `api_tokens` (migration), token scopes `tokens:create`, `peers:read`; enrolment token TTL down to one minute; ephemeral flag and reaper | M | unit tests with injected clocks |
-| S10-3 | REST: bearer API tokens next to browser sessions, scope checks on every route; `admin service-account create|list|revoke` | M | handler tests: wrong scope is 403, expired is 401 |
+| S10-3 | REST: bearer API tokens next to browser sessions, scope checks on every route; `admin service-account create`, `list` and `revoke` | M | handler tests: wrong scope is 403, expired is 401 |
 | S10-4 | Client: `client up --ephemeral`; status says so; `client down` on an ephemeral peer deletes it | S | fake-device tests |
 | S10-5 | Example: a GitHub Actions job that mints a token and enrols a runner as `kind: agent` (docs only, no network access in CI) | C | `docs/examples/ci-agent.md` |
 

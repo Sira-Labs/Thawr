@@ -7,12 +7,12 @@ minor versions may change config keys and the admin API. The release
 workflow uses the section for the tagged version as the release notes
 when one exists, and GitHub's generated notes otherwise.
 
-## [Unreleased]
+## [0.1.0] - unreleased
 
-Everything below ships as `v0.1.0` once the manual checklists for
-specs 010–012 have passed on real hosts (`docs/roadmap/sprints.md`,
-sprint 4). Pre-releases `v0.1.0-rc1`, `rc2` and `rc3` (5 Sep 2026)
-carried specs 001–009.
+Ships once the manual checklists for specs 010–013 have passed on real
+hosts (`docs/roadmap/sprints.md`, sprint 4); the tag replaces
+"unreleased" with the date. Pre-releases `v0.1.0-rc1`, `rc2` and `rc3`
+(5 Sep 2026) carried specs 001–009.
 
 ### Added
 
@@ -99,4 +99,4 @@ carried specs 001–009.
   threat once a device has pinned the lock record; the first record a
   device sees is trusted unless it was enrolled with `--lock-signer`.
 
-[Unreleased]: https://github.com/thedatadudech/Thawr/commits/main
+[0.1.0]: https://github.com/thedatadudech/Thawr/compare/v0.1.0-rc3...main

@@ -79,11 +79,12 @@ jobs:
           else
             prerelease=""
             case "$VERSION" in *-*) prerelease="--prerelease";; esac
-            notes=""
+            args=(release create "$VERSION" dist/* --title "$VERSION" --target "$GITHUB_SHA")
             awk -v v="${VERSION#v}" '
               /^## \[/ { p = index($0, "[" v "]") > 0 }
               p { print }
             ' CHANGELOG.md > notes.md
-            if [ -s notes.md ]; then notes="--notes-file notes.md"; else notes="--generate-notes"; fi
-            gh release create "$VERSION" dist/* --title "$VERSION" $notes --target "$GITHUB_SHA" $prerelease
+            if [ -s notes.md ]; then args+=(--notes-file notes.md); else args+=(--generate-notes); fi
+            if [ -n "$prerelease" ]; then args+=("$prerelease"); fi
+            gh "${args[@]}"
           fi
