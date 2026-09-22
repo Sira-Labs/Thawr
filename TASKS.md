@@ -587,6 +587,12 @@ batches).
         replaces it (an empty list withdraws). A withdrawn prefix
         loses its approval on the server, so re-advertising needs a
         person again.
+      - Follow-up (CI on main after the merge): `NetMapBuilder.Build`
+        loaded the compiled policy once per question, so two approvals
+        in a row could yield a map from two compilations (the gateway
+        visible, its exit-node flag missing). `PolicyVisibility` now
+        implements `Snapshotter` and a build takes one snapshot; the
+        owner rule and test wrappers that embed it need none.
 
 ## Phase 2 candidates (scheduled as specs 014–021 in `docs/roadmap/`)
 

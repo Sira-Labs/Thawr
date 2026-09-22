@@ -47,6 +47,13 @@ func (v PolicyVisibility) Routing(self store.Peer) Routing {
 	return r
 }
 
+// Snapshot implements Snapshotter: the returned view is bound to the
+// compilation current now and never loads again.
+func (v PolicyVisibility) Snapshot() Visibility {
+	c := v.Load()
+	return PolicyVisibility{Load: func() *policy.Compiled { return c }}
+}
+
 // filterRules converts compiled rules to netmap rules.
 func filterRules(rules []policy.FilterRule) []FilterRule {
 	out := make([]FilterRule, 0, len(rules))

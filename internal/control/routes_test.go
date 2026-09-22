@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/thedatadudech/thawr/internal/control/policy"
 	"github.com/thedatadudech/thawr/internal/store"
 )
 
@@ -221,5 +222,45 @@ func TestNetMapCarriesRoutes(t *testing.T) {
 	}
 	if !nm.SelfAdvertised[0].Approved || !nm.SelfAdvertised[1].Approved {
 		t.Errorf("gateway advertised: %+v", nm.SelfAdvertised)
+	}
+}
+
+// TestNetMapBuildUsesOneCompilation: a policy recompiled while a map is
+// being built (an approval landing between two loads) must not yield a
+// map that mixes both compilations, such as the gateway visible from the
+// newer one without the exit-node flag the older one lacked.
+func TestNetMapBuildUsesOneCompilation(t *testing.T) {
+	env := newRoutesEnv(t)
+	ctx := context.Background()
+	if _, err := env.svc.Advertise(ctx, env.gw, []string{"0.0.0.0/0"}); err != nil {
+		t.Fatal(err)
+	}
+	before := env.policy.Load()
+	if err := env.svc.SetApproved(ctx, env.admin, "gw", "0.0.0.0/0", true); err != nil {
+		t.Fatal(err)
+	}
+	after := env.policy.Load()
+	// The first load of a build sees the old compilation, every later
+	// one the new: a build that loads more than once mixes them.
+	loads := 0
+	load := func() *policy.Compiled {
+		loads++
+		if loads == 1 {
+			return before
+		}
+		return after
+	}
+	hub := HubConfig{PublicKey: "HUBKEY", Address: netip.MustParseAddr("100.64.0.1"), Overlay: netip.MustParsePrefix("100.64.0.0/10")}
+	b := NewNetMapBuilder(env.st, PolicyVisibility{Load: load}, nil, nil, hub, func() int64 { return 1 })
+	nm, err := b.Build(ctx, env.box.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nm.Peers) != 0 {
+		t.Fatalf("box map mixed two compilations: %+v", nm.Peers)
+	}
+	nm, err = b.Build(ctx, env.box.ID)
+	if err != nil || len(nm.Peers) != 1 || !nm.Peers[0].ExitNode {
+		t.Fatalf("box map from the new compilation: %+v %v", nm.Peers, err)
 	}
 }
