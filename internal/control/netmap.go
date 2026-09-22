@@ -149,6 +149,13 @@ type Visibility interface {
 	Routing(self store.Peer) Routing
 }
 
+// Snapshotter is implemented by a Visibility whose answers can change
+// between calls (a policy that is recompiled). Build asks it once per
+// map for a view bound to one compilation, so a map never mixes two.
+type Snapshotter interface {
+	Snapshot() Visibility
+}
+
 // OwnerVisibility is the rule of the early specs, kept for tests: peers
 // with the same non-empty owner see each other and no port is open.
 type OwnerVisibility struct{}
@@ -227,7 +234,15 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 		return NetMap{}, err
 	}
 	sigs := IndexSignatures(sigRows)
-	routing := b.visibility.Routing(self)
+	// One compilation answers every question of this build: the policy
+	// service recompiles on each registry or route change, and a map
+	// mixing two compilations can show a peer without the routes or the
+	// exit-node flag the newer one grants.
+	vis := b.visibility
+	if s, ok := vis.(Snapshotter); ok {
+		vis = s.Snapshot()
+	}
+	routing := vis.Routing(self)
 	viaRoutes := map[string][]netip.Prefix{}
 	for _, r := range routing.Routes {
 		viaRoutes[r.Via] = append(viaRoutes[r.Via], r.Prefix)
@@ -256,7 +271,7 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 		},
 		Lock:    lockRec,
 		Peers:   []NetPeer{},
-		Filter:  append([]FilterRule{}, b.visibility.FilterFor(self)...),
+		Filter:  append([]FilterRule{}, vis.FilterFor(self)...),
 		Forward: append([]ForwardRule{}, routing.Forward...),
 		STUN:    append([]string{}, b.hub.STUNAddrs...),
 	}
@@ -273,7 +288,7 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 		if err != nil {
 			continue
 		}
-		if !b.visibility.Visible(self, p) {
+		if !vis.Visible(self, p) {
 			continue
 		}
 		online := false
