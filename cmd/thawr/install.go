@@ -350,6 +350,10 @@ Requires root.`,
 			if err := enrollIfNeeded(cmd.Context(), deps, logger, upf, stateDir); err != nil {
 				return err
 			}
+			upf.advertiseSet = cmd.Flags().Changed("advertise-routes") || cmd.Flags().Changed("advertise-exit-node")
+			if err := applyAdvertise(stateDir, upf); err != nil {
+				return err
+			}
 			return installService(cmd.Context(), cmd.OutOrStdout(), m, svc.Service{
 				Name: serviceClient, Description: "Thawr node client", Exec: bin,
 				Args:           []string{"client", "up", "--state-dir", stateDir, "--socket", socket, "--interface", upf.iface, "--log-level", upf.logLevel, "--dns", upf.dnsMode},

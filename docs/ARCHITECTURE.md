@@ -527,13 +527,16 @@ answering with the generation and the fingerprints it signed.
 
 `GET /status` returns the document described by `docs/status.schema.json`:
 `version`, `self`, `server`, `wireguard`, `nat`, `relay`, `filter`,
-`dns`, `hub`, `peers[]`, `held[]`, `lock`, `retrieved_at`. Fields are only ever
-added. `held[]{name, ipv4, kind, owner, pinned_key, offered_key, since,
+`dns`, `hub`, `peers[]`, `held[]`, `lock`, `routes[]`, `exit_node`,
+`advertised[]`, `retrieved_at`. Fields are only ever added. `held[]{name, ipv4, kind, owner, pinned_key, offered_key, since,
 reason}` lists the entries held out of the tunnel (`reason`
 `key_changed` or `unsigned`); each also appears in `peers` (or `hub`)
 with `path` `key_changed` or `unsigned`. `lock{enabled, signer,
 has_key, generation, signers[], rejected, self_signed}` is the network
-lock as the device sees it.
+lock as the device sees it. `routes[]{prefix, via}` are the prefixes
+reached through peers, `exit_node{name, state}` the selected exit node
+(`off`, `active`, `unavailable`) and `advertised[]{prefix, approved}`
+what this device offers to carry (spec 013).
 `dns{listen, state, method, names, error}` describes the client's
 resolver (`state` `serving` or `error`; `method` `resolved`, `hosts`,
 `resolver-file`, `nrpt` or `none`) and is absent with `--dns off`.
