@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"os"
 	"sync"
 
@@ -26,7 +27,13 @@ type kernelDevice struct {
 	mu     sync.Mutex
 	closed bool
 
-	nft nftFilter
+	nft    nftFilter
+	routes routeTable
+}
+
+// SetRoutes installs the routes reached through the interface.
+func (k *kernelDevice) SetRoutes(_ context.Context, prefixes []netip.Prefix) error {
+	return k.routes.set(k.name, prefixes)
 }
 
 // SetFilter installs the receiver-side filter with nftables.
@@ -73,7 +80,9 @@ func (k *kernelDevice) Configure(_ context.Context, cfg Config) error {
 	if err != nil {
 		return fmt.Errorf("wg: read %s: %w", k.name, err)
 	}
-	wcfg := wgtypes.Config{PrivateKey: &cfg.PrivateKey}
+	// The mark is always written, so turning the exit node off clears it.
+	mark := int(cfg.FwMark)
+	wcfg := wgtypes.Config{PrivateKey: &cfg.PrivateKey, FirewallMark: &mark}
 	if cfg.ListenPort > 0 {
 		port := cfg.ListenPort
 		wcfg.ListenPort = &port
@@ -162,6 +171,9 @@ func (k *kernelDevice) Close() error {
 	}
 	k.closed = true
 	var errs []error
+	if err := k.routes.clear(k.name); err != nil {
+		errs = append(errs, err)
+	}
 	if err := k.nft.remove(); err != nil {
 		errs = append(errs, err)
 	}

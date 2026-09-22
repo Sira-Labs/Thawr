@@ -73,6 +73,8 @@ type GRPCDeps struct {
 	Paths     *control.PathTable
 	// Lock enables the network-lock RPCs; nil answers Unimplemented.
 	Lock LockOps
+	// Routes enables AdvertiseRoutes; nil answers Unimplemented.
+	Routes RoutesOps
 }
 
 // NewGRPC builds the gRPC server with the Control service registered.

@@ -28,6 +28,7 @@ const (
 	Control_SetLock_FullMethodName         = "/thawr.v1.Control/SetLock"
 	Control_SignPeer_FullMethodName        = "/thawr.v1.Control/SignPeer"
 	Control_ListLockPeers_FullMethodName   = "/thawr.v1.Control/ListLockPeers"
+	Control_AdvertiseRoutes_FullMethodName = "/thawr.v1.Control/AdvertiseRoutes"
 )
 
 // ControlClient is the client API for Control service.
@@ -59,6 +60,9 @@ type ControlClient interface {
 	// ListLockPeers lists every peer with its signing state. Only a peer
 	// named as signer in the current lock record may call it.
 	ListLockPeers(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*LockPeers, error)
+	// AdvertiseRoutes replaces the caller's advertised prefixes (spec
+	// 013); the reply lists them with their approval state.
+	AdvertiseRoutes(ctx context.Context, in *AdvertiseRoutesRequest, opts ...grpc.CallOption) (*AdvertisedRoutes, error)
 }
 
 type controlClient struct {
@@ -168,6 +172,16 @@ func (c *controlClient) ListLockPeers(ctx context.Context, in *Empty, opts ...gr
 	return out, nil
 }
 
+func (c *controlClient) AdvertiseRoutes(ctx context.Context, in *AdvertiseRoutesRequest, opts ...grpc.CallOption) (*AdvertisedRoutes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdvertisedRoutes)
+	err := c.cc.Invoke(ctx, Control_AdvertiseRoutes_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ControlServer is the server API for Control service.
 // All implementations must embed UnimplementedControlServer
 // for forward compatibility.
@@ -197,6 +211,9 @@ type ControlServer interface {
 	// ListLockPeers lists every peer with its signing state. Only a peer
 	// named as signer in the current lock record may call it.
 	ListLockPeers(context.Context, *Empty) (*LockPeers, error)
+	// AdvertiseRoutes replaces the caller's advertised prefixes (spec
+	// 013); the reply lists them with their approval state.
+	AdvertiseRoutes(context.Context, *AdvertiseRoutesRequest) (*AdvertisedRoutes, error)
 	mustEmbedUnimplementedControlServer()
 }
 
@@ -233,6 +250,9 @@ func (UnimplementedControlServer) SignPeer(context.Context, *SignPeerRequest) (*
 }
 func (UnimplementedControlServer) ListLockPeers(context.Context, *Empty) (*LockPeers, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListLockPeers not implemented")
+}
+func (UnimplementedControlServer) AdvertiseRoutes(context.Context, *AdvertiseRoutesRequest) (*AdvertisedRoutes, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AdvertiseRoutes not implemented")
 }
 func (UnimplementedControlServer) mustEmbedUnimplementedControlServer() {}
 func (UnimplementedControlServer) testEmbeddedByValue()                 {}
@@ -410,6 +430,24 @@ func _Control_ListLockPeers_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Control_AdvertiseRoutes_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdvertiseRoutesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).AdvertiseRoutes(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_AdvertiseRoutes_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).AdvertiseRoutes(ctx, req.(*AdvertiseRoutesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Control_ServiceDesc is the grpc.ServiceDesc for Control service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -448,6 +486,10 @@ var Control_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListLockPeers",
 			Handler:    _Control_ListLockPeers_Handler,
+		},
+		{
+			MethodName: "AdvertiseRoutes",
+			Handler:    _Control_AdvertiseRoutes_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

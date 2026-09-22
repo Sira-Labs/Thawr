@@ -29,6 +29,9 @@ service Control {
   // ListLockPeers lists every peer with its signing state. Only a peer
   // named as signer in the current lock record may call it.
   rpc ListLockPeers(Empty) returns (LockPeers);
+  // AdvertiseRoutes replaces the caller's advertised prefixes (spec
+  // 013); the reply lists them with their approval state.
+  rpc AdvertiseRoutes(AdvertiseRoutesRequest) returns (AdvertisedRoutes);
 }
 
 // EnrollRequest carries the token and the client's identity.
@@ -83,6 +86,9 @@ message NetMap {
   // lock is the current lock record with its signature; absent while
   // no record was ever set.
   SignedLockRecord lock = 8;
+  // forward lists the rules the receiver installs on its forwarding
+  // path as a subnet router or exit node (spec 013).
+  repeated ForwardRule forward = 9;
 }
 
 // SelfInfo describes the receiving peer.
@@ -98,6 +104,9 @@ message SelfInfo {
   // signatures are the lock signatures over the receiver's own current
   // record, so it can tell whether it is signed (spec 012).
   repeated PeerSignature signatures = 7;
+  // advertised lists the prefixes the receiver advertises as the server
+  // knows them, with their approval (spec 013).
+  repeated AdvertisedRoute advertised = 8;
 }
 
 // NetPeer is one visible peer.
@@ -121,6 +130,9 @@ message NetPeer {
   bool via_hub = 12;
   // signatures are lock signatures over this peer's current record.
   repeated PeerSignature signatures = 13;
+  // exit_node marks a peer the receiver may route its internet traffic
+  // through; the receiver adds 0.0.0.0/0 only when it selects it.
+  bool exit_node = 14;
 }
 
 // EndpointKind classifies a candidate address.
@@ -217,6 +229,34 @@ message FilterRule {
   string proto = 2;
   uint32 port_lo = 3;
   uint32 port_hi = 4;
+}
+
+// ForwardRule allows src_ipv4 to reach dst_cidr through the receiver on
+// a port range (spec 013).
+message ForwardRule {
+  string src_ipv4 = 1;
+  string dst_cidr = 2;
+  string proto = 3;
+  uint32 port_lo = 4;
+  uint32 port_hi = 5;
+}
+
+// AdvertiseRoutesRequest carries the caller's complete advertised set;
+// an empty list withdraws everything.
+message AdvertiseRoutesRequest {
+  repeated string prefixes = 1;
+}
+
+// AdvertisedRoutes lists a peer's advertised prefixes.
+message AdvertisedRoutes {
+  repeated AdvertisedRoute routes = 1;
+}
+
+// AdvertisedRoute is one advertised prefix and whether an admin
+// approved it.
+message AdvertisedRoute {
+  string prefix = 1;
+  bool approved = 2;
 }
 
 // EndpointReport replaces the caller's candidates.

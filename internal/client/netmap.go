@@ -46,6 +46,27 @@ type NetMap struct {
 	// when it has none (spec 012).
 	SelfSignatures []PeerSignature `json:"self_signatures,omitempty"`
 	Lock           *lock.Signed    `json:"lock,omitempty"`
+	// Forward are the rules this device enforces as a router and
+	// Advertised what the server knows about its own advertisements
+	// (spec 013).
+	Forward    []ForwardRule     `json:"forward,omitempty"`
+	Advertised []AdvertisedRoute `json:"advertised,omitempty"`
+}
+
+// ForwardRule allows Src to reach Dst (a CIDR) through this device.
+type ForwardRule struct {
+	Src    string `json:"src"`
+	Dst    string `json:"dst"`
+	Proto  string `json:"proto"`
+	PortLo uint16 `json:"port_lo"`
+	PortHi uint16 `json:"port_hi"`
+}
+
+// AdvertisedRoute is one prefix this device advertises and whether an
+// admin approved it.
+type AdvertisedRoute struct {
+	Prefix   string `json:"prefix"`
+	Approved bool   `json:"approved"`
 }
 
 // FilterRule allows Src to reach this device on a port range.
@@ -126,6 +147,9 @@ type Peer struct {
 	// Signatures are the network-lock signatures over this peer's
 	// current record (spec 012).
 	Signatures []PeerSignature `json:"signatures,omitempty"`
+	// ExitNode marks a peer this device may route its internet traffic
+	// through (spec 013).
+	ExitNode bool `json:"exit_node,omitempty"`
 }
 
 // PeerSignature is one lock key's signature over a peer record, as
@@ -167,9 +191,18 @@ func NetMapFromProto(m *thawrv1.NetMap, now time.Time) NetMap {
 		}
 		nm.Filter = append(nm.Filter, FilterRule{Src: f.GetSrcIpv4(), Proto: f.GetProto(), PortLo: uint16(f.GetPortLo()), PortHi: uint16(f.GetPortHi())}) //nolint:gosec // range-checked above
 	}
+	for _, f := range m.GetForward() {
+		if f.GetPortLo() > 65535 || f.GetPortHi() > 65535 {
+			continue
+		}
+		nm.Forward = append(nm.Forward, ForwardRule{Src: f.GetSrcIpv4(), Dst: f.GetDstCidr(), Proto: f.GetProto(), PortLo: uint16(f.GetPortLo()), PortHi: uint16(f.GetPortHi())}) //nolint:gosec // range-checked above
+	}
+	for _, a := range m.GetSelf().GetAdvertised() {
+		nm.Advertised = append(nm.Advertised, AdvertisedRoute{Prefix: a.GetPrefix(), Approved: a.GetApproved()})
+	}
 	for _, p := range m.GetPeers() {
 		peer := Peer{ID: p.GetId(), Name: p.GetName(), Kind: p.GetKind(), Owner: p.GetOwner(), PublicKey: p.GetPublicKey(), IPv4: p.GetIpv4(),
-			Online: p.GetOnline(), Symmetric: p.GetSymmetric(), Keepalive: p.GetKeepalive(), ViaHub: p.GetViaHub(),
+			Online: p.GetOnline(), Symmetric: p.GetSymmetric(), Keepalive: p.GetKeepalive(), ViaHub: p.GetViaHub(), ExitNode: p.GetExitNode(),
 			Endpoints: []Endpoint{}, AllowedIPs: append([]string{}, p.GetAllowedIps()...), Signatures: signaturesFromProto(p.GetSignatures())}
 		for _, e := range p.GetEndpoints() {
 			peer.Endpoints = append(peer.Endpoints, Endpoint{Addr: e.GetAddr(), Kind: kindFromProto(e.GetKind())})
@@ -241,6 +274,13 @@ func LoadNetMap(dir string) (nm NetMap, ok bool, err error) {
 // with its endpoint and keepalive. Mesh peers get no endpoint here; the
 // path prober owns it (a zero endpoint leaves the device's current one).
 func BuildConfig(nm NetMap, key wg.Key, listenPort int, overlay netip.Prefix) (wg.Config, error) {
+	return BuildConfigWith(nm, key, listenPort, overlay, "")
+}
+
+// BuildConfigWith is BuildConfig with an exit node: the named peer, when
+// the netmap flags it as one, carries 0.0.0.0/0 and the tunnel's own
+// packets get the fwmark that keeps them out of it (spec 013).
+func BuildConfigWith(nm NetMap, key wg.Key, listenPort int, overlay netip.Prefix, exitNode string) (wg.Config, error) {
 	selfIP, err := netip.ParseAddr(nm.SelfIPv4)
 	if err != nil {
 		return wg.Config{}, fmt.Errorf("client: self address %q: %w", nm.SelfIPv4, err)
@@ -284,15 +324,72 @@ func BuildConfig(nm NetMap, key wg.Key, listenPort int, overlay netip.Prefix) (w
 		if ip, err := netip.ParseAddr(p.IPv4); err == nil && len(peer.AllowedIPs) == 0 {
 			peer.AllowedIPs = []netip.Prefix{netip.PrefixFrom(ip, 32)}
 		}
+		if exitNode != "" && p.ExitNode && p.Name == exitNode {
+			peer.AllowedIPs = append(peer.AllowedIPs, wg.ExitRoute)
+			cfg.FwMark = wg.DefaultFwMark
+		}
 		cfg.Peers = append(cfg.Peers, peer)
 	}
 	return cfg, nil
 }
 
+// RoutesOf lists the prefixes cfg reaches through peers beyond their
+// own /32 addresses: what the OS routing table must carry.
+func RoutesOf(cfg wg.Config, overlay netip.Prefix) []netip.Prefix {
+	var out []netip.Prefix
+	for _, p := range cfg.Peers {
+		for _, a := range p.AllowedIPs {
+			if a.Bits() == 32 && overlay.Contains(a.Addr()) {
+				continue
+			}
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
 // FilterSet turns the netmap's filter into the device's: visible peers
 // and the hub may ping, listed sources reach the listed ports.
 func FilterSet(nm NetMap, iface string, self netip.Addr) wg.FilterSet {
+	return FilterSetFor(nm, iface, self, netip.Prefix{}, nil)
+}
+
+// FilterSetFor is FilterSet for a device that advertises routes: the
+// netmap's forward rules whose destination lies inside a prefix this
+// device itself advertises are enforced on its forwarding path and
+// those prefixes are masqueraded for overlay sources (spec 013). Rules
+// for anything else are dropped: a server cannot make a router forward
+// what the router never offered.
+func FilterSetFor(nm NetMap, iface string, self netip.Addr, overlay netip.Prefix, advertised []netip.Prefix) wg.FilterSet {
 	set := wg.FilterSet{Interface: iface, Hook: wg.HookInput, Local: self}
+	serves := func(dst netip.Prefix) bool {
+		for _, adv := range advertised {
+			if adv == wg.ExitRoute {
+				if dst == wg.ExitRoute {
+					return true
+				}
+				continue
+			}
+			if dst != wg.ExitRoute && adv.Bits() <= dst.Bits() && adv.Contains(dst.Addr()) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, f := range nm.Forward {
+		src, err := netip.ParseAddr(f.Src)
+		if err != nil {
+			continue
+		}
+		dst, err := netip.ParsePrefix(f.Dst)
+		if err != nil || !serves(dst) {
+			continue
+		}
+		set.Forward = append(set.Forward, wg.ForwardRule{Src: netip.PrefixFrom(src, 32), Dst: dst, Proto: f.Proto, Lo: f.PortLo, Hi: f.PortHi})
+	}
+	if len(advertised) > 0 {
+		set.Masquerade, set.MasqueradeFrom = append([]netip.Prefix(nil), advertised...), overlay
+	}
 	seen := map[netip.Addr]bool{}
 	visible := func(ip netip.Addr) {
 		if !seen[ip] {

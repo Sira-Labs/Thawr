@@ -362,7 +362,12 @@ func (h *rest) handleGetPeer(w http.ResponseWriter, r *http.Request) {
 		h.writeControlError(w, err)
 		return
 	}
-	detail := peerDetail{peerView: h.peerView(r.Context(), peer, map[string]string{}, h.signedIndex(r.Context())), Paths: []pathView{}, Endpoints: []endpointView{}, Filter: []filterView{}}
+	detail := peerDetail{peerView: h.peerView(r.Context(), peer, map[string]string{}, h.signedIndex(r.Context())), Paths: []pathView{}, Endpoints: []endpointView{}, Filter: []filterView{}, Routes: []routeView{}}
+	if h.deps.Routes != nil {
+		if rows, err := h.deps.Routes.List(r.Context(), p, peer.Name); err == nil {
+			detail.Routes = routeViews(rows)
+		}
+	}
 	if h.deps.Endpoints != nil {
 		eps, symmetric := h.deps.Endpoints.Get(peer.ID)
 		detail.Symmetric = symmetric
@@ -402,6 +407,8 @@ type peerDetail struct {
 	Endpoints []endpointView `json:"endpoints"`
 	Symmetric bool           `json:"symmetric"`
 	Filter    []filterView   `json:"filter"`
+	// Routes are the prefixes the peer advertises with their approval.
+	Routes []routeView `json:"routes"`
 }
 
 // endpointView is one candidate address with its kind.

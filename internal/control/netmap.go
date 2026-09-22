@@ -59,6 +59,9 @@ type NetPeer struct {
 	// Signatures are lock signatures over this peer's current record
 	// (spec 012).
 	Signatures []PeerSignature
+	// ExitNode marks a peer the receiver may route its internet traffic
+	// through (spec 013); the receiver adds 0.0.0.0/0 when it selects it.
+	ExitNode bool
 }
 
 // HubPeer is the server's own WireGuard interface as seen by a peer.
@@ -75,6 +78,38 @@ type FilterRule struct {
 	Proto   string
 	PortLo  uint16
 	PortHi  uint16
+}
+
+// ForwardRule allows SrcIPv4 to reach Dst through the receiver on a
+// port range; the receiver installs it on its forwarding path as a
+// subnet router or exit node (spec 013).
+type ForwardRule struct {
+	SrcIPv4 netip.Addr
+	Dst     netip.Prefix
+	Proto   string
+	PortLo  uint16
+	PortHi  uint16
+}
+
+// Route is one prefix reached through the peer Via (spec 013).
+type Route struct {
+	Prefix netip.Prefix
+	Via    string
+}
+
+// Routing is what the policy grants one peer in routes (spec 013):
+// the subnet prefixes it reaches and through whom, the exit nodes it
+// may use, and the rules it enforces as a router.
+type Routing struct {
+	Routes    []Route
+	ExitNodes []string
+	Forward   []ForwardRule
+}
+
+// AdvertisedRoute is one prefix a peer advertises and its approval.
+type AdvertisedRoute struct {
+	Prefix   netip.Prefix
+	Approved bool
 }
 
 // NetMap is one peer's complete view of the network.
@@ -95,6 +130,11 @@ type NetMap struct {
 	STUN []string
 	// Lock is the current signed lock record; nil while none was set.
 	Lock *lock.Signed
+	// Forward lists the rules the receiver installs as a router.
+	Forward []ForwardRule
+	// SelfAdvertised lists what the receiver advertises and whether an
+	// admin approved it.
+	SelfAdvertised []AdvertisedRoute
 }
 
 // Visibility decides whether two peers may see each other's keys and
@@ -104,6 +144,9 @@ type Visibility interface {
 	// FilterFor lists the receiver-side rules for dst; nil means no
 	// port is open (ICMP between visible peers stays implicit).
 	FilterFor(dst store.Peer) []FilterRule
+	// Routing lists the routes self may use and the forward rules it
+	// enforces (spec 013).
+	Routing(self store.Peer) Routing
 }
 
 // OwnerVisibility is the rule of the early specs, kept for tests: peers
@@ -117,6 +160,9 @@ func (OwnerVisibility) Visible(a, b store.Peer) bool {
 
 // FilterFor implements Visibility.
 func (OwnerVisibility) FilterFor(store.Peer) []FilterRule { return nil }
+
+// Routing implements Visibility: the owner rule grants no routes.
+func (OwnerVisibility) Routing(store.Peer) Routing { return Routing{} }
 
 // HubConfig describes the server's WireGuard interface for netmaps.
 type HubConfig struct {
@@ -181,6 +227,19 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 		return NetMap{}, err
 	}
 	sigs := IndexSignatures(sigRows)
+	routing := b.visibility.Routing(self)
+	viaRoutes := map[string][]netip.Prefix{}
+	for _, r := range routing.Routes {
+		viaRoutes[r.Via] = append(viaRoutes[r.Via], r.Prefix)
+	}
+	exitNodes := make(map[string]bool, len(routing.ExitNodes))
+	for _, id := range routing.ExitNodes {
+		exitNodes[id] = true
+	}
+	advertised, err := b.store.Routes().ListPeer(ctx, self.ID)
+	if err != nil {
+		return NetMap{}, err
+	}
 	nm := NetMap{
 		Generation:     b.generation(),
 		SelfID:         self.ID,
@@ -195,10 +254,16 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 			AllowedIPs: []netip.Prefix{netip.PrefixFrom(b.hub.Address, 32)},
 			Signatures: sigs[lock.HubID+"\x00"+b.hub.PublicKey],
 		},
-		Lock:   lockRec,
-		Peers:  []NetPeer{},
-		Filter: append([]FilterRule{}, b.visibility.FilterFor(self)...),
-		STUN:   append([]string{}, b.hub.STUNAddrs...),
+		Lock:    lockRec,
+		Peers:   []NetPeer{},
+		Filter:  append([]FilterRule{}, b.visibility.FilterFor(self)...),
+		Forward: append([]ForwardRule{}, routing.Forward...),
+		STUN:    append([]string{}, b.hub.STUNAddrs...),
+	}
+	for _, a := range advertised {
+		if p, err := netip.ParsePrefix(a.Prefix); err == nil {
+			nm.SelfAdvertised = append(nm.SelfAdvertised, AdvertisedRoute{Prefix: p, Approved: a.Approved})
+		}
 	}
 	for _, p := range all {
 		if p.ID == self.ID {
@@ -241,8 +306,9 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 			Online:     online,
 			Endpoints:  eps,
 			Symmetric:  symmetric,
-			AllowedIPs: []netip.Prefix{netip.PrefixFrom(ip, 32)},
+			AllowedIPs: append([]netip.Prefix{netip.PrefixFrom(ip, 32)}, viaRoutes[p.ID]...),
 			Signatures: sigs[p.ID+"\x00"+p.PublicKey],
+			ExitNode:   exitNodes[p.ID],
 		})
 	}
 	return nm, nil

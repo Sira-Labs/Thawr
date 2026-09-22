@@ -7,7 +7,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 	"github.com/thedatadudech/thawr/internal/config"
 	"github.com/thedatadudech/thawr/internal/lock"
 	"github.com/thedatadudech/thawr/internal/server"
+	"github.com/thedatadudech/thawr/internal/wg"
 )
 
 // envClientSocket overrides the client's local control socket.
@@ -33,6 +36,12 @@ func defaultClientSocket() string {
 type clientUpFlags struct {
 	serverURL, token, fingerprint, name, iface, logLevel, dnsMode, lockSigner string
 	acceptFingerprint                                                         bool
+	// advertiseRoutes and advertiseExitNode make this device a subnet
+	// router or exit node (spec 013); advertiseSet records whether
+	// either flag was given, since an omitted flag keeps the stored set.
+	advertiseRoutes   []string
+	advertiseExitNode bool
+	advertiseSet      bool
 }
 
 func addClientUpFlags(cmd *cobra.Command, f *clientUpFlags) {
@@ -45,6 +54,35 @@ func addClientUpFlags(cmd *cobra.Command, f *clientUpFlags) {
 	cmd.Flags().StringVar(&f.iface, "interface", config.DefaultInterface(), "WireGuard interface name")
 	cmd.Flags().StringVar(&f.logLevel, "log-level", "info", "debug, info, warn or error")
 	cmd.Flags().StringVar(&f.dnsMode, "dns", client.DNSOn, "<name>.thawr resolver: on (serve and register with the OS), serve (resolver only) or off")
+	cmd.Flags().StringSliceVar(&f.advertiseRoutes, "advertise-routes", nil, "prefixes behind this device to carry for others once an admin approves them, e.g. 10.1.0.0/24 (Linux; spec 013)")
+	cmd.Flags().BoolVar(&f.advertiseExitNode, "advertise-exit-node", false, "offer this device as exit node (0.0.0.0/0) once an admin approves it (Linux; spec 013)")
+}
+
+// applyAdvertise persists --advertise-routes and --advertise-exit-node
+// when either was given: the stored set is replaced, so a later
+// `client up` without the flags keeps advertising and one with an
+// empty list withdraws. Routers need Linux in this release.
+func applyAdvertise(stateDir string, f clientUpFlags) error {
+	if !f.advertiseSet {
+		return nil
+	}
+	want := append([]string(nil), f.advertiseRoutes...)
+	if f.advertiseExitNode {
+		want = append(want, wg.ExitRoute.String())
+	}
+	st, err := client.LoadState(stateDir)
+	if err != nil {
+		return err
+	}
+	overlay, _ := netip.ParsePrefix(st.OverlayCIDR)
+	if _, err := client.ParseAdvertised(want, overlay); err != nil {
+		return &exitError{code: exitConfigError, err: err}
+	}
+	if len(want) > 0 && runtime.GOOS != "linux" {
+		return &exitError{code: exitConfigError, err: errors.New("--advertise-routes and --advertise-exit-node need Linux in this release (forwarding and masquerade use nftables)")}
+	}
+	st.AdvertiseRoutes = want
+	return client.SaveState(stateDir, st)
 }
 
 // validateDNSMode turns a bad --dns value into a usage error.
@@ -137,6 +175,10 @@ SIGINT or SIGTERM. When the device is not enrolled yet, --server and
 			}
 			logger := server.NewLogger(logConfig(upf.logLevel), cmd.ErrOrStderr())
 			if err := enrollIfNeeded(cmd.Context(), deps, logger, upf, stateDir); err != nil {
+				return err
+			}
+			upf.advertiseSet = cmd.Flags().Changed("advertise-routes") || cmd.Flags().Changed("advertise-exit-node")
+			if err := applyAdvertise(stateDir, upf); err != nil {
 				return err
 			}
 			d, err := client.NewDaemon(client.DaemonOptions{StateDir: stateDir, Socket: socket, Interface: upf.iface, Logger: logger, Version: version,
@@ -320,7 +362,7 @@ reply, 2 unknown peer, 3 client not running. --count 0 skips the echoes.`,
 	ping.Flags().BoolVar(&pingJSON, "json", false, "print the settled path as JSON")
 	addClientCommonFlags(ping, &stateDir, &socket)
 
-	cmd.AddCommand(up, down, status, rotate, trust, newClientLockCmd(&stateDir, &socket), ping, newClientInstallCmd(deps), newClientUninstallCmd(deps))
+	cmd.AddCommand(up, down, status, rotate, trust, newClientLockCmd(&stateDir, &socket), newClientExitNodeCmd(&socket), ping, newClientInstallCmd(deps), newClientUninstallCmd(deps))
 	return cmd
 }
 

@@ -13,13 +13,14 @@ type SelectorKind int
 
 // Selector kinds.
 const (
-	SelAny   SelectorKind = iota + 1 // "*"
-	SelUser                          // "user:name" or bare "name"
-	SelGroup                         // "group:name"
-	SelTag                           // "tag:name"
-	SelPeer                          // "peer:name"
-	SelSelf                          // "self" (dst only): same owner as the source
-	SelCIDR                          // IPv4 address or prefix
+	SelAny      SelectorKind = iota + 1 // "*"
+	SelUser                             // "user:name" or bare "name"
+	SelGroup                            // "group:name"
+	SelTag                              // "tag:name"
+	SelPeer                             // "peer:name"
+	SelSelf                             // "self" (dst only): same owner as the source
+	SelCIDR                             // IPv4 address or prefix: peers inside the overlay, a subnet route outside it
+	SelInternet                         // "internet" (dst only): any approved exit node (spec 013)
 )
 
 // Selector is one parsed src selector or dst host.
@@ -46,6 +47,8 @@ func (s Selector) String() string {
 		return "self"
 	case SelCIDR:
 		return s.Prefix.String()
+	case SelInternet:
+		return "internet"
 	}
 	return "?"
 }
@@ -64,6 +67,11 @@ func ParseSelector(raw string, dst bool) (Selector, error) {
 			return Selector{}, fmt.Errorf("%q is only valid in dst", s)
 		}
 		return Selector{Kind: SelSelf}, nil
+	case "internet":
+		if !dst {
+			return Selector{}, fmt.Errorf("%q is only valid in dst", s)
+		}
+		return Selector{Kind: SelInternet}, nil
 	}
 	if kind, name, ok := strings.Cut(s, ":"); ok {
 		if !validLabel(name) {

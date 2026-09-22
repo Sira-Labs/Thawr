@@ -14,6 +14,7 @@ import (
 	"os"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -69,6 +70,9 @@ type DaemonOptions struct {
 	Relay relay.ClientOptions
 	// DNS configures the <name>.thawr resolver (spec 010).
 	DNS DNSOptions
+	// EnableForward turns on kernel forwarding for a router and returns
+	// the undo; defaults to wg.EnableIPForward (tests inject a no-op).
+	EnableForward func() (func() error, error)
 }
 
 func (o DaemonOptions) withDefaults() DaemonOptions {
@@ -83,6 +87,9 @@ func (o DaemonOptions) withDefaults() DaemonOptions {
 	}
 	if o.OpenDevice == nil {
 		o.OpenDevice = wg.Open
+	}
+	if o.EnableForward == nil {
+		o.EnableForward = wg.EnableIPForward
 	}
 	if o.Logger == nil {
 		o.Logger = slog.Default()
@@ -182,6 +189,13 @@ type Daemon struct {
 	// adopted (spec 012).
 	lockKey      lock.PrivateKey
 	lockRejected string
+	// advertise is what this device offers to route (from state),
+	// advertised what the server last reported about it, and exitNode
+	// the peer whose exit node this device uses (spec 013).
+	advertise  []netip.Prefix
+	advertised []AdvertisedRoute
+	exitNode   string
+	routesWarn sync.Once
 	// resyncNow ends the current sync stream so the next one carries
 	// fresh SyncRequest fields (a new lock key); resyncWanted tells the
 	// loop to reconnect at once instead of backing off.
@@ -256,9 +270,37 @@ func NewDaemon(opts DaemonOptions) (*Daemon, error) {
 	if ro.Now == nil {
 		ro.Now = opts.Now
 	}
+	advertise, err := ParseAdvertised(st.AdvertiseRoutes, overlay)
+	if err != nil {
+		return nil, err
+	}
 	return &Daemon{opts: opts, log: log, state: st, overlay: overlay.Masked(), selfIP: selfIP, key: key, pins: pins, lockKey: lockKey,
+		advertise: advertise, exitNode: st.ExitNode,
 		mapCh: make(chan NetMap, 16), paths: map[string]*peerPath{}, pathWake: make(chan struct{}, 1), relay: relay.NewClient(ro),
 		drops: newDropWindow(5 * time.Minute)}, nil
+}
+
+// ParseAdvertised validates the prefixes a device advertises: canonical
+// IPv4 CIDRs outside the overlay, 0.0.0.0/0 for an exit node.
+func ParseAdvertised(raw []string, overlay netip.Prefix) ([]netip.Prefix, error) {
+	out := make([]netip.Prefix, 0, len(raw))
+	for _, r := range raw {
+		p, err := netip.ParsePrefix(strings.TrimSpace(r))
+		if err != nil {
+			return nil, fmt.Errorf("client: advertised route %q: %w", r, err)
+		}
+		if !p.Addr().Is4() {
+			return nil, fmt.Errorf("client: advertised route %q: only IPv4 prefixes are supported", r)
+		}
+		if p.Masked() != p {
+			return nil, fmt.Errorf("client: advertised route %q is not canonical (use %s)", r, p.Masked())
+		}
+		if p != wg.ExitRoute && overlay.IsValid() && p.Overlaps(overlay) {
+			return nil, fmt.Errorf("client: advertised route %q overlaps the overlay %s", r, overlay)
+		}
+		out = append(out, p)
+	}
+	return out, nil
 }
 
 // randomPort picks a listen port in the dynamic range.
@@ -292,6 +334,20 @@ func (d *Daemon) Run(ctx context.Context) error {
 			d.log.Error("close device", "err", err)
 		}
 	}()
+	if len(d.advertise) > 0 {
+		// A router forwards for others: the kernel must forward, and the
+		// previous setting comes back when the daemon stops.
+		undo, err := d.opts.EnableForward()
+		if err != nil {
+			return fmt.Errorf("client: advertise routes: %w", err)
+		}
+		defer func() {
+			if err := undo(); err != nil {
+				d.log.Warn("restore ip_forward", "err", err)
+			}
+		}()
+		d.log.Info("advertising routes", "routes", d.advertise)
+	}
 
 	if nm, ok, err := LoadNetMap(d.opts.StateDir); err != nil {
 		d.log.Warn("netmap cache unreadable, ignoring", "err", err)
@@ -432,6 +488,7 @@ func (d *Daemon) syncOnce(ctx context.Context) error {
 	d.lastMessage = d.opts.Now()
 	d.mu.Unlock()
 	d.log.Info("sync connected", "server", d.state.Server, "generation", first.GetGeneration())
+	d.advertiseRoutes(ctx, client)
 	defer func() {
 		d.mu.Lock()
 		d.connected = false
@@ -458,6 +515,35 @@ func (d *Daemon) syncOnce(ctx context.Context) error {
 		}
 		if err := d.apply(ctx, NetMapFromProto(msg, d.opts.Now()), true); err != nil {
 			d.log.Error("apply netmap", "err", err)
+		}
+	}
+}
+
+// advertiseRoutes tells the server the complete set of prefixes this
+// device carries and records what the server knows about them. It runs
+// at every connect so a withdrawn set is cleared on the server too.
+func (d *Daemon) advertiseRoutes(ctx context.Context, client thawrv1.ControlClient) {
+	prefixes := make([]string, 0, len(d.advertise))
+	for _, p := range d.advertise {
+		prefixes = append(prefixes, p.String())
+	}
+	res, err := client.AdvertiseRoutes(ctx, &thawrv1.AdvertiseRoutesRequest{Prefixes: prefixes})
+	if err != nil {
+		if len(prefixes) > 0 {
+			d.log.Warn("advertise routes", "err", err)
+		}
+		return
+	}
+	var advertised []AdvertisedRoute
+	for _, r := range res.GetRoutes() {
+		advertised = append(advertised, AdvertisedRoute{Prefix: r.GetPrefix(), Approved: r.GetApproved()})
+	}
+	d.mu.Lock()
+	d.advertised = advertised
+	d.mu.Unlock()
+	for _, r := range advertised {
+		if !r.Approved {
+			d.log.Info("advertised route waits for approval", "prefix", r.Prefix, "hint", "thawr admin peer routes approve "+d.state.Name+" "+r.Prefix)
 		}
 	}
 }
@@ -491,7 +577,10 @@ func (d *Daemon) reapply(ctx context.Context) error {
 func (d *Daemon) applyLocked(ctx context.Context, nm NetMap, cache bool) error {
 	now := d.opts.Now()
 	d.mu.Lock()
-	key, dev, prev := d.key, d.dev, d.held
+	key, dev, prev, exitNode := d.key, d.dev, d.held, d.exitNode
+	if nm.Advertised != nil {
+		d.advertised = nm.Advertised
+	}
 	offered := nm
 	// The lock runs first: with it on, unsigned entries are held and
 	// signed ones are accepted into the pins, so the pin check after
@@ -528,7 +617,7 @@ func (d *Daemon) applyLocked(ctx context.Context, nm NetMap, cache bool) error {
 	}
 	d.warnSelfUnsigned()
 	nm = applied
-	cfg, err := BuildConfig(nm, key, d.state.ListenPort, d.overlay)
+	cfg, err := BuildConfigWith(nm, key, d.state.ListenPort, d.overlay, exitNode)
 	if err != nil {
 		return err
 	}
@@ -538,6 +627,7 @@ func (d *Daemon) applyLocked(ctx context.Context, nm NetMap, cache bool) error {
 	if err != nil {
 		return err
 	}
+	d.installRoutes(ctx, dev, cfg)
 	d.installFilter(ctx, dev, nm)
 	d.mu.Lock()
 	d.netmap = &nm
@@ -650,7 +740,7 @@ func (d *Daemon) installFilter(ctx context.Context, dev wg.Device, nm NetMap) {
 		})
 		return
 	}
-	set := FilterSet(nm, dev.Name(), d.selfIP)
+	set := FilterSetFor(nm, dev.Name(), d.selfIP, d.overlay, d.advertise)
 	d.devMu.Lock()
 	err := fd.SetFilter(ctx, set)
 	d.devMu.Unlock()
@@ -659,6 +749,84 @@ func (d *Daemon) installFilter(ctx context.Context, dev wg.Device, nm NetMap) {
 		return
 	}
 	d.log.Debug("filter installed", "rules", len(set.Rules), "visible", len(set.Visible))
+}
+
+// installRoutes puts the prefixes reached through peers, the exit
+// node's default route included, into the OS routing table; a device
+// without route support is reported once.
+func (d *Daemon) installRoutes(ctx context.Context, dev wg.Device, cfg wg.Config) {
+	rd, ok := dev.(wg.Routable)
+	if !ok {
+		if len(RoutesOf(cfg, d.overlay)) > 0 {
+			d.routesWarn.Do(func() {
+				d.log.Warn("device cannot install routes; subnet routes and exit nodes are unavailable", "backend", dev.Backend())
+			})
+		}
+		return
+	}
+	routes := RoutesOf(cfg, d.overlay)
+	d.devMu.Lock()
+	err := rd.SetRoutes(ctx, routes)
+	d.devMu.Unlock()
+	if err != nil {
+		d.log.Error("install routes", "err", err)
+		return
+	}
+	if len(routes) > 0 {
+		d.log.Debug("routes installed", "routes", routes)
+	}
+}
+
+// Errors of the exit-node selection.
+var (
+	// ErrNotExitNode means the named peer is not an exit node this device
+	// may use (no flag in the netmap, or held).
+	ErrNotExitNode = errors.New("not an exit node this device may use")
+)
+
+// ExitNodeOff clears the exit-node selection.
+const ExitNodeOff = "off"
+
+// SetExitNode routes this device's internet traffic through the named
+// peer (ExitNodeOff or "" for none), persists the choice and re-applies
+// the netmap. The peer must be flagged as exit node in the current
+// netmap and not held.
+func (d *Daemon) SetExitNode(ctx context.Context, name string) (ExitNodeStatus, error) {
+	name = stripZone(name)
+	if name == ExitNodeOff {
+		name = ""
+	}
+	d.mu.Lock()
+	nm := d.netmap
+	if name != "" {
+		found := false
+		if nm != nil {
+			for _, p := range nm.Peers {
+				if p.Name == name && p.ExitNode && !p.ViaHub {
+					found = true
+				}
+			}
+		}
+		if !found {
+			d.mu.Unlock()
+			return ExitNodeStatus{}, fmt.Errorf("%w: %s", ErrNotExitNode, name)
+		}
+	}
+	d.exitNode, d.state.ExitNode = name, name
+	st := d.state
+	d.mu.Unlock()
+	if err := SaveState(d.opts.StateDir, st); err != nil {
+		return ExitNodeStatus{}, err
+	}
+	if err := d.reapply(ctx); err != nil {
+		return ExitNodeStatus{}, err
+	}
+	if name == "" {
+		d.log.Info("exit node off")
+	} else {
+		d.log.Info("exit node selected", "peer", name)
+	}
+	return d.Status(ctx).ExitNode, nil
 }
 
 func (d *Daemon) generation() int64 {

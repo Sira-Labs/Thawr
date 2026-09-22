@@ -70,12 +70,21 @@ jobs:
         # A release published by hand for this tag (GitHub's "new release"
         # page creates the tag) gets the archives attached; otherwise the
         # workflow creates the release, and with it the tag on the commit
-        # that was built when started by hand.
+        # that was built when started by hand. The release notes are the
+        # CHANGELOG.md section for the version when there is one, else
+        # GitHub's generated notes.
         run: |
           if gh release view "$VERSION" >/dev/null 2>&1; then
             gh release upload "$VERSION" dist/* --clobber
           else
             prerelease=""
             case "$VERSION" in *-*) prerelease="--prerelease";; esac
-            gh release create "$VERSION" dist/* --title "$VERSION" --generate-notes --target "$GITHUB_SHA" $prerelease
+            args=(release create "$VERSION" dist/* --title "$VERSION" --target "$GITHUB_SHA")
+            awk -v v="${VERSION#v}" '
+              /^## \[/ { p = index($0, "[" v "]") > 0 }
+              p { print }
+            ' CHANGELOG.md > notes.md
+            if [ -s notes.md ]; then args+=(--notes-file notes.md); else args+=(--generate-notes); fi
+            if [ -n "$prerelease" ]; then args+=("$prerelease"); fi
+            gh "${args[@]}"
           fi

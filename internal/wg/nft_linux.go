@@ -92,6 +92,9 @@ func (n *nftFilter) remove() error {
 func buildRuleset(c *nftables.Conn, set FilterSet) (string, int) {
 	table := c.AddTable(&nftables.Table{Family: nftables.TableFamilyINet, Name: nftTable})
 	c.FlushTable(table)
+	if set.routerOnly {
+		return "forward", buildRouterChains(c, table, set)
+	}
 	drop := nftables.ChainPolicyDrop
 	name, hook, ifKey := "input", nftables.ChainHookInput, expr.MetaKeyIIFNAME
 	if set.Hook == HookForward {
@@ -159,7 +162,83 @@ func buildRuleset(c *nftables.Conn, set FilterSet) (string, int) {
 	}
 	// Count what the policy drops.
 	add(&expr.Counter{}, &expr.Verdict{Kind: expr.VerdictDrop})
+	if set.Hook == HookInput && (len(set.Forward) > 0 || len(set.Masquerade) > 0) {
+		count += buildRouterChains(c, table, set)
+	}
 	return name, count
+}
+
+// buildRouterChains adds what a subnet router or exit node needs next
+// to its input chain (spec 013): a forward chain that drops everything
+// crossing the tunnel unless a forward rule or an established flow
+// allows it, and a nat chain that masquerades forwarded packets on the
+// way out. Traffic between the host's other interfaces is untouched.
+func buildRouterChains(c *nftables.Conn, table *nftables.Table, set FilterSet) int {
+	drop := nftables.ChainPolicyDrop
+	fwd := c.AddChain(&nftables.Chain{Name: "forward", Table: table, Type: nftables.ChainTypeFilter, Hooknum: nftables.ChainHookForward, Priority: nftables.ChainPriorityFilter, Policy: &drop})
+	add := func(exprs ...expr.Any) {
+		c.AddRule(&nftables.Rule{Table: table, Chain: fwd, Exprs: exprs})
+	}
+	accept := &expr.Verdict{Kind: expr.VerdictAccept}
+	iface := ifname(set.Interface)
+	// Neither in nor out over the tunnel: none of our business.
+	add(&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1}, &expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: iface},
+		&expr.Meta{Key: expr.MetaKeyOIFNAME, Register: 1}, &expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: iface}, accept)
+	add(&expr.Ct{Register: 1, Key: expr.CtKeySTATE},
+		&expr.Bitwise{SourceRegister: 1, DestRegister: 1, Len: 4, Mask: binaryutil.NativeEndian.PutUint32(expr.CtStateBitESTABLISHED | expr.CtStateBitRELATED), Xor: binaryutil.NativeEndian.PutUint32(0)},
+		&expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: binaryutil.NativeEndian.PutUint32(0)}, accept)
+	count := 0
+	for _, r := range set.Forward {
+		for _, proto := range protocolsOf(FilterRule{Proto: r.Proto, Lo: r.Lo, Hi: r.Hi}) {
+			exprs := []expr.Any{&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: iface}}
+			exprs = append(exprs, ipv4()...)
+			exprs = append(exprs, saddr())
+			exprs = append(exprs, prefixMatch(r.Src)...)
+			if r.Dst.Bits() > 0 {
+				exprs = append(exprs, daddr())
+				exprs = append(exprs, prefixMatch(r.Dst)...)
+			}
+			exprs = append(exprs, &expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{proto}})
+			if proto != unix.IPPROTO_ICMP {
+				exprs = append(exprs, &expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2})
+				if r.Lo == r.Hi {
+					exprs = append(exprs, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: binaryutil.BigEndian.PutUint16(r.Lo)})
+				} else {
+					exprs = append(exprs, &expr.Range{Op: expr.CmpOpEq, Register: 1, FromData: binaryutil.BigEndian.PutUint16(r.Lo), ToData: binaryutil.BigEndian.PutUint16(r.Hi)})
+				}
+			}
+			add(append(exprs, accept)...)
+			count++
+		}
+	}
+	add(&expr.Counter{}, &expr.Verdict{Kind: expr.VerdictDrop})
+	if len(set.Masquerade) == 0 {
+		return count
+	}
+	nat := c.AddChain(&nftables.Chain{Name: "postrouting", Table: table, Type: nftables.ChainTypeNAT, Hooknum: nftables.ChainHookPostrouting, Priority: nftables.ChainPriorityNATSource})
+	for _, dst := range set.Masquerade {
+		exprs := []expr.Any{&expr.Meta{Key: expr.MetaKeyOIFNAME, Register: 1}, &expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: iface}}
+		exprs = append(exprs, ipv4()...)
+		if set.MasqueradeFrom.IsValid() {
+			exprs = append(exprs, saddr())
+			exprs = append(exprs, prefixMatch(set.MasqueradeFrom)...)
+		}
+		if dst.Bits() > 0 {
+			exprs = append(exprs, daddr())
+			exprs = append(exprs, prefixMatch(dst)...)
+		}
+		c.AddRule(&nftables.Rule{Table: table, Chain: nat, Exprs: append(exprs, &expr.Masq{})})
+	}
+	return count
+}
+
+// prefixMatch compares the address in register 1 with p.
+func prefixMatch(p netip.Prefix) []expr.Any {
+	if p.Bits() == 32 {
+		return []expr.Any{&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: p.Addr().AsSlice()}}
+	}
+	return []expr.Any{&expr.Bitwise{SourceRegister: 1, DestRegister: 1, Len: 4, Mask: prefixMask(p.Bits()), Xor: []byte{0, 0, 0, 0}},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: p.Masked().Addr().AsSlice()}}
 }
 
 // protocolsOf expands a rule's protocol into IP protocol numbers.

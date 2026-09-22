@@ -280,3 +280,53 @@ Two devices behind different home routers, server on a public host.
    enrol again). Restarting the first device with a
    different `--lock-signer` exits 2. `lock init` from a device owned
    by a member is refused by the server.
+
+## Manual checklist for subnet routers and exit nodes (spec 013)
+
+Needs a Linux router with a LAN behind it (a NAS or a Raspberry Pi with
+a printer next to it) and a second Linux device to use it; macOS and
+Windows install subnet routes but refuse the router role and the
+exit-node selection in this release.
+
+1. On the router: `thawr client up --advertise-routes 10.1.0.0/24
+   --advertise-exit-node`. `client status` shows `Routes: advertising
+   10.1.0.0/24 (pending approval: ...), 0.0.0.0/0 (pending approval:
+   ...)`; `sysctl net.ipv4.ip_forward` reads 1; the other devices do
+   not see the router. On the Mac the same flags exit 2 with the Linux
+   hint.
+2. `thawr admin peer routes list <router>` lists both as `pending`;
+   `admin peer routes approve <router> 10.1.0.0/24` and `approve
+   <router> --all`; `admin audit --action route.approve` has two rows
+   and `route.advertise` two more.
+3. Add `dst: ["10.1.0.0/24:*"]` for your laptop's user and `dst:
+   ["internet:*"]` for it to the policy, `admin policy reload`. The
+   laptop's `client status` shows `Routes: 10.1.0.0/24 via <router>`,
+   `ip route` has `10.1.0.0/24 dev thawr0`, and `ping 10.1.0.<host>`
+   answers. `nft list table inet thawr` on the router shows the
+   `forward` chain with one rule per laptop and the `postrouting`
+   masquerade; `tcpdump -i eth0 host 10.1.0.<host>` on the router
+   shows the packets leaving with the router's LAN address.
+4. Change the rule to `10.1.0.0/24:22`: `ssh 10.1.0.<host>` connects,
+   `curl http://10.1.0.<host>` times out, and the router's `client
+   status` filter line counts the drop.
+5. On the laptop: `thawr client exit-node <router>` prints `exit node:
+   <router> (active)`; `curl https://ifconfig.me` shows the router's
+   public address; `ip rule` lists the two thawr rules and `ip route
+   show table 0x7a77` the default through `thawr0`; the control
+   connection stays `connected` and `client ping <router>` still finds
+   the direct path. `thawr client exit-node off` restores the previous
+   public address; `ip rule` and the table are empty again. `client
+   exit-node <peer without the flag>` exits 2. On the Mac the
+   selection exits 2 with the Linux hint.
+6. `thawr admin peer routes revoke <router> 10.1.0.0/24`: the laptop
+   loses the route and the peer within seconds (`ip route` no longer
+   lists it); `client up` on the router without `--advertise-routes`
+   keeps advertising, `client up --advertise-routes ""` withdraws and
+   the approval of the exit node is gone too (`routes list`).
+7. Stop the server, insert a row for `10.9.0.0/24` on the router into
+   `peer_routes` with `approved_at` set, start it, and add a rule for
+   it: the laptop installs the route, packets reach the router and its
+   forward chain's drop counter grows; nothing reaches the LAN.
+8. `thawr client down` on the router restores `ip_forward` to its
+   previous value and removes the `inet thawr` table; on the laptop
+   `client down` leaves no route, rule or table behind.

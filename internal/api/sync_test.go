@@ -38,6 +38,7 @@ type syncEnv struct {
 	client   thawrv1.ControlClient
 	admin    control.Principal
 	lock     *control.LockService
+	routes   *control.RoutesService
 }
 
 func newSyncEnv(t *testing.T) *syncEnv {
@@ -66,18 +67,19 @@ func newSyncEnv(t *testing.T) *syncEnv {
 	lockSvc := control.NewLockService(st, now, quiet, testHubKey).WithNotifier(hub)
 	registry := control.NewRegistry(st, quiet).WithNotifier(hub).WithLock(lockSvc)
 	enroller := control.NewEnroller(st, now, quiet, overlay, "").WithNotifier(hub)
+	routesSvc := control.NewRoutesService(st, quiet, now, overlay).WithNotifier(hub)
 	endpoints := control.NewEndpointTable(now)
 	hubInfo := control.HubConfig{PublicKey: testHubKey, Endpoint: "vpn:51820", Address: netip.MustParseAddr("100.64.0.1"), Overlay: overlay, STUNAddrs: []string{"vpn:3478", "vpn:3479"}}
 	builder := control.NewNetMapBuilder(st, control.OwnerVisibility{}, endpoints, hub, hubInfo, hub.Generation)
 	srv, err := NewGRPC(GRPCDeps{
 		Enroller: enroller, Hub: HubInfo{PublicKey: testHubKey, Endpoint: "vpn:51820", Overlay: overlay}, Logger: quiet,
 		NodeAuth: registry, NetMaps: builder, Sync: hub, Peers: registry, Endpoints: endpoints, Paths: control.NewPathTable(now),
-		Lock: lockSvc,
+		Lock: lockSvc, Routes: routesSvc,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &syncEnv{t: t, st: st, hub: hub, registry: registry, tokens: control.NewTokens(st, now, quiet), lock: lockSvc,
+	return &syncEnv{t: t, st: st, hub: hub, registry: registry, tokens: control.NewTokens(st, now, quiet), lock: lockSvc, routes: routesSvc,
 		client: bufconnClient(t, srv), admin: control.Principal{UserID: admin.ID, Name: admin.Name, Role: admin.Role}}
 }
 

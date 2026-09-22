@@ -40,7 +40,7 @@ func TestPolicyVisibilityNetMap(t *testing.T) {
 	for _, u := range users {
 		names[u.ID] = u.Name
 	}
-	compiled := policy.Compile(pol, PolicyPeers(peers, names))
+	compiled := policy.Compile(pol, PolicyPeers(peers, names, nil))
 	vis := PolicyVisibility{Load: func() *policy.Compiled { return compiled }}
 	hub := HubConfig{PublicKey: "HUB", Address: netip.MustParseAddr("100.64.0.1"), Overlay: netip.MustParsePrefix("100.64.0.0/10")}
 	b := NewNetMapBuilder(env.st, vis, nil, nil, hub, func() int64 { return 1 })

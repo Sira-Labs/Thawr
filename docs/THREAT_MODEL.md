@@ -101,6 +101,7 @@ Attacker has root on the server host or a copy of `data_dir`.
 | Decrypt peer-to-peer traffic | Not possible: the server never holds peer private keys or session keys for agent peers. Relay carries ciphertext. This is the main reason for the DERP-style relay over a hub-and-spoke design |
 | Decrypt static-peer traffic | Possible: the hub terminates WireGuard for phones. Residual risk, documented in the QR export UI. Users needing end-to-end for phones must wait for a native client (non-goal v1) |
 | Distribute malicious keys (insert an attacker peer as a "visible" peer, or swap a key) | Reduced (spec 011): every client pins the hub key and each peer's `(id, key)` under its name on first sight and holds a changed key out of the tunnel, DNS and the filter until the user runs `thawr client trust <name>`; the peer shows as `key changed` in status. Closed further by the network lock (spec 012): with it on, a client applies only peers whose record `(id, name, key)` carries an Ed25519 signature by a signer named in a lock record that the signers themselves signed; the lock key lives on a client device, never on the server. An inserted peer, a renamed one or a swapped key is held as `unsigned` until a person runs `thawr client lock sign <name>` on a signer, and the server cannot turn the lock off (a disabled record must be signed too) or roll it back (records carry a generation). A signer's own rotation is signed on the way, so it needs no `trust`. Only a device an admin owns may create the first record, so a member's device cannot make itself the sole signer. Residual: the first lock record a device sees is pinned on first contact (like the enrolment), so a device enrolled while the server is already hostile can be handed the attacker's record unless it was enrolled with `--lock-signer <lock public key>`, which makes it apply nothing until a record signed by that key arrives (the full key, never the 32-bit fingerprint); a signer who signs, or adds a signer, without comparing the fingerprint with the other device's own output vouches blindly; devices enrolled before the lock stay pinned-only until signed; the admin's own signing device is the new single point (add a second signer with `lock add-signer <name> <key>`) |
+| Steer traffic through a router or exit node the owner never approved | The server decides which peer carries a prefix only among peers that advertised it and an admin approved; a route rides on the trust in that peer (pinned since spec 011, signed with the lock on), so a compromised server can point a prefix at an attacker peer only if that peer is accepted as a peer at all. A router forwards only prefixes it advertised itself, from its own state, so a route the server invents on an honest peer ends in a drop rule. Residual: the approval itself is the server's word, like visibility; a compromised server can withhold a route or move it between two legitimate routers of the same prefix (spec 013) |
 | Steal node secrets | Only SHA-256 hashes are stored; the attacker cannot impersonate existing clients from the DB alone, but as the server they can serve them anything |
 | Steal password hashes | argon2id (64 MiB, 3 iterations, 4 lanes) slows offline cracking; admins are told to use a password manager |
 | Steal enrollment tokens | Hashed; unused tokens can be revoked by deleting `data_dir` and re-issuing |
@@ -170,6 +171,12 @@ These are checked by tests where possible.
     (`TestPinsHoldUnsigned`, `TestPinsUpdateLock`,
     `TestDaemonNetworkLock`, `TestLockSetAcceptsOnlySignedSuccessors`,
     `TestSignPeerRequiresSigner`, `TestLockRPCs`).
+
+13. A client installs a route only for a prefix its netmap carries on
+    a peer it applied (held peers contribute none), and a router
+    forwards only prefixes it advertised itself, whatever the netmap
+    says (tests: `TestDaemonRoutes`,
+    `TestFilterSetForServesOnlyAdvertised`, `TestCompileForwardRules`).
 
 ## Explicitly out of scope for v1
 

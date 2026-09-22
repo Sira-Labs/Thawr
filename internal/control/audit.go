@@ -23,6 +23,10 @@ const (
 	AuditLoginOK          = "login.ok"
 	AuditLoginFailed      = "login.failed"
 	AuditPolicyReload     = "policy.reload"
+	AuditRouteAdvertise   = "route.advertise"
+	AuditRouteWithdraw    = "route.withdraw"
+	AuditRouteApprove     = "route.approve"
+	AuditRouteRevoke      = "route.revoke"
 )
 
 // Actor roles beyond the user roles.

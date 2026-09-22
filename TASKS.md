@@ -2,7 +2,10 @@
 
 Status legend: `[ ]` open, `[~]` in progress, `[x]` done. One spec per
 session; mark it here and add one line per non-obvious decision below the
-entry.
+entry. Phases, exit criteria and the progress log per sprint are in
+`docs/roadmap/roadmap.md`; the weekly sprint plan with dated stories is
+`docs/roadmap/sprints.md` (sprints 4 onward; sprints 1–3 below were spec
+batches).
 
 ## Phase 0 — Documents
 
@@ -544,10 +547,48 @@ entry.
         and not for authenticating a key.
       - Out of scope, listed in the spec: removing a signer, a quorum,
         rotating a lock key, short-lived keys.
-- [ ] **013 Exit nodes and subnet routers** — advertised prefixes gated
-      by policy (spec to be written).
+- [x] **013 Exit nodes and subnet routers** —
+      `docs/specs/013-exit-nodes-and-subnet-routers.md`
+      A Linux peer advertises prefixes or itself as exit node, an admin
+      approves, the policy grants (`dst` CIDR outside the overlay,
+      `internet`), clients install the routes, the router forwards and
+      masquerades; `client exit-node` with fwmark policy routing.
+      - Implemented in sprint 4 ahead of the plan (session of
+        2026-09-22): the roadmap's sprint 5 stories S5-1 to S5-4 and
+        S5-6 are done, S5-5 (routes on macOS and Windows) is done for
+        subnet routes only. Open: `tests/routes_test.go` (netns
+        integration test, S5-3's second half), the web UI column, and
+        the manual checklist on real hosts.
+      - Routes ride in the peer's `allowed_ips` next to its /32 rather
+        than a separate field; the client derives the OS routes from
+        every entry that is not a peer's own /32, so the pre-013 client
+        logic needed no change.
+      - The policy compiler gets the overlay (`CompileWith`,
+        `PolicyService.WithOverlay`): a dst CIDR inside the overlay
+        still selects peers, outside it is a route, and one that
+        contains the overlay is a validation error. Without an overlay
+        (`Compile`) routes are ignored, which keeps every earlier test.
+      - A route makes the router visible but opens no port on it:
+        `Allowed` is untouched, `Visible` also consults the forward
+        rules, `ForwardFor` is separate from `FilterFor`.
+      - The router forwards only prefixes from its own state
+        (`FilterSetFor` drops netmap forward rules outside them), so a
+        server cannot make a peer forward what it never offered
+        (threat model T4, requirement 13).
+      - Exit-node use and the router role need Linux: the fwmark plus
+        `ip rule` scheme (wg-quick's) keeps the endpoint out of the
+        tunnel, and forwarding and masquerade are nftables. macOS and
+        Windows refuse both with a clear error and still install subnet
+        routes. The `wireguard-go` adapter on Linux installs the same
+        forward and nat chains next to its userspace input filter.
+      - `EnableIPForward` is injectable in `DaemonOptions` so the fake
+        device tests run on every platform.
+      - `--advertise-routes` omitted keeps the stored set; given, it
+        replaces it (an empty list withdraws). A withdrawn prefix
+        loses its approval on the server, so re-advertising needs a
+        person again.
 
-## Phase 2 candidates (not scheduled)
+## Phase 2 candidates (scheduled as specs 014–021 in `docs/roadmap/`)
 
 - OIDC identity provider plugin (ADR 0006).
 - IPv6 overlay.

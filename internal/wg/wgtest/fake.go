@@ -27,9 +27,13 @@ type Fake struct {
 	// reported by FilterStats.
 	Filters []wg.FilterSet
 	Drops   uint64
-	closed  bool
-	name    string
-	current wg.Config
+	// Routes holds the prefixes of the last SetRoutes call; RoutesErr,
+	// when set, is returned by SetRoutes.
+	Routes    []netip.Prefix
+	RoutesErr error
+	closed    bool
+	name      string
+	current   wg.Config
 }
 
 // New returns a Fake named name.
@@ -146,8 +150,31 @@ func (f *Fake) SetFilter(_ context.Context, set wg.FilterSet) error {
 	}
 	set.Visible = append([]netip.Addr(nil), set.Visible...)
 	set.Rules = append([]wg.FilterRule(nil), set.Rules...)
+	set.Forward = append([]wg.ForwardRule(nil), set.Forward...)
+	set.Masquerade = append([]netip.Prefix(nil), set.Masquerade...)
 	f.Filters = append(f.Filters, set)
 	return nil
+}
+
+// SetRoutes records the routes the daemon wants installed.
+func (f *Fake) SetRoutes(_ context.Context, prefixes []netip.Prefix) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closed {
+		return errors.New("wgtest: set routes after close")
+	}
+	if f.RoutesErr != nil {
+		return f.RoutesErr
+	}
+	f.Routes = append([]netip.Prefix(nil), prefixes...)
+	return nil
+}
+
+// LastRoutes returns the prefixes of the last SetRoutes call.
+func (f *Fake) LastRoutes() []netip.Prefix {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]netip.Prefix(nil), f.Routes...)
 }
 
 // SetDrops sets the drop counter FilterStats reports.
