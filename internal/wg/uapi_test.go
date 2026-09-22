@@ -39,6 +39,7 @@ func TestRenderUAPI(t *testing.T) {
 	want := strings.Join([]string{
 		"private_key=" + hex.EncodeToString(priv[:]),
 		"listen_port=51820",
+		"fwmark=0",
 		"public_key=" + hex.EncodeToString(gone[:]),
 		"remove=true",
 		"public_key=" + hex.EncodeToString(pub[:]),

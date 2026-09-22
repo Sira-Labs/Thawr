@@ -217,8 +217,9 @@ Routes: advertising 10.1.0.0/24 (approved), 0.0.0.0/0 (pending approval: thawr a
 2. Ports: with `dst: ["10.1.0.0/24:22"]`, TCP 22 to the LAN host
    connects and TCP 80 times out; the counters in `R`'s status show the
    drop. `established,related` lets the reply through.
-3. Revoking the approval, withdrawing the advertisement (`client up`
-   without the flag) or removing the rule takes the route out of `C`
+3. Revoking the approval, withdrawing the advertisement (`client up
+   --advertise-routes ""` on `R`; without the flag the stored set
+   stays) or removing the rule takes the route out of `C`
    within one netmap; the route is gone from `C`'s routing table.
 4. Two routers advertise the same prefix: `C` routes through one of
    them, deterministically, and WireGuard has the prefix on one peer

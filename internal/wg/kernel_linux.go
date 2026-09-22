@@ -80,11 +80,9 @@ func (k *kernelDevice) Configure(_ context.Context, cfg Config) error {
 	if err != nil {
 		return fmt.Errorf("wg: read %s: %w", k.name, err)
 	}
-	wcfg := wgtypes.Config{PrivateKey: &cfg.PrivateKey}
-	if cfg.FwMark != 0 {
-		mark := int(cfg.FwMark)
-		wcfg.FirewallMark = &mark
-	}
+	// The mark is always written, so turning the exit node off clears it.
+	mark := int(cfg.FwMark)
+	wcfg := wgtypes.Config{PrivateKey: &cfg.PrivateKey, FirewallMark: &mark}
 	if cfg.ListenPort > 0 {
 		port := cfg.ListenPort
 		wcfg.ListenPort = &port
