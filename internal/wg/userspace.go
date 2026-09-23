@@ -31,6 +31,9 @@ type userspaceDevice struct {
 	closed bool
 	routes routeTable
 	nft    routerNAT
+	// port is the listen port the device holds; Configure sends
+	// listen_port only when it changes.
+	port int
 }
 
 // SetRoutes installs the routes reached through the interface.
@@ -136,16 +139,28 @@ func (u *userspaceDevice) Configure(ctx context.Context, cfg Config) error {
 			remove = append(remove, s.PublicKey)
 		}
 	}
-	if err := u.dev.IpcSet(renderUAPI(cfg, remove)); err != nil {
+	if err := u.dev.IpcSet(u.render(cfg, remove)); err != nil {
 		return fmt.Errorf("wg: configure %s: %w", u.name, err)
 	}
 	if err := u.dev.Up(); err != nil {
 		return fmt.Errorf("wg: bring up %s: %w", u.name, err)
 	}
+	u.port = cfg.ListenPort
 	if err := setAddresses(u.name, cfg.Addresses, u.mtu); err != nil {
 		return err
 	}
 	return nil
+}
+
+// render is renderUAPI without the listen port when the device already
+// holds it: wireguard-go closes and reopens its socket on every
+// listen_port it receives, the same number included, a gap in which
+// packets are lost and another process can take the port.
+func (u *userspaceDevice) render(cfg Config, remove []Key) string {
+	if cfg.ListenPort == u.port {
+		cfg.ListenPort = 0
+	}
+	return renderUAPI(cfg, remove)
 }
 
 func (u *userspaceDevice) SetPeer(_ context.Context, p Peer) error {

@@ -593,6 +593,15 @@ batches).
         visible, its exit-node flag missing). `PolicyVisibility` now
         implements `Snapshotter` and a build takes one snapshot; the
         owner rule and test wrappers that embed it need none.
+      - Follow-up (rc4 on macOS, 2026-09-23): a manual `client up` next
+        to the launchd service took over the socket and raced it for
+        UDP 60129, which the userspace adapter rebinds on every netmap
+        (wireguard-go reopens its socket for each `listen_port` line,
+        the same number included). Three fixes: `NewDaemon` refuses to
+        start while the socket answers (`ErrAlreadyRunning`, exit 2), a
+        stored listen port that is taken at start is replaced and
+        persisted, and the userspace adapter sends `listen_port` only
+        when it changes. The kernel already ignores an unchanged port.
 
 ## Phase 2 candidates (scheduled as specs 014–021 in `docs/roadmap/`)
 

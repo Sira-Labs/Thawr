@@ -516,7 +516,11 @@ access is filesystem permission (`root` and group `thawr`).
 `thawr client status` talks to the running daemon over
 `/var/run/thawr/client.sock` (a Unix socket on every platform; Windows
 supports `AF_UNIX`; mode 0660, group `thawr` where that group exists)
-with a tiny JSON-over-HTTP API: `GET /status`, `POST /down`,
+with a tiny JSON-over-HTTP API. A lock file next to the socket
+(`client.sock.lock`, `flock`; `LockFileEx` on Windows) is held by the
+running daemon, so a second `thawr client up` exits 2 with `already
+running` instead of taking the socket over, while the socket a crashed
+daemon left behind is replaced. The API: `GET /status`, `POST /down`,
 `POST /rotate-key`, `POST /trust/{name}` (accept a held key; `all` for
 every held one, `hub` for the hub), `POST /ping/{name}` (mark
 traffic intent, probe, answer with the settled path), and the network

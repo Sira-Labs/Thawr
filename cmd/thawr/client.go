@@ -85,6 +85,11 @@ func applyAdvertise(stateDir string, f clientUpFlags) error {
 	return client.SaveState(stateDir, st)
 }
 
+// alreadyRunning turns ErrAlreadyRunning into exit 2 with the way out.
+func alreadyRunning(err error) error {
+	return &exitError{code: exitConfigError, err: fmt.Errorf("%w (stop it with `thawr client down`, or the service with `thawr client uninstall`)", err)}
+}
+
 // validateDNSMode turns a bad --dns value into a usage error.
 func validateDNSMode(mode string) error {
 	if !client.ValidDNSMode(mode) {
@@ -173,6 +178,11 @@ SIGINT or SIGTERM. When the device is not enrolled yet, --server and
 			if err := validateDNSMode(upf.dnsMode); err != nil {
 				return err
 			}
+			// Before enrolment and the flags that write state: a running
+			// client must not have its stored settings changed under it.
+			if err := client.CheckNotRunning(socket); err != nil {
+				return alreadyRunning(err)
+			}
 			logger := server.NewLogger(logConfig(upf.logLevel), cmd.ErrOrStderr())
 			if err := enrollIfNeeded(cmd.Context(), deps, logger, upf, stateDir); err != nil {
 				return err
@@ -183,6 +193,9 @@ SIGINT or SIGTERM. When the device is not enrolled yet, --server and
 			}
 			d, err := client.NewDaemon(client.DaemonOptions{StateDir: stateDir, Socket: socket, Interface: upf.iface, Logger: logger, Version: version,
 				DNS: client.DNSOptions{Mode: upf.dnsMode}})
+			if errors.Is(err, client.ErrAlreadyRunning) {
+				return alreadyRunning(err)
+			}
 			if err != nil {
 				return err
 			}

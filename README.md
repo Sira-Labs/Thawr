@@ -208,7 +208,9 @@ sudo launchctl kickstart -k system/thawr-client   # macOS
 ```
 
 The server applies pending database migrations at start; clients keep
-their enrollment. A server can refuse clients older than
+their enrollment. Do not start `thawr client up` by hand while the
+service is installed: a second client exits with `already running`
+rather than taking over the first one's socket. A server can refuse clients older than
 `min_client_version` in its config; `thawr client status` shows the
 server's version and says `client update available` when the server is
 ahead. Nothing checks for updates over the internet: the only version

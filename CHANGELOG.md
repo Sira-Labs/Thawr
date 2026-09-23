@@ -86,6 +86,14 @@ hosts (`docs/roadmap/sprints.md`, sprint 4); the tag replaces
   testing guide with manual checklists per platform, one spec per
   feature, roadmap and weekly sprint plan.
 
+### Fixed
+
+- A second `thawr client up` on the same socket exits 2 with `already
+  running` instead of taking the socket over and racing the first
+  client for the WireGuard port; a stored listen port held by another
+  process is replaced at start; the userspace adapter no longer rebinds
+  its socket on every netmap (found on macOS with v0.1.0-rc4).
+
 ### Security
 
 - Thawr implements no cryptography: WireGuard for the tunnel, the Go

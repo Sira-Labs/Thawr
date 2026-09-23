@@ -181,6 +181,13 @@ Two devices behind different home routers, server on a public host.
    the server logs pending migrations, the client reconnects without
    re-enrolling, and a client running an older release shows
    `client update available` in `thawr client status`.
+7. While the service runs, `sudo thawr client up` exits 2 with `another
+   thawr client is already running` and the service keeps its socket
+   (`client status` still answers). Note the listen port from the
+   `WireGuard:` line of `client status`, stop the service, bind another
+   program to that port (`nc -u -l <port>`), and start the service
+   while `nc` keeps it: the log says `listen port in use, choosing
+   another`, status shows the new port, and the tunnel comes up.
 
 ## Manual checklist for names (spec 010)
 
