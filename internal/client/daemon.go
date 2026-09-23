@@ -227,6 +227,9 @@ func NewDaemon(opts DaemonOptions) (*Daemon, error) {
 	if err := validatePort(opts.DNS.Port); err != nil {
 		return nil, err
 	}
+	if socketBusy(opts.Socket) {
+		return nil, fmt.Errorf("%w on %s", ErrAlreadyRunning, opts.Socket)
+	}
 	st, err := LoadState(opts.StateDir)
 	if err != nil {
 		return nil, err
@@ -238,15 +241,6 @@ func NewDaemon(opts DaemonOptions) (*Daemon, error) {
 	overlay, err := netip.ParsePrefix(st.OverlayCIDR)
 	if err != nil {
 		return nil, fmt.Errorf("client: overlay %q in state: %w", st.OverlayCIDR, err)
-	}
-	if st.ListenPort == 0 {
-		st.ListenPort, err = randomPort()
-		if err != nil {
-			return nil, err
-		}
-		if err := SaveState(opts.StateDir, st); err != nil {
-			return nil, err
-		}
 	}
 	selfIP, err := netip.ParseAddr(st.IPv4)
 	if err != nil {
@@ -265,6 +259,19 @@ func NewDaemon(opts DaemonOptions) (*Daemon, error) {
 		return nil, err
 	}
 	log := opts.Logger.With("peer", st.Name)
+	port, err := freeListenPort(st.ListenPort)
+	if err != nil {
+		return nil, err
+	}
+	if port != st.ListenPort {
+		if st.ListenPort != 0 {
+			log.Warn("listen port in use, choosing another", "port", st.ListenPort, "new", port)
+		}
+		st.ListenPort = port
+		if err := SaveState(opts.StateDir, st); err != nil {
+			return nil, err
+		}
+	}
 	ro := opts.Relay
 	ro.ServerURL, ro.TLS, ro.NodeSecret, ro.WireGuardPort, ro.Logger = st.Server, tlsCfg, st.NodeSecret, st.ListenPort, log
 	if ro.Now == nil {
@@ -301,6 +308,58 @@ func ParseAdvertised(raw []string, overlay netip.Prefix) ([]netip.Prefix, error)
 		out = append(out, p)
 	}
 	return out, nil
+}
+
+// ErrAlreadyRunning means another client daemon serves the local
+// socket. A second daemon must not take the socket over: it would race
+// the first one for the WireGuard port and leave both without a working
+// tunnel.
+var ErrAlreadyRunning = errors.New("client: another thawr client is already running")
+
+// socketBusy reports whether something accepts connections on the
+// local socket. The file a dead daemon left behind refuses the
+// connection and is removed when the daemon listens.
+func socketBusy(socket string) bool {
+	d := net.Dialer{Timeout: time.Second}
+	c, err := d.Dial("unix", socket)
+	if err != nil {
+		return false
+	}
+	_ = c.Close()
+	return true
+}
+
+// freeListenPort returns port when nothing else listens on it, a random
+// port otherwise (and when port is zero). The stored port is kept
+// across restarts so endpoint candidates stay stable; one taken by
+// another process would fail every configure, and a new port only
+// costs one endpoint update.
+func freeListenPort(port int) (int, error) {
+	for range 16 {
+		if port == 0 {
+			p, err := randomPort()
+			if err != nil {
+				return 0, err
+			}
+			port = p
+		}
+		if portFree(port) {
+			return port, nil
+		}
+		port = 0
+	}
+	return 0, errors.New("client: no free listen port found")
+}
+
+// portFree binds the UDP port once, the way the WireGuard device will.
+func portFree(port int) bool {
+	var lc net.ListenConfig
+	c, err := lc.ListenPacket(context.Background(), "udp4", fmt.Sprintf(":%d", port))
+	if err != nil {
+		return false
+	}
+	_ = c.Close()
+	return true
 }
 
 // randomPort picks a listen port in the dynamic range.

@@ -183,6 +183,9 @@ SIGINT or SIGTERM. When the device is not enrolled yet, --server and
 			}
 			d, err := client.NewDaemon(client.DaemonOptions{StateDir: stateDir, Socket: socket, Interface: upf.iface, Logger: logger, Version: version,
 				DNS: client.DNSOptions{Mode: upf.dnsMode}})
+			if errors.Is(err, client.ErrAlreadyRunning) {
+				return &exitError{code: exitConfigError, err: fmt.Errorf("%w (stop it with `thawr client down`, or the service with `thawr client uninstall`)", err)}
+			}
 			if err != nil {
 				return err
 			}

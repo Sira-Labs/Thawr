@@ -41,7 +41,8 @@ type State struct {
 	HubPublicKey string    `json:"hub_public_key"`
 	HubEndpoint  string    `json:"hub_endpoint"`
 	EnrolledAt   time.Time `json:"enrolled_at"`
-	// ListenPort is chosen once so endpoint candidates stay stable.
+	// ListenPort is kept across restarts so endpoint candidates stay
+	// stable; it changes only when another process holds it at start.
 	ListenPort int `json:"listen_port,omitempty"`
 	// LockSigner is the full lock public key given at enrolment that
 	// must have signed the first lock record this device pins; empty
