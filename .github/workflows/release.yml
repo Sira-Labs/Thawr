@@ -41,6 +41,10 @@ jobs:
         env:
           CGO_ENABLED: "1" # race runtime needs cgo; the binary stays CGO_ENABLED=0
         run: go test -race -count=1 ./...
+      # A release is never cut with a known, reachable vulnerability, even if one was
+      # published after the last CI run. Same toolchain as the build below.
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
   publish:
     needs: check
