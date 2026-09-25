@@ -86,6 +86,12 @@ hosts (`docs/roadmap/sprints.md`, sprint 4); the tag replaces
   testing guide with manual checklists per platform, one spec per
   feature, roadmap and weekly sprint plan.
 
+### Changed
+
+- The repository moved to `Sira-Labs/Thawr` and the Go module path is
+  now `github.com/sira-labs/thawr`; `go install` and imports must use
+  the new path, the old one no longer resolves to this module.
+
 ### Fixed
 
 - A second `thawr client up` on the same socket exits 2 with `already

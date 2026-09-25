@@ -18,8 +18,8 @@ problem. Use one of these channels instead:
 1. **GitHub private vulnerability reporting**: the *Report a
    vulnerability* button under the repository's *Security* tab opens a
    draft advisory that only the maintainer can read.
-2. **Email**: the address on the maintainer's GitHub profile
-   ([@Sira-Labs](https://github.com/Sira-Labs)). Put `[thawr
+2. **Email**: the address on the GitHub profile of the maintainer
+   listed in [`.github/CODEOWNERS`](.github/CODEOWNERS). Put `[thawr
    security]` in the subject.
 
 Include the version (`thawr version --json`), the platform, what you
