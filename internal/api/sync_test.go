@@ -18,10 +18,10 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
-	thawrv1 "github.com/thedatadudech/thawr/internal/api/proto/thawr/v1"
-	"github.com/thedatadudech/thawr/internal/control"
-	"github.com/thedatadudech/thawr/internal/store"
-	"github.com/thedatadudech/thawr/internal/wg"
+	thawrv1 "github.com/sira-labs/thawr/internal/api/proto/thawr/v1"
+	"github.com/sira-labs/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/wg"
 )
 
 // testHubKey is a fixed, valid hub public key (spec 012 signs it, so

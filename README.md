@@ -9,9 +9,9 @@
 
 **One binary. No cloud. Works offline.**
 
-[![CI](https://github.com/thedatadudech/Thawr/actions/workflows/ci.yml/badge.svg)](https://github.com/thedatadudech/Thawr/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/thedatadudech/Thawr?include_prereleases&label=release)](https://github.com/thedatadudech/Thawr/releases)
-[![Go](https://img.shields.io/github/go-mod/go-version/thedatadudech/Thawr)](go.mod)
+[![CI](https://github.com/Sira-Labs/Thawr/actions/workflows/ci.yml/badge.svg)](https://github.com/Sira-Labs/Thawr/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Sira-Labs/Thawr?include_prereleases&label=release)](https://github.com/Sira-Labs/Thawr/releases)
+[![Go](https://img.shields.io/github/go-mod/go-version/Sira-Labs/Thawr)](go.mod)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 Thawr is a self-hosted, WireGuard-based private network (mesh VPN / ZTNA)
@@ -76,8 +76,8 @@ checksums. Download the archive for your platform from the GitHub
 Releases page, verify it, and put the binary on the path:
 
 ```
-curl -LO https://github.com/thedatadudech/Thawr/releases/download/v0.1.0/thawr_v0.1.0_linux_amd64.tar.gz
-curl -LO https://github.com/thedatadudech/Thawr/releases/download/v0.1.0/SHA256SUMS
+curl -LO https://github.com/Sira-Labs/Thawr/releases/download/v0.1.0/thawr_v0.1.0_linux_amd64.tar.gz
+curl -LO https://github.com/Sira-Labs/Thawr/releases/download/v0.1.0/SHA256SUMS
 sha256sum -c SHA256SUMS --ignore-missing
 tar xzf thawr_v0.1.0_linux_amd64.tar.gz
 sudo install -m 0755 thawr_v0.1.0_linux_amd64/thawr /usr/local/bin/thawr
@@ -258,7 +258,7 @@ change per commit, `make test lint` clean, Developer Certificate of
 Origin sign-off. Pull requests that add cryptographic code are declined
 on principle (ADR 0004). Report vulnerabilities privately as described
 in `SECURITY.md`, not in a public issue. The
-[milestones](https://github.com/thedatadudech/Thawr/milestones) show
+[milestones](https://github.com/Sira-Labs/Thawr/milestones) show
 what is planned next; `docs/roadmap/` has the phases and the sprint
 plan behind them.
 

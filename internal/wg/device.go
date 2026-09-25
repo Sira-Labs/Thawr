@@ -12,7 +12,7 @@ import (
 
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 
-	"github.com/thedatadudech/thawr/internal/stun"
+	"github.com/sira-labs/thawr/internal/stun"
 )
 
 // Key is a 32-byte WireGuard key (private, public or preshared).

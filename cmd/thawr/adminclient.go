@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/config"
+	"github.com/sira-labs/thawr/internal/config"
 )
 
 // envAdminSocket overrides the admin socket path.

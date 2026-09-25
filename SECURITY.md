@@ -6,7 +6,7 @@ receive. Thank you for taking the time.
 
 ## Supported versions
 
-Only the latest release on the [Releases page](https://github.com/thedatadudech/Thawr/releases)
+Only the latest release on the [Releases page](https://github.com/Sira-Labs/Thawr/releases)
 receives fixes. Pre-releases (`v0.1.0-rcN`) are supported until the
 next one is published.
 
@@ -18,8 +18,8 @@ problem. Use one of these channels instead:
 1. **GitHub private vulnerability reporting**: the *Report a
    vulnerability* button under the repository's *Security* tab opens a
    draft advisory that only the maintainer can read.
-2. **Email**: the address on the maintainer's GitHub profile
-   ([@thedatadudech](https://github.com/thedatadudech)). Put `[thawr
+2. **Email**: the address on the GitHub profile of the maintainer
+   listed in [`.github/CODEOWNERS`](.github/CODEOWNERS). Put `[thawr
    security]` in the subject.
 
 Include the version (`thawr version --json`), the platform, what you

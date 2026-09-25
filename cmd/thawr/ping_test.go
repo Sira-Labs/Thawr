@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/thedatadudech/thawr/internal/client"
+	"github.com/sira-labs/thawr/internal/client"
 )
 
 // probingDaemon answers /status with b idle until /ping/b was called,

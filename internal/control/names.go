@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/thedatadudech/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/store"
 )
 
 // SanitizeName turns a hostname into a DNS label: lowercase letters,

@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/thedatadudech/thawr/internal/wg"
+	"github.com/sira-labs/thawr/internal/wg"
 )
 
 // enableForwarding lets the kernel forward packets that arrive on the

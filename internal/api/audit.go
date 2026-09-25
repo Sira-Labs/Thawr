@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/store"
 )
 
 // AuditService is what the audit endpoint needs from the store.

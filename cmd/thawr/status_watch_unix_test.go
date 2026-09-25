@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/client"
+	"github.com/sira-labs/thawr/internal/client"
 )
 
 // TestStatusWatchStopsOnInterrupt sends SIGINT to the test process, as

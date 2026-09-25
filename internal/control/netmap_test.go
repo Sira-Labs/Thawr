@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/store"
 )
 
 type fakePresence map[string]bool

@@ -7,11 +7,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/thedatadudech/thawr/internal/client"
-	"github.com/thedatadudech/thawr/internal/config"
-	"github.com/thedatadudech/thawr/internal/control"
-	"github.com/thedatadudech/thawr/internal/dns"
-	"github.com/thedatadudech/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/client"
+	"github.com/sira-labs/thawr/internal/config"
+	"github.com/sira-labs/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/dns"
+	"github.com/sira-labs/thawr/internal/store"
 )
 
 // dnsPort is where the hub resolver listens on the hub address.

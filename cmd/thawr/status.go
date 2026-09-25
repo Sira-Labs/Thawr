@@ -8,9 +8,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/thedatadudech/thawr/internal/client"
-	"github.com/thedatadudech/thawr/internal/control"
-	"github.com/thedatadudech/thawr/internal/wg"
+	"github.com/sira-labs/thawr/internal/client"
+	"github.com/sira-labs/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/wg"
 )
 
 // maxNameWidth is the widest peer name shown before truncation.

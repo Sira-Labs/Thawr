@@ -18,9 +18,9 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
-	thawrv1 "github.com/thedatadudech/thawr/internal/api/proto/thawr/v1"
-	"github.com/thedatadudech/thawr/internal/control"
-	"github.com/thedatadudech/thawr/internal/store"
+	thawrv1 "github.com/sira-labs/thawr/internal/api/proto/thawr/v1"
+	"github.com/sira-labs/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/store"
 )
 
 type fakeEnroller struct {

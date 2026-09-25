@@ -14,9 +14,9 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/relay"
-	"github.com/thedatadudech/thawr/internal/store"
-	"github.com/thedatadudech/thawr/internal/wg"
+	"github.com/sira-labs/thawr/internal/relay"
+	"github.com/sira-labs/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/wg"
 )
 
 type fakeNodeAuth map[string]store.Peer

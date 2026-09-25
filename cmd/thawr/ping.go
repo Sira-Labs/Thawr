@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/client"
+	"github.com/sira-labs/thawr/internal/client"
 )
 
 // pingPoll is how often the path is re-read while ICMP echoes run.

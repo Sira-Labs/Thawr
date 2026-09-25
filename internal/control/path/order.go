@@ -4,7 +4,7 @@ import (
 	"net/netip"
 	"sort"
 
-	"github.com/thedatadudech/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/control"
 )
 
 // Order ranks a peer's candidates: local addresses sharing a /24 with

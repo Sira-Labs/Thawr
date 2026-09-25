@@ -1,6 +1,6 @@
 package control
 
-import "github.com/thedatadudech/thawr/internal/store"
+import "github.com/sira-labs/thawr/internal/store"
 
 // Principal is who is acting: a logged-in user or the local admin socket.
 type Principal struct {

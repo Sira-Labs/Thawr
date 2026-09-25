@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/client"
-	"github.com/thedatadudech/thawr/internal/control"
-	"github.com/thedatadudech/thawr/internal/relay"
-	"github.com/thedatadudech/thawr/internal/wg"
+	"github.com/sira-labs/thawr/internal/client"
+	"github.com/sira-labs/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/relay"
+	"github.com/sira-labs/thawr/internal/wg"
 )
 
 // TestRelayOverTLS: two enrolled peers reach the relay through the real

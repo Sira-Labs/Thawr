@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/wg"
+	"github.com/sira-labs/thawr/internal/wg"
 )
 
 func testKey(t *testing.T) string {

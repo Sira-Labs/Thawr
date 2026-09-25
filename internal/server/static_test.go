@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/client"
-	"github.com/thedatadudech/thawr/internal/control"
-	"github.com/thedatadudech/thawr/internal/store"
-	"github.com/thedatadudech/thawr/internal/wg"
+	"github.com/sira-labs/thawr/internal/client"
+	"github.com/sira-labs/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/wg"
 )
 
 // TestHubPeerAddRemove: a static peer joins the hub interface within a

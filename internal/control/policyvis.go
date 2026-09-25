@@ -3,8 +3,8 @@ package control
 import (
 	"net/netip"
 
-	"github.com/thedatadudech/thawr/internal/control/policy"
-	"github.com/thedatadudech/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/control/policy"
+	"github.com/sira-labs/thawr/internal/store"
 )
 
 // PolicyVisibility answers visibility and filter questions from the

@@ -13,8 +13,8 @@ import (
 	gzqr "github.com/makiuchi-d/gozxing/qrcode"
 	qrcode "github.com/skip2/go-qrcode"
 
-	"github.com/thedatadudech/thawr/internal/control"
-	"github.com/thedatadudech/thawr/internal/wg"
+	"github.com/sira-labs/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/wg"
 )
 
 func TestMobileConfigRender(t *testing.T) {

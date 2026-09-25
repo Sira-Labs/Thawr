@@ -1,8 +1,8 @@
 blank_issues_enabled: true
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/thedatadudech/Thawr/security/advisories/new
+    url: https://github.com/Sira-Labs/Thawr/security/advisories/new
     about: Report privately; never in a public issue.
   - name: Question or setup help
-    url: https://github.com/thedatadudech/Thawr/discussions
+    url: https://github.com/Sira-Labs/Thawr/discussions
     about: Ask in Discussions when it is not a bug.

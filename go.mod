@@ -1,4 +1,4 @@
-module github.com/thedatadudech/thawr
+module github.com/sira-labs/thawr
 
 go 1.26.8
 

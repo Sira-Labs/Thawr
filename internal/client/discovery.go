@@ -5,10 +5,10 @@ import (
 	"net/netip"
 	"time"
 
-	thawrv1 "github.com/thedatadudech/thawr/internal/api/proto/thawr/v1"
-	"github.com/thedatadudech/thawr/internal/control"
-	"github.com/thedatadudech/thawr/internal/stun"
-	"github.com/thedatadudech/thawr/internal/wg"
+	thawrv1 "github.com/sira-labs/thawr/internal/api/proto/thawr/v1"
+	"github.com/sira-labs/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/stun"
+	"github.com/sira-labs/thawr/internal/wg"
 )
 
 // endpointReport is one ReportEndpoints payload.

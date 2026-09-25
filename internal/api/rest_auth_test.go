@@ -15,8 +15,8 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/control"
-	"github.com/thedatadudech/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/store"
 )
 
 // restEnv wires the REST handler to real control services on a temp DB.

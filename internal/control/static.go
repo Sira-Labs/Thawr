@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"net/netip"
 
-	"github.com/thedatadudech/thawr/internal/store"
-	"github.com/thedatadudech/thawr/internal/wg"
+	"github.com/sira-labs/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/wg"
 )
 
 // StaticRequest describes a static (mobile) peer to create.

@@ -3,9 +3,9 @@ package api
 import (
 	"fmt"
 
-	thawrv1 "github.com/thedatadudech/thawr/internal/api/proto/thawr/v1"
-	"github.com/thedatadudech/thawr/internal/control"
-	"github.com/thedatadudech/thawr/internal/lock"
+	thawrv1 "github.com/sira-labs/thawr/internal/api/proto/thawr/v1"
+	"github.com/sira-labs/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/lock"
 )
 
 func kindToProto(k control.EndpointKind) thawrv1.EndpointKind {

@@ -8,7 +8,7 @@ import (
 
 	"golang.zx2c4.com/wireguard/conn"
 
-	"github.com/thedatadudech/thawr/internal/stun"
+	"github.com/sira-labs/thawr/internal/stun"
 )
 
 // stunBind wraps wireguard-go's socket so STUN can share the WireGuard

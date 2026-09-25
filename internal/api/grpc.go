@@ -14,9 +14,9 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
-	thawrv1 "github.com/thedatadudech/thawr/internal/api/proto/thawr/v1"
-	"github.com/thedatadudech/thawr/internal/control"
-	"github.com/thedatadudech/thawr/internal/lock"
+	thawrv1 "github.com/sira-labs/thawr/internal/api/proto/thawr/v1"
+	"github.com/sira-labs/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/lock"
 )
 
 // Enroller is the control-plane operation behind the Enroll RPC.

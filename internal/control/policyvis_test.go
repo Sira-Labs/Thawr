@@ -6,8 +6,8 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/thedatadudech/thawr/internal/control/policy"
-	"github.com/thedatadudech/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/control/policy"
+	"github.com/sira-labs/thawr/internal/store"
 )
 
 // TestPolicyVisibilityNetMap: with a compiled policy the netmap carries

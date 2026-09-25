@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/thedatadudech/thawr/internal/control/policy"
-	"github.com/thedatadudech/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/control/policy"
+	"github.com/sira-labs/thawr/internal/store"
 )
 
 type routesEnv struct {

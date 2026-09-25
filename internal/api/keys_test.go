@@ -3,7 +3,7 @@ package api
 import (
 	"testing"
 
-	"github.com/thedatadudech/thawr/internal/wg"
+	"github.com/sira-labs/thawr/internal/wg"
 )
 
 func newKey(t *testing.T) string {

@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/client"
-	"github.com/thedatadudech/thawr/internal/control"
-	"github.com/thedatadudech/thawr/internal/wg"
-	"github.com/thedatadudech/thawr/internal/wg/wgtest"
+	"github.com/sira-labs/thawr/internal/client"
+	"github.com/sira-labs/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/wg"
+	"github.com/sira-labs/thawr/internal/wg/wgtest"
 )
 
 // createTokenLocal creates a user (once) and a token over the admin socket.

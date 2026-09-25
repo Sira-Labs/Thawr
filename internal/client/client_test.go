@@ -13,10 +13,10 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/api"
-	"github.com/thedatadudech/thawr/internal/control"
-	"github.com/thedatadudech/thawr/internal/store"
-	"github.com/thedatadudech/thawr/internal/wg"
+	"github.com/sira-labs/thawr/internal/api"
+	"github.com/sira-labs/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/wg"
 )
 
 type fakeEnroller struct {

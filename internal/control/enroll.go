@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/store"
-	"github.com/thedatadudech/thawr/internal/wg"
+	"github.com/sira-labs/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/wg"
 )
 
 // Enrollment rate limit per remote IP.

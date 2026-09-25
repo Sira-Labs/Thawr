@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/lock"
-	"github.com/thedatadudech/thawr/internal/store"
-	"github.com/thedatadudech/thawr/internal/wg"
-	"github.com/thedatadudech/thawr/internal/wg/wgtest"
+	"github.com/sira-labs/thawr/internal/lock"
+	"github.com/sira-labs/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/wg"
+	"github.com/sira-labs/thawr/internal/wg/wgtest"
 )
 
 func testLockKey(t *testing.T) lock.PrivateKey {

@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/thedatadudech/thawr/internal/relay"
-	"github.com/thedatadudech/thawr/internal/wg"
+	"github.com/sira-labs/thawr/internal/relay"
+	"github.com/sira-labs/thawr/internal/wg"
 )
 
 // RelaySession serves one authenticated relay connection; the relay
