@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/store"
 )
 
 // Audit action names (spec 011). The dotted form groups by subject.

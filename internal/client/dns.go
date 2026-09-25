@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/dns"
+	"github.com/sira-labs/thawr/internal/dns"
 )
 
 // DNS modes for DNSOptions.Mode and the --dns flag.

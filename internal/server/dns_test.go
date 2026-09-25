@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/client"
-	"github.com/thedatadudech/thawr/internal/control"
-	"github.com/thedatadudech/thawr/internal/dns"
+	"github.com/sira-labs/thawr/internal/client"
+	"github.com/sira-labs/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/dns"
 )
 
 // TestHubResolverHonoursVisibility: the hub resolver answers a phone

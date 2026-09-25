@@ -17,7 +17,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/config"
+	"github.com/sira-labs/thawr/internal/config"
 )
 
 // TLS file names inside data_dir/tls.

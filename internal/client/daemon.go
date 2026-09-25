@@ -23,13 +23,13 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
 
-	thawrv1 "github.com/thedatadudech/thawr/internal/api/proto/thawr/v1"
-	"github.com/thedatadudech/thawr/internal/control"
-	"github.com/thedatadudech/thawr/internal/control/path"
-	"github.com/thedatadudech/thawr/internal/dns"
-	"github.com/thedatadudech/thawr/internal/lock"
-	"github.com/thedatadudech/thawr/internal/relay"
-	"github.com/thedatadudech/thawr/internal/wg"
+	thawrv1 "github.com/sira-labs/thawr/internal/api/proto/thawr/v1"
+	"github.com/sira-labs/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/control/path"
+	"github.com/sira-labs/thawr/internal/dns"
+	"github.com/sira-labs/thawr/internal/lock"
+	"github.com/sira-labs/thawr/internal/relay"
+	"github.com/sira-labs/thawr/internal/wg"
 )
 
 // DefaultSocket is the local control socket of the running daemon.

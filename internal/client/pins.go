@@ -10,8 +10,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/lock"
-	"github.com/thedatadudech/thawr/internal/wg"
+	"github.com/sira-labs/thawr/internal/lock"
+	"github.com/sira-labs/thawr/internal/wg"
 )
 
 // PinsFile records the hub key and every peer key this device has

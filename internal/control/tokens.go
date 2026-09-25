@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/store"
 )
 
 // Token lifetime policy.

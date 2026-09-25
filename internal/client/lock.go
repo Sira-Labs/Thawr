@@ -11,9 +11,9 @@ import (
 	"sort"
 	"strings"
 
-	thawrv1 "github.com/thedatadudech/thawr/internal/api/proto/thawr/v1"
-	"github.com/thedatadudech/thawr/internal/lock"
-	"github.com/thedatadudech/thawr/internal/wg"
+	thawrv1 "github.com/sira-labs/thawr/internal/api/proto/thawr/v1"
+	"github.com/sira-labs/thawr/internal/lock"
+	"github.com/sira-labs/thawr/internal/wg"
 )
 
 // LockKeyFile holds this device's Ed25519 lock private key (spec 012).

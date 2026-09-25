@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/store"
 )
 
 // Notifier is told after a persistent change so subscribers wake up.

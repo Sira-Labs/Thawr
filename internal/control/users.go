@@ -13,7 +13,7 @@ import (
 
 	"golang.org/x/crypto/argon2"
 
-	"github.com/thedatadudech/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/store"
 )
 
 // argon2id parameters (threat model: 64 MiB, 3 iterations, 4 lanes).

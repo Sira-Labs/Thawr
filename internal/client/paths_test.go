@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/control"
-	"github.com/thedatadudech/thawr/internal/wg"
-	"github.com/thedatadudech/thawr/internal/wg/wgtest"
+	"github.com/sira-labs/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/wg"
+	"github.com/sira-labs/thawr/internal/wg/wgtest"
 )
 
 var (

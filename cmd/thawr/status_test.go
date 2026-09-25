@@ -16,7 +16,7 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
-	"github.com/thedatadudech/thawr/internal/client"
+	"github.com/sira-labs/thawr/internal/client"
 )
 
 // statusFixture mirrors the example in docs/specs/007-cli-status.md.

@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/thedatadudech/thawr/internal/client"
+	"github.com/sira-labs/thawr/internal/client"
 )
 
 // newClientLockCmd builds `thawr client lock` (spec 012): the network

@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/store"
-	"github.com/thedatadudech/thawr/internal/wg"
+	"github.com/sira-labs/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/wg"
 )
 
 type enrollEnv struct {

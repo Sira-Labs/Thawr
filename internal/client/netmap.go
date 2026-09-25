@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"time"
 
-	thawrv1 "github.com/thedatadudech/thawr/internal/api/proto/thawr/v1"
-	"github.com/thedatadudech/thawr/internal/control"
-	"github.com/thedatadudech/thawr/internal/lock"
-	"github.com/thedatadudech/thawr/internal/wg"
+	thawrv1 "github.com/sira-labs/thawr/internal/api/proto/thawr/v1"
+	"github.com/sira-labs/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/lock"
+	"github.com/sira-labs/thawr/internal/wg"
 )
 
 // NetMapFile caches the last netmap so WireGuard can be restored before

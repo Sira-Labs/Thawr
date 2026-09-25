@@ -20,12 +20,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/api"
-	"github.com/thedatadudech/thawr/internal/config"
-	"github.com/thedatadudech/thawr/internal/control"
-	"github.com/thedatadudech/thawr/internal/store"
-	"github.com/thedatadudech/thawr/internal/wg"
-	"github.com/thedatadudech/thawr/internal/wg/wgtest"
+	"github.com/sira-labs/thawr/internal/api"
+	"github.com/sira-labs/thawr/internal/config"
+	"github.com/sira-labs/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/wg"
+	"github.com/sira-labs/thawr/internal/wg/wgtest"
 )
 
 // syncBuffer is a goroutine-safe log sink.

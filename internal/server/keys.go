@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/thedatadudech/thawr/internal/store"
-	"github.com/thedatadudech/thawr/internal/wg"
+	"github.com/sira-labs/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/wg"
 )
 
 // ServerKeyFile is the name of the WireGuard private key file in data_dir.

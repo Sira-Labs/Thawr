@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/thedatadudech/thawr/internal/client"
-	"github.com/thedatadudech/thawr/internal/lock"
+	"github.com/sira-labs/thawr/internal/client"
+	"github.com/sira-labs/thawr/internal/lock"
 )
 
 // lockDaemon fakes the daemon's lock endpoints: a signer that knows

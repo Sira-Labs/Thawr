@@ -8,7 +8,7 @@ import (
 
 	"golang.zx2c4.com/wireguard/conn"
 
-	"github.com/thedatadudech/thawr/internal/stun"
+	"github.com/sira-labs/thawr/internal/stun"
 )
 
 // fakeBind delivers scripted packets to the device and records sends.

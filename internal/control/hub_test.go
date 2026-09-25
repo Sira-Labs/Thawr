@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/store"
 )
 
 func newHub(t *testing.T, st *store.Store, clk *clock) *Hub {

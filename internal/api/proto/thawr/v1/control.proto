@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package thawr.v1;
 
-option go_package = "github.com/thedatadudech/thawr/internal/api/proto/thawr/v1;thawrv1";
+option go_package = "github.com/sira-labs/thawr/internal/api/proto/thawr/v1;thawrv1";
 
 // Control is the client-to-server control channel. Every RPC except
 // Enroll carries the node secret as "authorization: Bearer <secret>".

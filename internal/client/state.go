@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/wg"
+	"github.com/sira-labs/thawr/internal/wg"
 )
 
 // File names inside the state directory.

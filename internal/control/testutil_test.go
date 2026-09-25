@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/store"
 )
 
 // clock is an injectable, advanceable time source for tests.

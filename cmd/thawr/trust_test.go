@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/thedatadudech/thawr/internal/client"
-	"github.com/thedatadudech/thawr/internal/wg"
+	"github.com/sira-labs/thawr/internal/client"
+	"github.com/sira-labs/thawr/internal/wg"
 )
 
 // trustDaemon answers /trust/{name} for "nas" and "all" and 404 otherwise.

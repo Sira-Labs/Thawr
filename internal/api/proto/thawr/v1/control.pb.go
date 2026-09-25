@@ -2129,7 +2129,7 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"\aSetLock\x12\x18.thawr.v1.SetLockRequest\x1a\x0f.thawr.v1.Empty\x126\n" +
 	"\bSignPeer\x12\x19.thawr.v1.SignPeerRequest\x1a\x0f.thawr.v1.Empty\x125\n" +
 	"\rListLockPeers\x12\x0f.thawr.v1.Empty\x1a\x13.thawr.v1.LockPeers\x12O\n" +
-	"\x0fAdvertiseRoutes\x12 .thawr.v1.AdvertiseRoutesRequest\x1a\x1a.thawr.v1.AdvertisedRoutesBDZBgithub.com/thedatadudech/thawr/internal/api/proto/thawr/v1;thawrv1b\x06proto3"
+	"\x0fAdvertiseRoutes\x12 .thawr.v1.AdvertiseRoutesRequest\x1a\x1a.thawr.v1.AdvertisedRoutesB@Z>github.com/sira-labs/thawr/internal/api/proto/thawr/v1;thawrv1b\x06proto3"
 
 var (
 	file_thawr_v1_control_proto_rawDescOnce sync.Once

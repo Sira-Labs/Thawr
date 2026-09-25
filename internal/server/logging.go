@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/thedatadudech/thawr/internal/config"
+	"github.com/sira-labs/thawr/internal/config"
 )
 
 // NewLogger builds the slog logger described by cfg, writing to w.

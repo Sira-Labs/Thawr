@@ -12,9 +12,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/control"
-	"github.com/thedatadudech/thawr/internal/control/path"
-	"github.com/thedatadudech/thawr/internal/wg"
+	"github.com/sira-labs/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/control/path"
+	"github.com/sira-labs/thawr/internal/wg"
 )
 
 // Status is the daemon's state as served on the local socket and

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/store"
 )
 
 func newTokenEnv(t *testing.T) (*Tokens, *Users, *clock) {

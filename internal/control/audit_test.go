@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/thedatadudech/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/store"
 )
 
 // auditEnv is the enrol env with an auditor on every service.

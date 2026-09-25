@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/thedatadudech/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/control"
 )
 
 // PolicyService is what the policy endpoints need from the server.

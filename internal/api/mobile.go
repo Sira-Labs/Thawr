@@ -7,9 +7,9 @@ import (
 
 	qrcode "github.com/skip2/go-qrcode"
 
-	"github.com/thedatadudech/thawr/internal/control"
-	"github.com/thedatadudech/thawr/internal/dns"
-	"github.com/thedatadudech/thawr/internal/wg"
+	"github.com/sira-labs/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/dns"
+	"github.com/sira-labs/thawr/internal/wg"
 )
 
 // MobileWarning is shown wherever a phone config is displayed: the hub

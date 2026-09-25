@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/thedatadudech/thawr/internal/client"
-	"github.com/thedatadudech/thawr/internal/svc"
+	"github.com/sira-labs/thawr/internal/client"
+	"github.com/sira-labs/thawr/internal/svc"
 )
 
 // fakeManager records calls and serves a scripted state.

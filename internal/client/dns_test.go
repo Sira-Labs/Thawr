@@ -12,7 +12,7 @@ import (
 
 	"golang.org/x/net/dns/dnsmessage"
 
-	"github.com/thedatadudech/thawr/internal/dns"
+	"github.com/sira-labs/thawr/internal/dns"
 )
 
 // fakeRegistrar records the registrar calls in order; fail makes

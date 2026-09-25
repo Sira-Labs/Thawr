@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/thedatadudech/thawr/internal/store"
-	"github.com/thedatadudech/thawr/internal/wg"
+	"github.com/sira-labs/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/wg"
 )
 
 func TestCreateStatic(t *testing.T) {

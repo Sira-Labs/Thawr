@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/client"
-	"github.com/thedatadudech/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/client"
+	"github.com/sira-labs/thawr/internal/control"
 )
 
 // TestPolicyChangesNetmaps: without a policy nobody sees anybody; a

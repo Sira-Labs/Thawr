@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/control"
 )
 
 func ep(s string, k control.EndpointKind) control.Endpoint {

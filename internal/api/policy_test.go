@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thedatadudech/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/control"
 )
 
 func TestPolicyEndpoints(t *testing.T) {

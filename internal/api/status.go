@@ -3,7 +3,7 @@ package api
 import (
 	"context"
 
-	"github.com/thedatadudech/thawr/internal/relay"
+	"github.com/sira-labs/thawr/internal/relay"
 )
 
 // Status is the JSON body of GET /api/v1/status.

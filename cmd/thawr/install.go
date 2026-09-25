@@ -12,9 +12,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/thedatadudech/thawr/internal/client"
-	"github.com/thedatadudech/thawr/internal/server"
-	"github.com/thedatadudech/thawr/internal/svc"
+	"github.com/sira-labs/thawr/internal/client"
+	"github.com/sira-labs/thawr/internal/server"
+	"github.com/sira-labs/thawr/internal/svc"
 )
 
 // Service names registered with the platform's service manager.

@@ -19,16 +19,16 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/thedatadudech/thawr/internal/api"
-	"github.com/thedatadudech/thawr/internal/config"
-	"github.com/thedatadudech/thawr/internal/control"
-	"github.com/thedatadudech/thawr/internal/control/policy"
-	"github.com/thedatadudech/thawr/internal/dns"
-	"github.com/thedatadudech/thawr/internal/relay"
-	"github.com/thedatadudech/thawr/internal/store"
-	"github.com/thedatadudech/thawr/internal/stun"
-	"github.com/thedatadudech/thawr/internal/wg"
-	"github.com/thedatadudech/thawr/web"
+	"github.com/sira-labs/thawr/internal/api"
+	"github.com/sira-labs/thawr/internal/config"
+	"github.com/sira-labs/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/control/policy"
+	"github.com/sira-labs/thawr/internal/dns"
+	"github.com/sira-labs/thawr/internal/relay"
+	"github.com/sira-labs/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/stun"
+	"github.com/sira-labs/thawr/internal/wg"
+	"github.com/sira-labs/thawr/web"
 )
 
 // DBFile is the SQLite database name inside data_dir.

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/thedatadudech/thawr/internal/client"
+	"github.com/sira-labs/thawr/internal/client"
 )
 
 // postLocal sends a JSON request over the admin socket.

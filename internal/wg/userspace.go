@@ -14,7 +14,7 @@ import (
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun"
 
-	"github.com/thedatadudech/thawr/internal/stun"
+	"github.com/sira-labs/thawr/internal/stun"
 )
 
 // userspaceDevice runs wireguard-go on a TUN interface and configures it

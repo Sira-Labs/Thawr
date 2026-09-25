@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/thedatadudech/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/store"
 )
 
 func TestKeyVisibility(t *testing.T) {

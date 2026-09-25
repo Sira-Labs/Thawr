@@ -59,4 +59,4 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/thedatadudech/thawr
+        - github.com/sira-labs/thawr

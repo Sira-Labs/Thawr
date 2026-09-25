@@ -6,8 +6,8 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/thedatadudech/thawr/internal/control"
-	"github.com/thedatadudech/thawr/internal/store"
+	"github.com/sira-labs/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/store"
 )
 
 // Cookie and header names of the admin UI session. The CSRF token is
