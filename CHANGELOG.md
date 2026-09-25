@@ -107,4 +107,4 @@ hosts (`docs/roadmap/sprints.md`, sprint 4); the tag replaces
   threat once a device has pinned the lock record; the first record a
   device sees is trusted unless it was enrolled with `--lock-signer`.
 
-[0.1.0]: https://github.com/thedatadudech/Thawr/compare/v0.1.0-rc3...main
+[0.1.0]: https://github.com/Sira-Labs/Thawr/compare/v0.1.0-rc3...main

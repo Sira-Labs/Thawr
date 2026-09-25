@@ -19,7 +19,7 @@ someone's private information, and sustained disruption of discussions.
 
 ## Enforcement
 
-The maintainer ([@thedatadudech](https://github.com/thedatadudech))
+The maintainer ([@Sira-Labs](https://github.com/Sira-Labs))
 handles reports sent by email (address on the profile) or through
 GitHub's report feature, in confidence. Consequences range from a
 warning to a permanent ban from the project's spaces, at the

@@ -161,7 +161,7 @@ def social():
         f'<text x="566" y="468" font-family="{FONT}" font-size="26" font-weight="400" '
         f'fill="{WHITE}" fill-opacity="0.7">Local users, one-time tokens, ACLs in git, relay built in.</text>',
         f'<text x="566" y="540" font-family="{FONT}" font-size="22" font-weight="500" '
-        f'letter-spacing="1" fill="{TEAL}">github.com/thedatadudech/Thawr</text>',
+        f'letter-spacing="1" fill="{TEAL}">github.com/Sira-Labs/Thawr</text>',
         "</svg>",
     ]
     return "\n".join(out)

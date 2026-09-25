@@ -2,28 +2,28 @@
 # it with the release checksums into dist/thawr.rb.
 class Thawr < Formula
   desc "Self-hosted WireGuard private network. One binary. No cloud. Works offline."
-  homepage "https://github.com/thedatadudech/Thawr"
+  homepage "https://github.com/Sira-Labs/Thawr"
   version "@VERSION_NUMBER@"
   license "Apache-2.0"
 
   on_macos do
     on_arm do
-      url "https://github.com/thedatadudech/Thawr/releases/download/v#{version}/thawr_v#{version}_darwin_arm64.tar.gz"
+      url "https://github.com/Sira-Labs/Thawr/releases/download/v#{version}/thawr_v#{version}_darwin_arm64.tar.gz"
       sha256 "@SHA_DARWIN_ARM64@"
     end
     on_intel do
-      url "https://github.com/thedatadudech/Thawr/releases/download/v#{version}/thawr_v#{version}_darwin_amd64.tar.gz"
+      url "https://github.com/Sira-Labs/Thawr/releases/download/v#{version}/thawr_v#{version}_darwin_amd64.tar.gz"
       sha256 "@SHA_DARWIN_AMD64@"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/thedatadudech/Thawr/releases/download/v#{version}/thawr_v#{version}_linux_arm64.tar.gz"
+      url "https://github.com/Sira-Labs/Thawr/releases/download/v#{version}/thawr_v#{version}_linux_arm64.tar.gz"
       sha256 "@SHA_LINUX_ARM64@"
     end
     on_intel do
-      url "https://github.com/thedatadudech/Thawr/releases/download/v#{version}/thawr_v#{version}_linux_amd64.tar.gz"
+      url "https://github.com/Sira-Labs/Thawr/releases/download/v#{version}/thawr_v#{version}_linux_amd64.tar.gz"
       sha256 "@SHA_LINUX_AMD64@"
     end
   end
