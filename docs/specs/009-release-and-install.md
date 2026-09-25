@@ -78,7 +78,8 @@ with the VCS revision from Go's build info when present.
   (`workflow_dispatch` with a `version` input, refused when that tag
   already exists; the release then creates the tag on the commit it
   built): lint and tests as
-  in `ci.yml`, then `make release release-verify`, then creates the
+  in `ci.yml` plus `govulncheck` (a known reachable vulnerability stops
+  the release), then `make release release-verify`, then creates the
   GitHub Release with `gh release create` (the runner's `gh`, no
   third-party action) and uploads `dist/*` including `SHA256SUMS`; when
   the release for the tag already exists (published by hand, which
