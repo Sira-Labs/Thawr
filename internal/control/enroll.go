@@ -104,8 +104,8 @@ func (e *Enroller) Enroll(ctx context.Context, req EnrollRequest) (EnrollResult,
 	if len(req.Hostname) > 63 {
 		return EnrollResult{}, fmt.Errorf("%w: hostname longer than 63 characters", ErrValidation)
 	}
-	if req.Name != "" && !validLabel(req.Name) {
-		return EnrollResult{}, fmt.Errorf("%w: name %q must be a DNS label", ErrValidation, req.Name)
+	if req.Name != "" && !validPeerName(req.Name) {
+		return EnrollResult{}, fmt.Errorf("%w: name %q must be a DNS label other than %q", ErrValidation, req.Name, HubName)
 	}
 	if !strings.HasPrefix(req.Token, TokenPrefix) || len(req.Token) != len(TokenPrefix)+43 {
 		e.log.Warn("enroll rejected: malformed token", "remote", req.RemoteIP)
@@ -165,6 +165,9 @@ func (e *Enroller) Enroll(ctx context.Context, req EnrollRequest) (EnrollResult,
 		// Only a token issued for a name may take one the policy
 		// selects; members cannot issue such tokens (Tokens.Create).
 		reserved := func(n string) bool {
+			if n == HubName {
+				return true // a host called "hub" gets hub-2
+			}
 			return e.peerRefs != nil && n != tok.PeerName && len(e.peerRefs(n)) > 0
 		}
 		name, err := uniqueName(ctx, tx.Peers(), base, reserved)

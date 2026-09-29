@@ -37,3 +37,11 @@ var labelRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
 // validLabel reports whether s is a DNS-label style name.
 func validLabel(s string) bool { return labelRe.MatchString(s) }
+
+// HubName is the name hub.thawr gives the server's hub address; no peer
+// may take it, or its name would never resolve to it.
+const HubName = "hub"
+
+// validPeerName reports whether s may name a peer: a DNS label other
+// than HubName.
+func validPeerName(s string) bool { return validLabel(s) && s != HubName }

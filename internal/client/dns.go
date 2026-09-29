@@ -24,7 +24,7 @@ const (
 )
 
 // HubName is the zone name of the server's hub address.
-const HubName = "hub"
+const HubName = "hub" // control.HubName: no peer may take it
 
 // DNS states in the status document.
 const (

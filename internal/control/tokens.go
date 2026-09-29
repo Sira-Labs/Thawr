@@ -100,8 +100,8 @@ func (t *Tokens) Create(ctx context.Context, by Principal, req TokenRequest) (Cr
 			}
 		}
 	}
-	if req.PeerName != "" && !validLabel(req.PeerName) {
-		return CreatedToken{}, fmt.Errorf("%w: peer name %q must be a DNS label", ErrValidation, req.PeerName)
+	if req.PeerName != "" && !validPeerName(req.PeerName) {
+		return CreatedToken{}, fmt.Errorf("%w: peer name %q must be a DNS label other than %q", ErrValidation, req.PeerName, HubName)
 	}
 	if req.PeerName != "" && !by.IsAdmin() && t.peerRefs != nil {
 		if refs := t.peerRefs(req.PeerName); len(refs) > 0 {

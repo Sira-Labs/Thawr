@@ -96,3 +96,25 @@ func TestEnrollDoesNotTakePolicySelectedName(t *testing.T) {
 		})
 	}
 }
+
+func TestHubNameIsReserved(t *testing.T) {
+	ctx := context.Background()
+	env := newEnrollEnv(t, "100.64.0.0/10")
+
+	res, err := env.enroller.Enroll(ctx, EnrollRequest{Token: env.token(t, TokenRequest{}), PublicKey: newPubKey(t), Hostname: "hub", ClientVersion: "0.1.0"})
+	if err != nil || res.Peer.Name != "hub-2" {
+		t.Fatalf("enrol a host called hub: name %q, err %v; want hub-2", res.Peer.Name, err)
+	}
+	if _, err := env.enroller.Enroll(ctx, EnrollRequest{Token: env.token(t, TokenRequest{}), PublicKey: newPubKey(t), Name: "hub", ClientVersion: "0.1.0"}); !errors.Is(err, ErrValidation) {
+		t.Errorf("enrol --name hub = %v, want ErrValidation", err)
+	}
+	if _, err := env.tokens.Create(ctx, env.admin, TokenRequest{OwnerName: "markus", Kind: "human", PeerName: "hub"}); !errors.Is(err, ErrValidation) {
+		t.Errorf("token for hub = %v, want ErrValidation", err)
+	}
+	if err := env.registry.Rename(ctx, env.admin, "hub-2", "hub", true); !errors.Is(err, ErrValidation) {
+		t.Errorf("rename to hub = %v, want ErrValidation", err)
+	}
+	if _, err := env.registry.CreateStatic(ctx, env.admin, StaticRequest{OwnerName: "markus", Name: "hub"}); !errors.Is(err, ErrValidation) {
+		t.Errorf("static peer hub = %v, want ErrValidation", err)
+	}
+}

@@ -54,8 +54,8 @@ func (r *Registry) CreateStatic(ctx context.Context, by Principal, req StaticReq
 	if !by.IsAdmin() && by.Name != req.OwnerName {
 		return StaticResult{}, fmt.Errorf("%w: %s may only add peers for themselves", ErrForbidden, by.Name)
 	}
-	if req.Name == "" || !validLabel(req.Name) {
-		return StaticResult{}, fmt.Errorf("%w: name %q must be a DNS label", ErrValidation, req.Name)
+	if req.Name == "" || !validPeerName(req.Name) {
+		return StaticResult{}, fmt.Errorf("%w: name %q must be a DNS label other than %q", ErrValidation, req.Name, HubName)
 	}
 	kind := req.Kind
 	if kind == "" {

@@ -112,8 +112,8 @@ func (r *Registry) Rename(ctx context.Context, by Principal, name, newName strin
 	if !by.IsAdmin() {
 		return ErrForbidden
 	}
-	if !validLabel(newName) {
-		return fmt.Errorf("%w: name %q must be a DNS label", ErrValidation, newName)
+	if !validPeerName(newName) {
+		return fmt.Errorf("%w: name %q must be a DNS label other than %q", ErrValidation, newName, HubName)
 	}
 	p, err := r.Get(ctx, by, name)
 	if err != nil {
