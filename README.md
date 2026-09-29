@@ -129,7 +129,8 @@ user thawr`) to run `client status` without sudo. `client status` shows
 in one table whether the control connection, the path to a peer or the
 policy is the problem (`--json` for scripts, validated by
 `docs/status.schema.json`; exit codes 0 connected, 1 server unreachable,
-2 usage, 3 not running):
+2 usage, 3 not running; without sudo or the group it says so and exits
+2 instead of reporting the client as not running):
 
 ```
 thawr 0.1.0 · alice-laptop 100.64.0.7 · server vpn.example.com:8443 connected (netmap #42, 3s ago)
@@ -142,6 +143,12 @@ hub           100.64.0.1    server   -       direct vpn.example.com:51820   25s 
 
 Filter: 3 rules · 0 dropped (last 5 min)
 ```
+
+The installed service is stopped with `sudo thawr client stop` and
+started with `sudo thawr client start`; it also starts at every boot.
+`sudo thawr client down` stops whichever client is running, the
+service included, and neither launchd nor systemd starts it again on
+their own, so `client start` is the way back after it.
 
 Every peer has a name: `ssh nas.thawr`, `curl http://build-box.thawr:8000`,
 `ping alice-laptop.thawr`. The client serves the `thawr` zone on its

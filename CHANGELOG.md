@@ -118,6 +118,12 @@ hosts (`docs/roadmap/sprints.md`, sprint 4); the tag replaces
   rights to open the client socket say so and suggest sudo (exit 2).
   Before, status reported a running client as "not running" (exit 3),
   and `up` failed later with a bare "permission denied" on state.json.
+- `thawr client start` and `thawr client stop` drive the installed
+  service. After `client down` the service stayed stopped until the
+  next boot (launchd and systemd do not restart a clean exit) and only
+  `launchctl kickstart` or `systemctl start` brought it back. `down`,
+  `status` and the "already running" error now point there; the last
+  no longer suggests `client uninstall`.
 
 ### Security
 

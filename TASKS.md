@@ -636,6 +636,12 @@ tree that followed. One commit each, highest severity first.
       sudo" (Administrator prompt on Windows), and `main` adds the same
       hint to any other permission error. The socket test is skipped as
       root, which bypasses file permissions.
+- [x] `client start|stop` wrap `svc.Manager.Start/Stop` (launchd
+      bootstrap or kickstart, systemctl, the Windows SCM). `start`
+      refuses while a foreground `client up` holds the socket, since the
+      service would exit at once with "already running". The service
+      restart policies (`SuccessfulExit=false`, `Restart=on-failure`)
+      stay: a clean `down` staying down is what `down` promises.
 
 ## Phase 2 candidates (scheduled as specs 014–021 in `docs/roadmap/`)
 

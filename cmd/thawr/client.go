@@ -88,7 +88,7 @@ func applyAdvertise(stateDir string, f clientUpFlags) error {
 
 // alreadyRunning turns ErrAlreadyRunning into exit 2 with the way out.
 func alreadyRunning(err error) error {
-	return &exitError{code: exitConfigError, err: fmt.Errorf("%w (stop it with `thawr client down`, or the service with `thawr client uninstall`)", err)}
+	return &exitError{code: exitConfigError, err: fmt.Errorf("%w; see it with `thawr client status`. To run this one in the foreground instead, stop the other first: `sudo thawr client stop` for the service, `sudo thawr client down` for a foreground client", err)}
 }
 
 // validateDNSMode turns a bad --dns value into a usage error.
@@ -170,10 +170,13 @@ func newClientCmd(deps cliDeps) *cobra.Command {
 	up := &cobra.Command{
 		Use:   "up",
 		Short: "Enrol this device if needed, then run the client in the foreground",
-		Long: `Runs the node client: brings up the WireGuard interface, restores the
-cached netmap, and keeps the interface in sync with the server until
-SIGINT or SIGTERM. When the device is not enrolled yet, --server and
---token enrol it first.`,
+		Long: `Runs the node client in the foreground: brings up the WireGuard
+interface, restores the cached netmap, and keeps the interface in sync
+with the server until SIGINT or SIGTERM. When the device is not enrolled
+yet, --server and --token enrol it first. For a client that runs in the
+background and starts at boot, use ` + "`client install`" + ` instead; a
+service installed that way is stopped and started with ` + "`client stop`" + `
+and ` + "`client start`" + `.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := validateDNSMode(upf.dnsMode); err != nil {
@@ -229,7 +232,9 @@ SIGINT or SIGTERM. When the device is not enrolled yet, --server and
 					return fmt.Errorf("client is not running (%w)", err)
 				}
 			} else {
-				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "client stopping")
+				// A service that exits cleanly is not restarted by
+				// launchd or systemd; say how to bring it back.
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "client stopping; it stays stopped until the next boot. To bring it back, "+startHint)
 			}
 			if !forget {
 				return nil
@@ -273,7 +278,7 @@ server is unreachable, 2 usage error, 3 client not running.`,
 				return socketPermission(socket)
 			}
 			if err != nil {
-				return &exitError{code: exitNotRunning, err: fmt.Errorf("thawr client is not running (%w)", err)}
+				return &exitError{code: exitNotRunning, err: fmt.Errorf("thawr client is not running (%w); %s", err, startHint)}
 			}
 			if err := printStatus(cmd.OutOrStdout(), st, asJSON); err != nil {
 				return err
@@ -388,7 +393,7 @@ reply, 2 unknown peer, 3 client not running. --count 0 skips the echoes.`,
 	ping.Flags().BoolVar(&pingJSON, "json", false, "print the settled path as JSON")
 	addClientCommonFlags(ping, &stateDir, &socket)
 
-	cmd.AddCommand(up, down, status, rotate, trust, newClientLockCmd(&stateDir, &socket), newClientExitNodeCmd(&socket), ping, newClientInstallCmd(deps), newClientUninstallCmd(deps))
+	cmd.AddCommand(up, down, status, rotate, trust, newClientLockCmd(&stateDir, &socket), newClientExitNodeCmd(&socket), ping, newClientInstallCmd(deps), newClientUninstallCmd(deps), newClientStartCmd(deps), newClientStopCmd(deps))
 	return cmd
 }
 
