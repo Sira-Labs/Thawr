@@ -362,6 +362,13 @@ func parseQuery(req []byte) (query, error) {
 // after someone looked its name up resolves within seconds.
 func (s *Server) answerZone(ctx context.Context, q query, from netip.Addr, name string, tcp bool) ([]byte, error) {
 	if name == s.zone {
+		if q.question.Type == dnsmessage.TypeSOA || q.question.Type == dnsmessage.TypeALL {
+			soa, err := s.zoneSOA()
+			if err != nil {
+				return s.respond(q, dnsmessage.RCodeServerFailure, nil, tcp)
+			}
+			return s.respond(q, dnsmessage.RCodeSuccess, []dnsmessage.Resource{soa}, tcp)
+		}
 		return s.respondNegative(q, dnsmessage.RCodeSuccess, tcp)
 	}
 	label := strings.TrimSuffix(name, "."+s.zone)
@@ -487,6 +494,8 @@ func (s *Server) build(q query, rcode dnsmessage.RCode, answers, authority []dns
 				err = b.AResource(rr.Header, *body)
 			case *dnsmessage.PTRResource:
 				err = b.PTRResource(rr.Header, *body)
+			case *dnsmessage.SOAResource:
+				err = b.SOAResource(rr.Header, *body)
 			default:
 				err = fmt.Errorf("unsupported record type %v", rr.Header.Type)
 			}

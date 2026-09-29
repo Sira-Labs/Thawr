@@ -115,7 +115,8 @@ func TestHandleZone(t *testing.T) {
 		{"aaaa nodata", "nas.thawr.", dnsmessage.TypeAAAA, dnsmessage.RCodeSuccess, ""},
 		{"unknown", "printer.thawr.", dnsmessage.TypeA, dnsmessage.RCodeNameError, ""},
 		{"nested label", "a.nas.thawr.", dnsmessage.TypeA, dnsmessage.RCodeNameError, ""},
-		{"apex", "thawr.", dnsmessage.TypeSOA, dnsmessage.RCodeSuccess, ""},
+		{"apex soa", "thawr.", dnsmessage.TypeSOA, dnsmessage.RCodeSuccess, "soa"},
+		{"apex nodata", "thawr.", dnsmessage.TypeA, dnsmessage.RCodeSuccess, ""},
 		{"ptr", "3.0.64.100.in-addr.arpa.", dnsmessage.TypePTR, dnsmessage.RCodeSuccess, "nas.thawr."},
 		{"ptr unknown", "200.0.64.100.in-addr.arpa.", dnsmessage.TypePTR, dnsmessage.RCodeNameError, ""},
 		{"outside zone refused", "example.com.", dnsmessage.TypeA, dnsmessage.RCodeRefused, ""},
@@ -160,6 +161,10 @@ func TestHandleZone(t *testing.T) {
 			case *dnsmessage.PTRResource:
 				if got := body.PTR.String(); got != c.want {
 					t.Errorf("PTR %s, want %s", got, c.want)
+				}
+			case *dnsmessage.SOAResource:
+				if c.want != "soa" || rr.Header.Name.String() != "thawr." || body.MinTTL != uint32(TTL.Seconds()) {
+					t.Errorf("SOA %s %+v, want the zone SOA", rr.Header.Name, body)
 				}
 			default:
 				t.Errorf("body %T", body)

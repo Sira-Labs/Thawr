@@ -614,11 +614,14 @@ tree that followed. One commit each, highest severity first.
       - Rename refuses a policy-selected name without `--force`; the
         error names the rules. The new name is not checked: renaming
         into a selected name is how an admin grants it on purpose.
-      - Only a token issued for the name may take it at enrolment.
-        Members cannot issue one (checked at token creation, where the
-        caller is known; the store attributes socket-issued tokens to
-        their owner, so enrolment cannot tell who issued it). Any other
-        request gets the next numbered name and a warning in the log.
+      - Only a token an admin issued for the name may take it at
+        enrolment, checked against the policy in force then (a member's
+        token from before a reload that selects the name gets a numbered
+        name). Migration 0006 adds `issued_by_admin`, since `created_by`
+        attributes socket-issued tokens to their owner; older tokens
+        count as not admin-issued. Members also cannot issue such a
+        token or add a static peer with the name. A rename to the same
+        name is a no-op.
       - Delete is not guarded: the freed name stays protected by the
         enrolment rule.
 - [x] The exit-node choice is kept by peer id (`exit_node_id` in
@@ -644,8 +647,12 @@ tree that followed. One commit each, highest severity first.
       stay: a clean `down` staying down is what `down` promises.
 - [x] `client install` checks for an installed service before
       enrolment and `--advertise-*`; installed, it refuses any flag that
-      writes state and otherwise starts the service if stopped. Not
+      writes state or is baked into the service (`--dns`, `--interface`,
+      `--log-level`, `--bin`) and otherwise starts the service if
+      stopped, unless a foreground client holds the socket. Not
       installed, it runs the same `CheckNotRunning` as `up` first.
+      `client start` checks the socket given by `--socket` (default the
+      default install's); the service definition is not read back.
 - [x] The admin socket error tells "no socket here" (run on the server
       host) from "permission denied" (sudo). Left as is: the `thawr`
       group on admin.sock grants nothing while the socket sits in the
@@ -653,7 +660,8 @@ tree that followed. One commit each, highest severity first.
 - [x] DNS: `hub` is refused as a peer name everywhere a name is set and
       counts as taken at enrolment; an existing peer called `hub` is
       left alone. Negative answers in the zone carry an SOA with TTL and
-      MINIMUM 30 s (reverse-zone negatives are unchanged). The no-upstream
+      MINIMUM 30 s (reverse-zone negatives are unchanged); an SOA query
+      at the apex answers it. The no-upstream
       state is decided once at start, like the upstream list itself.
       README: the server host resolves no `.thawr` names, `dig` bypasses
       the macOS resolver file, phones from before the resolver need the

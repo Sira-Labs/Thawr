@@ -101,9 +101,11 @@ hosts (`docs/roadmap/sprints.md`, sprint 4); the tag replaces
   its socket on every netmap (found on macOS with v0.1.0-rc4).
 - A name the policy selects with `peer:<name>` can no longer change
   hands silently: `thawr admin peer rename` refuses such a peer unless
-  `--force` is given, members cannot issue a token for such a name,
-  and a device that asks for it at enrolment gets a numbered name
-  instead of that peer's grants (found in a review after v0.1.0-rc5).
+  `--force` is given, members can neither issue a token for such a name
+  nor add a phone with it, and at enrolment only a token an admin
+  issued for the name may take it; any other request gets a numbered
+  name instead of that peer's grants (found in a review after
+  v0.1.0-rc5). Schema version 6 records who issued a token.
 - Renaming the exit node a device uses no longer drops the default
   route and sends internet traffic around the tunnel; the choice is
   kept by peer id, so a different peer that later takes the old name
@@ -136,8 +138,9 @@ hosts (`docs/roadmap/sprints.md`, sprint 4); the tag replaces
   server's address, so such a peer never resolved through the hub. A
   host called `hub` enrols as `hub-2`.
 - "No such name" answers under `.thawr` carry the zone's SOA, so
-  resolvers cache them for 30 s instead of a platform default of
-  minutes; a peer enrolled right after a failed lookup resolves at once.
+  resolvers cache them for at most 30 s instead of a platform default
+  of minutes; a peer enrolled right after a failed lookup resolves
+  once that entry expires.
 - `add-mobile` (CLI and UI) warns when the hub resolver has no upstream,
   which leaves the phone with only `.thawr` names while the tunnel is up.
 
