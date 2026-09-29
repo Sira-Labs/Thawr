@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -109,5 +111,16 @@ func TestAdminPeerRename(t *testing.T) {
 	out, _, _ = runCLI(t, "admin", "peer", "rename", "db", "db-old", "--socket", sock)
 	if got["force"] != false || strings.Contains(out, "lock sign") {
 		t.Errorf("without --force and signed: body %v, output:\n%s", got, out)
+	}
+}
+
+func TestAdminSocketMissing(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the admin socket is a Unix socket; Windows reports a missing one differently")
+	}
+	sock := filepath.Join(t.TempDir(), "admin.sock")
+	_, code, err := runCLI(t, "admin", "peer", "list", "--socket", sock)
+	if code != exitConfigError || err == nil || !strings.Contains(err.Error(), "run it there") || !strings.Contains(err.Error(), sock) {
+		t.Errorf("code %d, err %v", code, err)
 	}
 }

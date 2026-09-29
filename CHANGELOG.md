@@ -128,6 +128,10 @@ hosts (`docs/roadmap/sprints.md`, sprint 4); the tag replaces
   only reporting it as installed, and refuses flags that would rewrite
   the enrollment state under the running client (`--advertise-routes`
   used to change state.json and still print "already installed").
+- `thawr admin` run away from the server says that it talks to the
+  server's local socket and must run on the server host; a permission
+  error on that socket suggests sudo. The README's admin examples now
+  use sudo.
 
 ### Security
 

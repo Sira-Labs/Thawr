@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"os"
@@ -72,7 +73,7 @@ func (c *adminClient) do(ctx context.Context, method, path string, in, out any) 
 	if err != nil {
 		var opErr *net.OpError
 		if errors.As(err, &opErr) {
-			return fmt.Errorf("cannot reach the thawr server admin socket (%w); is `thawr server` running and are you allowed to access it?", err)
+			return adminDialError(opErr, err)
 		}
 		return err
 	}
@@ -97,4 +98,21 @@ func (c *adminClient) do(ctx context.Context, method, path string, in, out any) 
 		}
 	}
 	return nil
+}
+
+// adminDialError explains why the admin socket did not answer. `thawr
+// admin` talks to the server's local socket only, so on a laptop it
+// finds nothing; that is the usual case, so it comes first.
+func adminDialError(opErr *net.OpError, err error) error {
+	socket := ""
+	if opErr.Addr != nil {
+		socket = opErr.Addr.String()
+	}
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return &exitError{code: exitConfigError, err: fmt.Errorf("no thawr server admin socket at %s. `thawr admin` talks to the server on its own host: run it there (for example over ssh), or pass --socket when data_dir or admin_socket differ", socket)}
+	case errors.Is(err, fs.ErrPermission):
+		return &exitError{code: exitConfigError, err: fmt.Errorf("no permission to use the admin socket %s; %s", socket, elevateHint())}
+	}
+	return fmt.Errorf("cannot reach the thawr server admin socket (%w); is `thawr server` running?", err)
 }

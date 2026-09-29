@@ -646,6 +646,10 @@ tree that followed. One commit each, highest severity first.
       enrolment and `--advertise-*`; installed, it refuses any flag that
       writes state and otherwise starts the service if stopped. Not
       installed, it runs the same `CheckNotRunning` as `up` first.
+- [x] The admin socket error tells "no socket here" (run on the server
+      host) from "permission denied" (sudo). Left as is: the `thawr`
+      group on admin.sock grants nothing while the socket sits in the
+      0700 data_dir; moving it is a layout change for a spec.
 
 ## Phase 2 candidates (scheduled as specs 014–021 in `docs/roadmap/`)
 

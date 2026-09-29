@@ -96,9 +96,13 @@ Server, on a host with a public address (Linux with systemd, or macOS):
 
 ```
 sudo thawr server install --public-addr vpn.example.com
-thawr admin user create markus --role admin
-thawr admin token create --owner markus --kind human
+sudo thawr admin user create markus --role admin
+sudo thawr admin token create --owner markus --kind human
 ```
+
+`thawr admin` talks to the server over a local socket that only root
+can open, so every admin command runs on the server host with sudo
+(from a laptop: `ssh vpn.example.com sudo thawr admin …`).
 
 `server install` writes `/etc/thawr/server.yaml` with that one line,
 validates it, and registers `thawr-server` to start at boot
