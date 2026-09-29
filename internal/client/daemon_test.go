@@ -646,29 +646,51 @@ func TestDaemonAdoptsRename(t *testing.T) {
 	if len(own) != 1 || own[0] != "new-name" {
 		t.Errorf("own DNS names = %v, want [new-name]", own)
 	}
-	if st, err := LoadState(dir); err != nil || st.Name != "new-name" {
-		t.Errorf("state name = %q (%v), want new-name", st.Name, err)
+	// Status shows the name before state.json is written; wait for it.
+	if st := waitSavedState(t, dir, func(st State) bool { return st.Name == "new-name" }); st.Name != "new-name" {
+		t.Errorf("state name = %q, want new-name", st.Name)
 	}
 }
 
 func TestAdoptSelfName(t *testing.T) {
 	cases := []struct {
-		name     string
-		nm       NetMap
-		wantName string
-		wantOld  string
+		name        string
+		stateName   string
+		nm          NetMap
+		wantName    string
+		wantOld     string
+		wantChanged bool
 	}{
-		{"renamed", NetMap{SelfID: "p1", SelfName: "new"}, "new", "old"},
-		{"unchanged", NetMap{SelfID: "p1", SelfName: "old"}, "old", ""},
-		{"no name in the map", NetMap{SelfID: "p1"}, "old", ""},
-		{"another peer's map", NetMap{SelfID: "p2", SelfName: "new"}, "old", ""},
+		{"renamed", "old", NetMap{SelfID: "p1", SelfName: "new"}, "new", "old", true},
+		{"unchanged", "old", NetMap{SelfID: "p1", SelfName: "old"}, "old", "", false},
+		{"no name in the map", "old", NetMap{SelfID: "p1"}, "old", "", false},
+		{"another peer's map", "old", NetMap{SelfID: "p2", SelfName: "new"}, "old", "", false},
+		{"state without a name", "", NetMap{SelfID: "p1", SelfName: "new"}, "new", "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			st := State{PeerID: "p1", Name: "old"}
-			if got := adoptSelfName(&st, tc.nm); got != tc.wantOld || st.Name != tc.wantName {
-				t.Errorf("adoptSelfName = %q, name %q; want %q, %q", got, st.Name, tc.wantOld, tc.wantName)
+			st := State{PeerID: "p1", Name: tc.stateName}
+			got, changed := adoptSelfName(&st, tc.nm)
+			if got != tc.wantOld || changed != tc.wantChanged || st.Name != tc.wantName {
+				t.Errorf("adoptSelfName = %q, %v, name %q; want %q, %v, %q", got, changed, st.Name, tc.wantOld, tc.wantChanged, tc.wantName)
 			}
 		})
+	}
+}
+
+// waitSavedState polls state.json until cond holds or 5 s pass, and
+// returns the last state read.
+func waitSavedState(t *testing.T, dir string, cond func(State) bool) State {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		st, err := LoadState(dir)
+		if err == nil && cond(st) {
+			return st
+		}
+		if time.Now().After(deadline) {
+			return st
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

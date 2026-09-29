@@ -117,7 +117,8 @@ func TestDaemonRoutes(t *testing.T) {
 	if stB.ExitNode.State != ExitStateActive || len(fakeB.LastRoutes()) != 1 {
 		t.Errorf("bob after gateway rename: %+v routes %v", stB.ExitNode, fakeB.LastRoutes())
 	}
-	if st, _ := LoadState(dirB); st.ExitNode != "gw-nl" || st.ExitNodeID == "" {
+	// Status follows the rename before state.json is written; wait for it.
+	if st := waitSavedState(t, dirB, func(st State) bool { return st.ExitNode == "gw-nl" }); st.ExitNode != "gw-nl" || st.ExitNodeID == "" {
 		t.Errorf("state after gateway rename: exit_node %q id %q", st.ExitNode, st.ExitNodeID)
 	}
 	if err := cp.registry.Rename(ctx, cp.admin, "gw-nl", "gw", false); err != nil {

@@ -60,16 +60,17 @@ type State struct {
 }
 
 // adoptSelfName takes this device's name from nm, where the server
-// reports it after an admin renamed the peer, and returns the old name
-// when it changed. The name serves DNS, status and the lock records
-// this device signs, which the server checks against the current name.
-func adoptSelfName(st *State, nm NetMap) string {
+// reports it after an admin renamed the peer. It returns the previous
+// name (empty when state had none) and whether st changed. The name
+// serves DNS, status and the lock records this device signs, which the
+// server checks against the current name.
+func adoptSelfName(st *State, nm NetMap) (string, bool) {
 	if nm.SelfName == "" || nm.SelfName == st.Name || (nm.SelfID != "" && nm.SelfID != st.PeerID) {
-		return ""
+		return "", false
 	}
 	old := st.Name
 	st.Name = nm.SelfName
-	return old
+	return old, true
 }
 
 // followExitNode keeps st's exit-node choice on the same peer: it

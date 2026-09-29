@@ -677,7 +677,7 @@ func (d *Daemon) reapply(ctx context.Context) error {
 func (d *Daemon) applyLocked(ctx context.Context, nm NetMap, cache bool) error {
 	now := d.opts.Now()
 	d.mu.Lock()
-	renamedFrom := adoptSelfName(&d.state, nm)
+	renamedFrom, renamed := adoptSelfName(&d.state, nm)
 	exitMoved := followExitNode(&d.state, nm.Peers)
 	key, dev, prev, exitNode, newName := d.key, d.dev, d.held, d.state.ExitNodeID, d.state.Name
 	if nm.Advertised != nil {
@@ -708,10 +708,10 @@ func (d *Daemon) applyLocked(ctx context.Context, nm NetMap, cache bool) error {
 		d.offered, d.held, d.lockRejected = &offered, held, rejected
 	}
 	d.mu.Unlock()
-	if renamedFrom != "" {
+	if renamed {
 		d.log.Info("renamed by the server", "from", renamedFrom, "to", newName)
 	}
-	if exitMoved || renamedFrom != "" {
+	if exitMoved || renamed {
 		if serr := d.saveState(); serr != nil {
 			d.log.Warn("save state", "err", serr)
 		}
