@@ -176,7 +176,7 @@ func TestNotifierCalledOnPersistentChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := env.registry.Rename(ctx, env.admin, "a1", "a-one"); err != nil {
+	if err := env.registry.Rename(ctx, env.admin, "a1", "a-one", false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := env.registry.RotateKey(ctx, res.Peer.ID, newPubKey(t), nil); err != nil {

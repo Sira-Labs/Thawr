@@ -50,6 +50,15 @@ type Enroller struct {
 	limit      *rateLimit
 	notify     Notifier
 	audit      *Auditor
+	peerRefs   PeerRefs
+}
+
+// WithPeerRefs keeps names the policy selects with peer:<name> for
+// tokens issued for them: a device naming itself after such a peer
+// gets a numbered name instead of that peer's grants.
+func (e *Enroller) WithPeerRefs(refs PeerRefs) *Enroller {
+	e.peerRefs = refs
+	return e
 }
 
 // WithAuditor records each enrollment in the audit log.
@@ -153,9 +162,17 @@ func (e *Enroller) Enroll(ctx context.Context, req EnrollRequest) (EnrollResult,
 		if base == "" {
 			base = SanitizeName(req.Hostname)
 		}
-		name, err := uniqueName(ctx, tx.Peers(), base)
+		// Only a token issued for a name may take one the policy
+		// selects; members cannot issue such tokens (Tokens.Create).
+		reserved := func(n string) bool {
+			return e.peerRefs != nil && n != tok.PeerName && len(e.peerRefs(n)) > 0
+		}
+		name, err := uniqueName(ctx, tx.Peers(), base, reserved)
 		if err != nil {
 			return err
+		}
+		if reserved(base) {
+			e.log.Warn("enroll: requested name is selected by the policy, using another", "requested", base, "name", name, "token", tok.ID)
 		}
 
 		peer := store.Peer{

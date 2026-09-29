@@ -626,12 +626,12 @@ func (s *Server) buildServices(ctx context.Context) error {
 	auditor := control.NewAuditor(s.deps.Now)
 	users.WithAuditor(auditor)
 	s.policySvc.WithAuditor(auditor)
-	s.tokens = control.NewTokens(s.st, s.deps.Now, s.log).WithTagAllowed(s.policySvc.TagAllowed).WithAuditor(auditor)
-	s.enroller = control.NewEnroller(s.st, s.deps.Now, s.log, s.cfg.OverlayPrefix(), s.cfg.MinClientVersion).WithNotifier(hub).WithAuditor(auditor)
+	s.tokens = control.NewTokens(s.st, s.deps.Now, s.log).WithTagAllowed(s.policySvc.TagAllowed).WithPeerRefs(s.policySvc.PeerRefs).WithAuditor(auditor)
+	s.enroller = control.NewEnroller(s.st, s.deps.Now, s.log, s.cfg.OverlayPrefix(), s.cfg.MinClientVersion).WithNotifier(hub).WithAuditor(auditor).WithPeerRefs(s.policySvc.PeerRefs)
 	s.lockSvc = control.NewLockService(s.st, s.deps.Now, s.log, s.hubKey.PublicKey().String()).WithNotifier(hub).WithAuditor(auditor)
 	s.routesSvc = control.NewRoutesService(s.st, s.log, s.deps.Now, s.cfg.OverlayPrefix()).WithNotifier(hub).WithAuditor(auditor)
 	s.registry = control.NewRegistry(s.st, s.log).WithNotifier(hub).WithClock(s.deps.Now).
-		WithOverlay(s.cfg.OverlayPrefix()).WithTagAllowed(s.policySvc.TagAllowed).WithAuditor(auditor).WithLock(s.lockSvc)
+		WithOverlay(s.cfg.OverlayPrefix()).WithTagAllowed(s.policySvc.TagAllowed).WithAuditor(auditor).WithLock(s.lockSvc).WithPeerRefs(s.policySvc.PeerRefs)
 	s.staticSeen = map[string]time.Time{}
 	s.sessions = api.NewSessions(s.deps.Now)
 	s.relay = relay.NewServer(keyVisibility{control.NewKeyVisibility(s.st, visibility, hub.Generation)},

@@ -99,6 +99,11 @@ hosts (`docs/roadmap/sprints.md`, sprint 4); the tag replaces
   client for the WireGuard port; a stored listen port held by another
   process is replaced at start; the userspace adapter no longer rebinds
   its socket on every netmap (found on macOS with v0.1.0-rc4).
+- A name the policy selects with `peer:<name>` can no longer change
+  hands silently: `thawr admin peer rename` refuses such a peer unless
+  `--force` is given, members cannot issue a token for such a name,
+  and a device that asks for it at enrolment gets a numbered name
+  instead of that peer's grants (found in a review after v0.1.0-rc5).
 
 ### Security
 

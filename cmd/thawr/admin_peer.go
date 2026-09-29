@@ -108,19 +108,26 @@ func newAdminPeerCmd(flags *adminFlags) *cobra.Command {
 			return renderPeerDetail(cmd.OutOrStdout(), d, time.Now())
 		},
 	}
+	var forceRename bool
 	rename := &cobra.Command{
 		Use:   "rename <name> <new-name>",
 		Short: "Rename a peer",
-		Args:  cobra.ExactArgs(2),
+		Long: `Renames a peer. The server refuses when the policy selects the peer
+as peer:<name>, since those grants would stop applying to it and pass
+to the next device that takes the name; change the policy first, then
+rename with --force.`,
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var p peerJSON
-			if err := newAdminClient(flags.socket).do(cmd.Context(), "PATCH", "/api/v1/peers/"+args[0], map[string]string{"name": args[1]}, &p); err != nil {
+			body := map[string]any{"name": args[1], "force": forceRename}
+			if err := newAdminClient(flags.socket).do(cmd.Context(), "PATCH", "/api/v1/peers/"+args[0], body, &p); err != nil {
 				return err
 			}
 			_, err := fmt.Fprintf(cmd.OutOrStdout(), "peer %s renamed to %s\n", args[0], p.Name)
 			return err
 		},
 	}
+	rename.Flags().BoolVar(&forceRename, "force", false, "rename even though the policy selects the peer by name")
 	del := &cobra.Command{
 		Use:   "delete <name>",
 		Short: "Delete a peer; every client drops it on the next netmap",

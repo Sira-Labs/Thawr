@@ -199,6 +199,11 @@ func (s *PolicyService) FilterFor(ctx context.Context, peerID string) []FilterRu
 // Load is Compiled with a background context, for PolicyVisibility.
 func (s *PolicyService) Load() *policy.Compiled { return s.Compiled(context.Background()) }
 
+// PeerRefs implements PeerRefs from the running policy.
+func (s *PolicyService) PeerRefs(name string) []string {
+	return s.Current().PeerReferences()[name]
+}
+
 // TagAllowed implements TagAllowed for Tokens.
 func (s *PolicyService) TagAllowed(user, tag string) bool {
 	return s.Load().MayUseTag(user, tag)

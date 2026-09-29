@@ -603,6 +603,25 @@ batches).
         persisted, and the userspace adapter sends `listen_port` only
         when it changes. The kernel already ignores an unchanged port.
 
+## Fixes after v0.1.0-rc5 (review of 2026-09-29)
+
+Found while using rc5 on macOS with a phone and in a review of the
+tree that followed. One commit each, highest severity first.
+
+- [x] Policy names stay with their peer. `peer:<name>` grants follow
+      the name, so a rename dropped them and the next device taking the
+      name inherited them.
+      - Rename refuses a policy-selected name without `--force`; the
+        error names the rules. The new name is not checked: renaming
+        into a selected name is how an admin grants it on purpose.
+      - Only a token issued for the name may take it at enrolment.
+        Members cannot issue one (checked at token creation, where the
+        caller is known; the store attributes socket-issued tokens to
+        their owner, so enrolment cannot tell who issued it). Any other
+        request gets the next numbered name and a warning in the log.
+      - Delete is not guarded: the freed name stays protected by the
+        enrolment rule.
+
 ## Phase 2 candidates (scheduled as specs 014–021 in `docs/roadmap/`)
 
 - OIDC identity provider plugin (ADR 0006).
