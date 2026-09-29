@@ -108,6 +108,22 @@ func TestDaemonRoutes(t *testing.T) {
 	if len(stB.Routes) != 1 || stB.Routes[0].Prefix != "0.0.0.0/0" || stB.ExitNode.State != ExitStateActive {
 		t.Errorf("bob status with exit node: %+v %+v", stB.Routes, stB.ExitNode)
 	}
+	// A rename keeps the choice on the same peer: the default route
+	// stays and state follows the new name.
+	if err := cp.registry.Rename(ctx, cp.admin, "gw", "gw-nl", false); err != nil {
+		t.Fatal(err)
+	}
+	stB = waitStatus(t, lcB, "exit node renamed", func(s Status) bool { return s.ExitNode.Name == "gw-nl" })
+	if stB.ExitNode.State != ExitStateActive || len(fakeB.LastRoutes()) != 1 {
+		t.Errorf("bob after gateway rename: %+v routes %v", stB.ExitNode, fakeB.LastRoutes())
+	}
+	if st, _ := LoadState(dirB); st.ExitNode != "gw-nl" || st.ExitNodeID == "" {
+		t.Errorf("state after gateway rename: exit_node %q id %q", st.ExitNode, st.ExitNodeID)
+	}
+	if err := cp.registry.Rename(ctx, cp.admin, "gw-nl", "gw", false); err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, lcB, "exit node renamed back", func(s Status) bool { return s.ExitNode.Name == "gw" })
 	if res, err := lcB.SetExitNode(ctx, ExitNodeOff); err != nil || res.State != ExitStateOff {
 		t.Fatalf("exit node off: %+v %v", res, err)
 	}

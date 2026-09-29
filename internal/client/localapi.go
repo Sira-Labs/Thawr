@@ -196,7 +196,7 @@ func (d *Daemon) Status(ctx context.Context) Status {
 	now := d.opts.Now()
 	d.mu.Lock()
 	nm, dev, held := d.netmap, d.dev, d.held
-	exitNode, advertised := d.exitNode, d.advertised
+	exitNode, exitNodeID, advertised := d.state.ExitNode, d.state.ExitNodeID, d.advertised
 	lockSt := d.lockStatusLocked()
 	srv := ServerStatus{Addr: d.state.Server, State: ServerReconnecting, Attempt: d.attempt, LastError: d.lastError,
 		NextRetryAt: timePtr(d.nextRetryAt), UnreachableSince: timePtr(d.unreachableSince), LastMessageAt: timePtr(d.lastMessage)}
@@ -305,7 +305,7 @@ func (d *Daemon) Status(ctx context.Context) Status {
 				st.Routes = append(st.Routes, RouteStatus{Prefix: pfx.String(), Via: p.Name})
 			}
 		}
-		if p.ExitNode && p.Name == exitNode {
+		if p.ExitNode && p.ID == exitNodeID {
 			// The default route is the client's own addition (spec 013).
 			st.ExitNode.State = ExitStateActive
 			st.Routes = append(st.Routes, RouteStatus{Prefix: wg.ExitRoute.String(), Via: p.Name})

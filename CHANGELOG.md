@@ -104,6 +104,10 @@ hosts (`docs/roadmap/sprints.md`, sprint 4); the tag replaces
   `--force` is given, members cannot issue a token for such a name,
   and a device that asks for it at enrolment gets a numbered name
   instead of that peer's grants (found in a review after v0.1.0-rc5).
+- Renaming the exit node a device uses no longer drops the default
+  route and sends internet traffic around the tunnel; the choice is
+  kept by peer id, so a different peer that later takes the old name
+  is not used either.
 
 ### Security
 

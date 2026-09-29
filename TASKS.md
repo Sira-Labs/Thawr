@@ -621,6 +621,10 @@ tree that followed. One commit each, highest severity first.
         request gets the next numbered name and a warning in the log.
       - Delete is not guarded: the freed name stays protected by the
         enrolment rule.
+- [x] The exit-node choice is kept by peer id (`exit_node_id` in
+      state.json), with `exit_node` as the last known name for status.
+      State written by rc5 names the peer only; the first netmap with
+      an exit node of that name fills in the id.
 
 ## Phase 2 candidates (scheduled as specs 014–021 in `docs/roadmap/`)
 

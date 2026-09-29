@@ -277,10 +277,11 @@ func BuildConfig(nm NetMap, key wg.Key, listenPort int, overlay netip.Prefix) (w
 	return BuildConfigWith(nm, key, listenPort, overlay, "")
 }
 
-// BuildConfigWith is BuildConfig with an exit node: the named peer, when
-// the netmap flags it as one, carries 0.0.0.0/0 and the tunnel's own
-// packets get the fwmark that keeps them out of it (spec 013).
-func BuildConfigWith(nm NetMap, key wg.Key, listenPort int, overlay netip.Prefix, exitNode string) (wg.Config, error) {
+// BuildConfigWith is BuildConfig with an exit node: the peer with id
+// exitNodeID, when the netmap flags it as one, carries 0.0.0.0/0 and
+// the tunnel's own packets get the fwmark that keeps them out of it
+// (spec 013).
+func BuildConfigWith(nm NetMap, key wg.Key, listenPort int, overlay netip.Prefix, exitNodeID string) (wg.Config, error) {
 	selfIP, err := netip.ParseAddr(nm.SelfIPv4)
 	if err != nil {
 		return wg.Config{}, fmt.Errorf("client: self address %q: %w", nm.SelfIPv4, err)
@@ -324,7 +325,7 @@ func BuildConfigWith(nm NetMap, key wg.Key, listenPort int, overlay netip.Prefix
 		if ip, err := netip.ParseAddr(p.IPv4); err == nil && len(peer.AllowedIPs) == 0 {
 			peer.AllowedIPs = []netip.Prefix{netip.PrefixFrom(ip, 32)}
 		}
-		if exitNode != "" && p.ExitNode && p.Name == exitNode {
+		if exitNodeID != "" && p.ExitNode && p.ID == exitNodeID {
 			peer.AllowedIPs = append(peer.AllowedIPs, wg.ExitRoute)
 			cfg.FwMark = wg.DefaultFwMark
 		}

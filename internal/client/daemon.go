@@ -193,11 +193,10 @@ type Daemon struct {
 	lockKey      lock.PrivateKey
 	lockRejected string
 	// advertise is what this device offers to route (from state),
-	// advertised what the server last reported about it, and exitNode
-	// the peer whose exit node this device uses (spec 013).
+	// advertised what the server last reported about it (spec 013).
+	// The exit-node choice lives in state.
 	advertise  []netip.Prefix
 	advertised []AdvertisedRoute
-	exitNode   string
 	routesWarn sync.Once
 	// resyncNow ends the current sync stream so the next one carries
 	// fresh SyncRequest fields (a new lock key); resyncWanted tells the
@@ -291,7 +290,7 @@ func NewDaemon(opts DaemonOptions) (*Daemon, error) {
 		return nil, err
 	}
 	return &Daemon{opts: opts, log: log, state: st, overlay: overlay.Masked(), selfIP: selfIP, key: key, pins: pins, lockKey: lockKey,
-		instance: lk, advertise: advertise, exitNode: st.ExitNode,
+		instance: lk, advertise: advertise,
 		mapCh: make(chan NetMap, 16), paths: map[string]*peerPath{}, pathWake: make(chan struct{}, 1), relay: relay.NewClient(ro),
 		drops: newDropWindow(5 * time.Minute)}, nil
 }
@@ -665,7 +664,8 @@ func (d *Daemon) reapply(ctx context.Context) error {
 func (d *Daemon) applyLocked(ctx context.Context, nm NetMap, cache bool) error {
 	now := d.opts.Now()
 	d.mu.Lock()
-	key, dev, prev, exitNode := d.key, d.dev, d.held, d.exitNode
+	exitMoved := followExitNode(&d.state, nm.Peers)
+	key, dev, prev, exitNode, st := d.key, d.dev, d.held, d.state.ExitNodeID, d.state
 	if nm.Advertised != nil {
 		d.advertised = nm.Advertised
 	}
@@ -694,6 +694,11 @@ func (d *Daemon) applyLocked(ctx context.Context, nm NetMap, cache bool) error {
 		d.offered, d.held, d.lockRejected = &offered, held, rejected
 	}
 	d.mu.Unlock()
+	if exitMoved {
+		if serr := SaveState(d.opts.StateDir, st); serr != nil {
+			d.log.Warn("exit node: save state", "err", serr)
+		}
+	}
 	if err != nil {
 		return err
 	}
@@ -886,21 +891,21 @@ func (d *Daemon) SetExitNode(ctx context.Context, name string) (ExitNodeStatus, 
 	}
 	d.mu.Lock()
 	nm := d.netmap
+	id := ""
 	if name != "" {
-		found := false
 		if nm != nil {
 			for _, p := range nm.Peers {
 				if p.Name == name && p.ExitNode && !p.ViaHub {
-					found = true
+					id = p.ID
 				}
 			}
 		}
-		if !found {
+		if id == "" {
 			d.mu.Unlock()
 			return ExitNodeStatus{}, fmt.Errorf("%w: %s", ErrNotExitNode, name)
 		}
 	}
-	d.exitNode, d.state.ExitNode = name, name
+	d.state.ExitNode, d.state.ExitNodeID = name, id
 	st := d.state
 	d.mu.Unlock()
 	if err := SaveState(d.opts.StateDir, st); err != nil {
