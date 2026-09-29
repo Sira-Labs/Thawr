@@ -20,7 +20,10 @@ func newClientStartCmd(deps cliDeps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "start",
 		Short: "Start the installed client service (after `client down` or `client stop`)",
-		Args:  cobra.NoArgs,
+		Long: "Start the installed client service (after `client down` or `client stop`).\n\n" +
+			"It refuses while a foreground `client up` holds the socket. A service installed\n" +
+			"with a non-default --socket needs the same --socket here.",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := requireRoot(deps); err != nil {
 				return err
