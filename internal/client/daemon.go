@@ -198,6 +198,8 @@ type Daemon struct {
 	// The exit-node choice lives in state.
 	advertise  []netip.Prefix
 	advertised []AdvertisedRoute
+	// saveMu serialises writes of state.json (saveState).
+	saveMu     sync.Mutex
 	routesWarn sync.Once
 	// resyncNow ends the current sync stream so the next one carries
 	// fresh SyncRequest fields (a new lock key); resyncWanted tells the
@@ -677,7 +679,7 @@ func (d *Daemon) applyLocked(ctx context.Context, nm NetMap, cache bool) error {
 	d.mu.Lock()
 	renamedFrom := adoptSelfName(&d.state, nm)
 	exitMoved := followExitNode(&d.state, nm.Peers)
-	key, dev, prev, exitNode, st := d.key, d.dev, d.held, d.state.ExitNodeID, d.state
+	key, dev, prev, exitNode, newName := d.key, d.dev, d.held, d.state.ExitNodeID, d.state.Name
 	if nm.Advertised != nil {
 		d.advertised = nm.Advertised
 	}
@@ -707,10 +709,10 @@ func (d *Daemon) applyLocked(ctx context.Context, nm NetMap, cache bool) error {
 	}
 	d.mu.Unlock()
 	if renamedFrom != "" {
-		d.log.Info("renamed by the server", "from", renamedFrom, "to", st.Name)
+		d.log.Info("renamed by the server", "from", renamedFrom, "to", newName)
 	}
 	if exitMoved || renamedFrom != "" {
-		if serr := SaveState(d.opts.StateDir, st); serr != nil {
+		if serr := d.saveState(); serr != nil {
 			d.log.Warn("save state", "err", serr)
 		}
 	}
@@ -921,9 +923,8 @@ func (d *Daemon) SetExitNode(ctx context.Context, name string) (ExitNodeStatus, 
 		}
 	}
 	d.state.ExitNode, d.state.ExitNodeID = name, id
-	st := d.state
 	d.mu.Unlock()
-	if err := SaveState(d.opts.StateDir, st); err != nil {
+	if err := d.saveState(); err != nil {
 		return ExitNodeStatus{}, err
 	}
 	if err := d.reapply(ctx); err != nil {
@@ -992,6 +993,19 @@ func (d *Daemon) RotateKey(ctx context.Context) error {
 		d.log.Info("key rotated; other devices hold this peer until they trust the new key", "key", wg.Fingerprint(newKey.PublicKey()), "hint", "thawr client trust "+d.selfName())
 	}
 	return nil
+}
+
+// saveState writes the current state. Saves are serialised and each one
+// takes its copy under saveMu, so a slower writer never replaces a newer
+// state with the older copy it took (a netmap that renames the device
+// racing an exit-node change, say).
+func (d *Daemon) saveState() error {
+	d.saveMu.Lock()
+	defer d.saveMu.Unlock()
+	d.mu.Lock()
+	st := d.state
+	d.mu.Unlock()
+	return SaveState(d.opts.StateDir, st)
 }
 
 // selfName is this device's current peer name.
