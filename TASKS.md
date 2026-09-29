@@ -650,6 +650,14 @@ tree that followed. One commit each, highest severity first.
       host) from "permission denied" (sudo). Left as is: the `thawr`
       group on admin.sock grants nothing while the socket sits in the
       0700 data_dir; moving it is a layout change for a spec.
+- [x] DNS: `hub` is refused as a peer name everywhere a name is set and
+      counts as taken at enrolment; an existing peer called `hub` is
+      left alone. Negative answers in the zone carry an SOA with TTL and
+      MINIMUM 30 s (reverse-zone negatives are unchanged). The no-upstream
+      state is decided once at start, like the upstream list itself.
+      README: the server host resolves no `.thawr` names, `dig` bypasses
+      the macOS resolver file, phones from before the resolver need the
+      DNS line added in the app.
 
 ## Phase 2 candidates (scheduled as specs 014–021 in `docs/roadmap/`)
 

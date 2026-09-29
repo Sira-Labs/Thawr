@@ -132,6 +132,14 @@ hosts (`docs/roadmap/sprints.md`, sprint 4); the tag replaces
   server's local socket and must run on the server host; a permission
   error on that socket suggests sudo. The README's admin examples now
   use sudo.
+- `hub` can no longer be a peer name: it collides with `hub.thawr`, the
+  server's address, so such a peer never resolved through the hub. A
+  host called `hub` enrols as `hub-2`.
+- "No such name" answers under `.thawr` carry the zone's SOA, so
+  resolvers cache them for 30 s instead of a platform default of
+  minutes; a peer enrolled right after a failed lookup resolves at once.
+- `add-mobile` (CLI and UI) warns when the hub resolver has no upstream,
+  which leaves the phone with only `.thawr` names while the tunnel is up.
 
 ### Security
 
