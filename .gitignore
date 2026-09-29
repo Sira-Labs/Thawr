@@ -1,5 +1,6 @@
 # Build output
 /bin/
+/thawr
 /dist/
 /dist-verify-*/
 *.exe
