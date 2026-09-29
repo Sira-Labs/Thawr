@@ -162,13 +162,17 @@ func (e *Enroller) Enroll(ctx context.Context, req EnrollRequest) (EnrollResult,
 		if base == "" {
 			base = SanitizeName(req.Hostname)
 		}
-		// Only a token issued for a name may take one the policy
-		// selects; members cannot issue such tokens (Tokens.Create).
+		// Only a token an admin issued for a name may take one the
+		// policy selects now; the policy may have changed since the
+		// token was created, so this is checked here, not only there.
 		reserved := func(n string) bool {
 			if n == HubName {
 				return true // a host called "hub" gets hub-2
 			}
-			return e.peerRefs != nil && n != tok.PeerName && len(e.peerRefs(n)) > 0
+			if e.peerRefs == nil || len(e.peerRefs(n)) == 0 {
+				return false
+			}
+			return n != tok.PeerName || !tok.IssuedByAdmin
 		}
 		name, err := uniqueName(ctx, tx.Peers(), base, reserved)
 		if err != nil {

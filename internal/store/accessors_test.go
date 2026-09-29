@@ -46,7 +46,7 @@ func TestTokensCRUD(t *testing.T) {
 		t.Fatal(err)
 	}
 	tok := Token{ID: "tk_1", SecretHash: "hash1", OwnerID: "u1", Kind: KindHuman, Tags: []string{"tag:dev"},
-		PeerName: "laptop", CreatedBy: "u1", CreatedAt: now(), ExpiresAt: now().Add(time.Hour)}
+		PeerName: "laptop", CreatedBy: "u1", CreatedAt: now(), ExpiresAt: now().Add(time.Hour), IssuedByAdmin: true}
 	if err := s.Tokens().Create(ctx, tok); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestTokensCRUD(t *testing.T) {
 		t.Errorf("duplicate hash: %v", err)
 	}
 	got, err := s.Tokens().GetByHash(ctx, "hash1")
-	if err != nil || got.ID != "tk_1" || len(got.Tags) != 1 || got.PeerName != "laptop" || got.UsedAt != nil {
+	if err != nil || got.ID != "tk_1" || len(got.Tags) != 1 || got.PeerName != "laptop" || got.UsedAt != nil || !got.IssuedByAdmin {
 		t.Errorf("GetByHash: %+v, %v", got, err)
 	}
 	if _, err := s.Tokens().GetByHash(ctx, "nope"); !errors.Is(err, ErrNotFound) {

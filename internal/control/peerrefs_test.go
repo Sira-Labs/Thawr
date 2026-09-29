@@ -118,3 +118,73 @@ func TestHubNameIsReserved(t *testing.T) {
 		t.Errorf("static peer hub = %v, want ErrValidation", err)
 	}
 }
+
+// A member's token for a name the policy did not select yet cannot take
+// the name once a reload selects it: enrolment checks the policy then
+// in force and who issued the token.
+func TestEnrollChecksPolicyAtRedeem(t *testing.T) {
+	ctx := context.Background()
+	env := newEnrollEnv(t, "100.64.0.0/10")
+	alice := asPrincipal(mustUser(t, env.users, "alice", store.RoleMember))
+	selected := false
+	refs := func(name string) []string {
+		if selected && name == "db" {
+			return []string{"acls[0].dst[0]"}
+		}
+		return nil
+	}
+	env.tokens.WithPeerRefs(refs)
+	env.enroller.WithPeerRefs(refs)
+
+	member, err := env.tokens.Create(ctx, alice, TokenRequest{OwnerName: "alice", Kind: "human", PeerName: "db"})
+	if err != nil {
+		t.Fatalf("member token before the policy selects db: %v", err)
+	}
+	admin := env.token(t, TokenRequest{PeerName: "db"})
+	selected = true // the policy is reloaded with peer:db
+
+	res, err := env.enroller.Enroll(ctx, EnrollRequest{Token: member.Secret, PublicKey: newPubKey(t), ClientVersion: "0.1.0"})
+	if err != nil || res.Peer.Name == "db" {
+		t.Fatalf("member token took db after the reload: name %q, err %v", res.Peer.Name, err)
+	}
+	res, err = env.enroller.Enroll(ctx, EnrollRequest{Token: admin, PublicKey: newPubKey(t), ClientVersion: "0.1.0"})
+	if err != nil || res.Peer.Name != "db" {
+		t.Errorf("admin token for db: name %q, err %v; want db", res.Peer.Name, err)
+	}
+}
+
+func TestMemberCannotAddStaticPeerWithPolicySelectedName(t *testing.T) {
+	ctx := context.Background()
+	env := newEnrollEnv(t, "100.64.0.0/10")
+	env.registry.WithPeerRefs(policyRefs("db"))
+	alice := asPrincipal(mustUser(t, env.users, "alice", store.RoleMember))
+
+	if _, err := env.registry.CreateStatic(ctx, alice, StaticRequest{OwnerName: "alice", Name: "db"}); !errors.Is(err, ErrForbidden) || !strings.Contains(err.Error(), "peer:db") {
+		t.Errorf("member static peer db = %v, want ErrForbidden naming peer:db", err)
+	}
+	if _, err := env.registry.CreateStatic(ctx, alice, StaticRequest{OwnerName: "alice", Name: "alice-phone"}); err != nil {
+		t.Errorf("member static peer with an unselected name: %v", err)
+	}
+	if _, err := env.registry.CreateStatic(ctx, env.admin, StaticRequest{OwnerName: "alice", Name: "db"}); err != nil {
+		t.Errorf("admin static peer db: %v", err)
+	}
+}
+
+func TestRenameToSameNameIsNoOp(t *testing.T) {
+	ctx := context.Background()
+	env := newEnrollEnv(t, "100.64.0.0/10")
+	env.registry.WithPeerRefs(policyRefs("db"))
+	if _, err := env.enroller.Enroll(ctx, EnrollRequest{Token: env.token(t, TokenRequest{PeerName: "db"}), PublicKey: newPubKey(t), ClientVersion: "0.1.0"}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := env.st.Meta().Generation(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := env.registry.Rename(ctx, env.admin, "db", "db", false); err != nil {
+		t.Fatalf("rename to the same name: %v", err)
+	}
+	if after, _ := env.st.Meta().Generation(ctx); after != before {
+		t.Errorf("generation %d -> %d on a no-op rename", before, after)
+	}
+}

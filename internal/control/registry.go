@@ -119,6 +119,9 @@ func (r *Registry) Rename(ctx context.Context, by Principal, name, newName strin
 	if err != nil {
 		return err
 	}
+	if newName == p.Name {
+		return nil // nothing changes: no write, no audit entry, no new netmap
+	}
 	if !force && r.peerRefs != nil {
 		if refs := r.peerRefs(p.Name); len(refs) > 0 {
 			return fmt.Errorf("%w: the policy selects peer:%s (%s); renaming would drop those grants from %s. Change the policy to peer:%s and reload, then rename with --force", ErrValidation, p.Name, strings.Join(refs, ", "), p.Name, newName)

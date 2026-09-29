@@ -139,8 +139,11 @@ func (t *Tokens) Create(ctx context.Context, by Principal, req TokenRequest) (Cr
 		Tags:       tags,
 		PeerName:   req.PeerName,
 		CreatedBy:  creator,
-		CreatedAt:  now,
-		ExpiresAt:  now.Add(ttl),
+		// Only an admin's token may take a name the policy selects; the
+		// check at enrolment reads this, since the policy may change.
+		IssuedByAdmin: by.IsAdmin(),
+		CreatedAt:     now,
+		ExpiresAt:     now.Add(ttl),
 	}
 	err = t.store.InTx(ctx, func(tx *store.Store) error {
 		if err := tx.Tokens().Create(ctx, tok); err != nil {

@@ -23,6 +23,9 @@ type Token struct {
 	ExpiresAt    time.Time
 	UsedAt       *time.Time
 	UsedByPeerID string
+	// IssuedByAdmin records that an admin created the token, which lets
+	// it take a peer name the policy selects.
+	IssuedByAdmin bool
 }
 
 // Tokens accesses the enrollment_tokens table.
@@ -31,7 +34,7 @@ type Tokens struct {
 }
 
 //nolint:gosec // a column list, not a credential
-const tokenColumns = `id, secret_hash, owner_id, kind, tags, peer_name, created_by, created_at, expires_at, used_at, used_by_peer_id`
+const tokenColumns = `id, secret_hash, owner_id, kind, tags, peer_name, created_by, created_at, expires_at, used_at, used_by_peer_id, issued_by_admin`
 
 func scanToken(row interface{ Scan(...any) error }) (Token, error) {
 	var (
@@ -39,7 +42,7 @@ func scanToken(row interface{ Scan(...any) error }) (Token, error) {
 		tags, created, expires     string
 		peerName, usedAt, usedByID sql.NullString
 	)
-	if err := row.Scan(&t.ID, &t.SecretHash, &t.OwnerID, &t.Kind, &tags, &peerName, &t.CreatedBy, &created, &expires, &usedAt, &usedByID); err != nil {
+	if err := row.Scan(&t.ID, &t.SecretHash, &t.OwnerID, &t.Kind, &tags, &peerName, &t.CreatedBy, &created, &expires, &usedAt, &usedByID, &t.IssuedByAdmin); err != nil {
 		return Token{}, err
 	}
 	if err := json.Unmarshal([]byte(tags), &t.Tags); err != nil {
@@ -60,9 +63,9 @@ func (s *Tokens) Create(ctx context.Context, t Token) error {
 		return fmt.Errorf("store: encode tags: %w", err)
 	}
 	_, err = s.q.ExecContext(ctx,
-		`INSERT INTO enrollment_tokens (`+tokenColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
+		`INSERT INTO enrollment_tokens (`+tokenColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)`,
 		t.ID, t.SecretHash, t.OwnerID, t.Kind, string(tags), nullString(t.PeerName), t.CreatedBy,
-		formatTime(t.CreatedAt), formatTime(t.ExpiresAt))
+		formatTime(t.CreatedAt), formatTime(t.ExpiresAt), t.IssuedByAdmin)
 	if isUniqueViolation(err) {
 		return fmt.Errorf("token %s: %w", t.ID, ErrConflict)
 	}
