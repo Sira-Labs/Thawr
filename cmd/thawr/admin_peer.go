@@ -157,6 +157,8 @@ type mobileJSON struct {
 	Config  string   `json:"config"`
 	QRSVG   string   `json:"qr_svg,omitempty"`
 	Warning string   `json:"warning"`
+	// DNSWarning is set when the phone will resolve only .thawr names.
+	DNSWarning string `json:"dns_warning,omitempty"`
 }
 
 func newAdminAddMobileCmd(flags *adminFlags) *cobra.Command {
@@ -203,7 +205,15 @@ phone's traffic (threat model T4).`,
 // printMobile prints the warning, the QR code and the config, or writes
 // the config to out.
 func printMobile(w io.Writer, m mobileJSON, out string, noQR bool) error {
-	if _, err := fmt.Fprintf(w, "Peer %s (%s) created for %s.\nWarning: %s\n\n", m.Peer.Name, m.Peer.IPv4, m.Peer.Owner, m.Warning); err != nil {
+	if _, err := fmt.Fprintf(w, "Peer %s (%s) created for %s.\nWarning: %s\n", m.Peer.Name, m.Peer.IPv4, m.Peer.Owner, m.Warning); err != nil {
+		return err
+	}
+	if m.DNSWarning != "" {
+		if _, err := fmt.Fprintf(w, "Warning: %s\n", m.DNSWarning); err != nil {
+			return err
+		}
+	}
+	if _, err := io.WriteString(w, "\n"); err != nil {
 		return err
 	}
 	if !noQR {

@@ -290,7 +290,7 @@
     const tags = f.tags.value.split(",").map((s) => s.trim()).filter(Boolean);
     try {
       const m = await api("POST", "/api/v1/peers/mobile", { owner: f.owner.value, name: f.name.value, kind: f.kind.value, tags });
-      $("#mobile-warning").textContent = m.warning;
+      $("#mobile-warning").textContent = m.dns_warning ? `${m.warning} ${m.dns_warning}` : m.warning;
       $("#mobile-config").textContent = m.config;
       const svg = new DOMParser().parseFromString(m.qr_svg, "image/svg+xml").documentElement;
       if (svg && svg.nodeName === "svg") $("#mobile-qr").replaceChildren(document.adoptNode(svg));

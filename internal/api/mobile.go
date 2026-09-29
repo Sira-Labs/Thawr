@@ -25,7 +25,14 @@ type mobileView struct {
 	Config  string   `json:"config"`
 	QRSVG   string   `json:"qr_svg"`
 	Warning string   `json:"warning"`
+	// DNSWarning says the phone will resolve only .thawr names.
+	DNSWarning string `json:"dns_warning,omitempty"`
 }
+
+// MobileDNSWarning is added to a phone config while the hub resolver has
+// no upstream: the WireGuard app sends every query through the tunnel.
+const MobileDNSWarning = "The hub resolver found no upstream DNS server, so this phone resolves only .thawr names while the tunnel is up. " +
+	"Set dns.upstream in the server config and restart the server."
 
 // handleCreateMobile creates a static peer and returns its WireGuard
 // config once. The service restricts members to their own peers.
@@ -54,9 +61,11 @@ func (h *rest) handleCreateMobile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "qr rendering failed")
 		return
 	}
-	writeJSON(w, http.StatusCreated, mobileView{
-		Peer: h.peerView(r.Context(), res.Peer, map[string]string{}, nil), Config: conf, QRSVG: svg, Warning: MobileWarning,
-	})
+	view := mobileView{Peer: h.peerView(r.Context(), res.Peer, map[string]string{}, nil), Config: conf, QRSVG: svg, Warning: MobileWarning}
+	if h.deps.Hub.DNS.IsValid() && h.deps.Hub.DNSNoUpstream {
+		view.DNSWarning = MobileDNSWarning
+	}
+	writeJSON(w, http.StatusCreated, view)
 }
 
 // renderWireGuardConf renders the phone's config for the official

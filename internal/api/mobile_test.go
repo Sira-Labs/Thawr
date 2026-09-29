@@ -135,3 +135,25 @@ func TestQRRoundTrip(t *testing.T) {
 		t.Errorf("svg: %v", err)
 	}
 }
+
+// TestMobileDNSWarning: without an upstream the phone would lose every
+// name outside .thawr, and the admin creating it is told.
+func TestMobileDNSWarning(t *testing.T) {
+	for _, noUpstream := range []bool{false, true} {
+		env := newRESTEnv(t, func(d *RESTDeps, e *restEnv) {
+			e.registry = control.NewRegistry(e.st, d.Logger).WithOverlay(netip.MustParsePrefix("100.64.0.0/10"))
+			d.Peers = e.registry
+			d.Hub.DNS = netip.MustParseAddr("100.64.0.1")
+			d.Hub.DNSNoUpstream = noUpstream
+		})
+		rec := env.do(env.local, session{}, http.MethodPost, "/api/v1/peers/mobile", map[string]any{"owner": "alice", "name": "alice-phone"}, false)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+		}
+		var mv mobileView
+		decode(t, rec, &mv)
+		if want := map[bool]string{false: "", true: MobileDNSWarning}[noUpstream]; mv.DNSWarning != want {
+			t.Errorf("no upstream %v: dns_warning %q, want %q", noUpstream, mv.DNSWarning, want)
+		}
+	}
+}

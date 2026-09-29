@@ -95,6 +95,8 @@ type Server struct {
 	// dnsListen is the hub resolver's address for status, empty when off
 	// or stopped.
 	dnsListen atomic.Pointer[string]
+	// dnsNoUpstream is set when the hub resolver found no upstream.
+	dnsNoUpstream bool
 
 	ready     chan struct{}
 	readyOnce sync.Once
@@ -226,6 +228,7 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 	hubInfo := api.HubInfo{PublicKey: s.hubKey.PublicKey().String(), Endpoint: cfg.HubEndpoint(), Overlay: cfg.OverlayPrefix()}
 	if cfg.DNS.Enabled {
 		hubInfo.DNS = cfg.HubAddr().Addr()
+		hubInfo.DNSNoUpstream = s.dnsNoUpstream
 	}
 	grpcSrv, err := api.NewGRPC(api.GRPCDeps{
 		Enroller:  s.enroller,
