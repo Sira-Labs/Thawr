@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -385,5 +386,37 @@ func TestClientInstallStartsStoppedServiceAndKeepsState(t *testing.T) {
 	}
 	if st, err := client.LoadState(stateDir); err != nil || len(st.AdvertiseRoutes) != 0 {
 		t.Errorf("state changed under an installed client: %+v %v", st.AdvertiseRoutes, err)
+	}
+}
+
+func TestClientInstallRefusesServiceOptionsWhenInstalled(t *testing.T) {
+	env := newInstallEnv(t)
+	stateDir := t.TempDir()
+	if err := client.SaveState(stateDir, enrolledState()); err != nil {
+		t.Fatal(err)
+	}
+	env.mgr.states = map[string]svc.State{serviceClient: svc.Running}
+	for _, flag := range []string{"--dns=off", "--interface=utun9", "--log-level=debug"} {
+		_, errOut, code := env.run(t, "client", "install", "--state-dir", stateDir, flag)
+		if code != exitConfigError || !strings.Contains(errOut, "uninstall") || len(env.calls) != 0 {
+			t.Errorf("%s on an installed client: code %d, calls %v, %s", flag, code, env.calls, errOut)
+		}
+	}
+}
+
+func TestClientInstallDoesNotStartOverForegroundClient(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the client socket is a Unix socket")
+	}
+	env := newInstallEnv(t)
+	stateDir := t.TempDir()
+	if err := client.SaveState(stateDir, enrolledState()); err != nil {
+		t.Fatal(err)
+	}
+	env.mgr.states = map[string]svc.State{serviceClient: svc.Stopped}
+	sock := fakeDaemonSocket(t, http.NotFoundHandler()) // a foreground client answers here
+	_, errOut, code := env.run(t, "client", "install", "--state-dir", stateDir, "--socket", sock)
+	if code != exitConfigError || !strings.Contains(errOut, "foreground") || len(env.calls) != 0 {
+		t.Errorf("code %d, calls %v: %s", code, env.calls, errOut)
 	}
 }

@@ -133,7 +133,7 @@ func installService(ctx context.Context, w io.Writer, m svc.Manager, s svc.Servi
 		return err
 	}
 	if state != svc.Absent {
-		return startInstalled(ctx, w, m, s.Name, state, noStart)
+		return startInstalled(ctx, w, m, s.Name, state, noStart, nil)
 	}
 	files, err := m.Install(ctx, s)
 	if err != nil {
@@ -158,10 +158,16 @@ func installService(ctx context.Context, w io.Writer, m svc.Manager, s svc.Servi
 // startInstalled handles install on a machine where the service already
 // exists: a stopped one is started (unless --no-start), since that is
 // what running install again is usually for. Changing the service's
-// settings needs uninstall first.
-func startInstalled(ctx context.Context, w io.Writer, m svc.Manager, name string, state svc.State, noStart bool) error {
+// settings needs uninstall first. beforeStart, when set, may refuse the
+// start (a foreground client holding the socket).
+func startInstalled(ctx context.Context, w io.Writer, m svc.Manager, name string, state svc.State, noStart bool, beforeStart func() error) error {
 	cmd := strings.TrimPrefix(name, "thawr-")
 	if state == svc.Stopped && !noStart {
+		if beforeStart != nil {
+			if err := beforeStart(); err != nil {
+				return err
+			}
+		}
 		if err := m.Start(ctx, name); err != nil {
 			return fmt.Errorf("start %s: %w", name, err)
 		}
@@ -172,19 +178,34 @@ func startInstalled(ctx context.Context, w io.Writer, m svc.Manager, name string
 	return err
 }
 
-// stateFlags are the client flags that write the enrollment state.
-var stateFlags = []string{"server", "token", "fingerprint", "accept-fingerprint", "name", "lock-signer", "advertise-routes", "advertise-exit-node"}
+// installedFlags are the client install flags an installed service
+// cannot take: the first ones write the enrollment state under it, the
+// rest are baked into the registered service definition.
+var installedFlags = []string{"server", "token", "fingerprint", "accept-fingerprint", "name", "lock-signer", "advertise-routes", "advertise-exit-node",
+	"interface", "dns", "log-level", "bin"}
 
-// refuseStateChange rejects install flags that would rewrite the state
-// of an installed client: the running service would not see them, and
-// install would report success.
+// refuseStateChange rejects install flags an installed client cannot
+// apply: install would otherwise report success and change nothing, or
+// change state.json under the running service.
 func refuseStateChange(cmd *cobra.Command) error {
-	for _, f := range stateFlags {
+	for _, f := range installedFlags {
 		if cmd.Flags().Changed(f) {
-			return &exitError{code: exitConfigError, err: fmt.Errorf("%s is already installed; --%s would change its enrollment state under it. Run `thawr client uninstall` first, or `thawr client start` to start it as it is", serviceClient, f)}
+			return &exitError{code: exitConfigError, err: fmt.Errorf("%s is already installed; --%s cannot change it in place. Run `thawr client uninstall` first and install again, or `thawr client start` to start it as it is", serviceClient, f)}
 		}
 	}
 	return nil
+}
+
+// foregroundClientCheck refuses to start the service while a foreground
+// `client up` holds socket: the service would exit at once with
+// "already running".
+func foregroundClientCheck(socket string) func() error {
+	return func() error {
+		if err := client.CheckNotRunning(socket); errors.Is(err, client.ErrAlreadyRunning) {
+			return &exitError{code: exitConfigError, err: fmt.Errorf("%w; a foreground `thawr client up` is running: stop it (Ctrl-C or `sudo thawr client down`) first", err)}
+		}
+		return nil
+	}
 }
 
 // refuseHubHost rejects a client on a host that runs the server: both
@@ -386,7 +407,7 @@ Requires root.`,
 				if err := refuseStateChange(cmd); err != nil {
 					return err
 				}
-				return startInstalled(cmd.Context(), cmd.OutOrStdout(), m, serviceClient, installed, f.noStart)
+				return startInstalled(cmd.Context(), cmd.OutOrStdout(), m, serviceClient, installed, f.noStart, foregroundClientCheck(socket))
 			}
 			if err := client.CheckNotRunning(socket); err != nil {
 				if errors.Is(err, client.ErrAlreadyRunning) {

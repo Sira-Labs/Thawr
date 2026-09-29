@@ -1,12 +1,10 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
 
-	"github.com/sira-labs/thawr/internal/client"
 	"github.com/sira-labs/thawr/internal/svc"
 )
 
@@ -42,10 +40,11 @@ func newClientStartCmd(deps cliDeps) *cobra.Command {
 				_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s is already running\n", serviceClient)
 				return err
 			}
-			// A foreground `client up` holds the socket; the service would
-			// start and exit at once with "already running".
-			if err := client.CheckNotRunning(socket); errors.Is(err, client.ErrAlreadyRunning) {
-				return &exitError{code: exitConfigError, err: fmt.Errorf("%w; a foreground `thawr client up` is running: stop it (Ctrl-C or `sudo thawr client down`) first", err)}
+			// The service uses the socket it was installed with: the default
+			// unless `client install --socket` chose another, which --socket
+			// here must then name as well.
+			if err := foregroundClientCheck(socket)(); err != nil {
+				return err
 			}
 			if err := m.Start(cmd.Context(), serviceClient); err != nil {
 				return fmt.Errorf("start %s: %w", serviceClient, err)
