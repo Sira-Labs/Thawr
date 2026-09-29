@@ -59,6 +59,19 @@ type State struct {
 	ExitNodeID      string   `json:"exit_node_id,omitempty"`
 }
 
+// adoptSelfName takes this device's name from nm, where the server
+// reports it after an admin renamed the peer, and returns the old name
+// when it changed. The name serves DNS, status and the lock records
+// this device signs, which the server checks against the current name.
+func adoptSelfName(st *State, nm NetMap) string {
+	if nm.SelfName == "" || nm.SelfName == st.Name || (nm.SelfID != "" && nm.SelfID != st.PeerID) {
+		return ""
+	}
+	old := st.Name
+	st.Name = nm.SelfName
+	return old
+}
+
 // followExitNode keeps st's exit-node choice on the same peer: it
 // resolves a choice stored by name only and takes up a rename. It
 // reports whether st changed.

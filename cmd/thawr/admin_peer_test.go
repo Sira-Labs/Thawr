@@ -84,3 +84,30 @@ func TestAdminPeerShowFilter(t *testing.T) {
 		t.Errorf("missing name: exit %d", code)
 	}
 }
+
+func TestAdminPeerRename(t *testing.T) {
+	var got map[string]any
+	signed := false
+	mux := http.NewServeMux()
+	mux.HandleFunc("PATCH /api/v1/peers/{name}", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "p1", "name": got["name"], "signed": signed})
+	})
+	sock := fakeDaemonSocket(t, mux)
+
+	out, code, err := runCLI(t, "admin", "peer", "rename", "db", "db-old", "--force", "--socket", sock)
+	if code != 0 {
+		t.Fatalf("exit %d: %v", code, err)
+	}
+	if got["name"] != "db-old" || got["force"] != true {
+		t.Errorf("request body = %v, want name db-old and force", got)
+	}
+	if !strings.Contains(out, "renamed to db-old") || !strings.Contains(out, "thawr client lock sign db-old") {
+		t.Errorf("output lacks the rename or the lock hint:\n%s", out)
+	}
+	signed = true
+	out, _, _ = runCLI(t, "admin", "peer", "rename", "db", "db-old", "--socket", sock)
+	if got["force"] != false || strings.Contains(out, "lock sign") {
+		t.Errorf("without --force and signed: body %v, output:\n%s", got, out)
+	}
+}

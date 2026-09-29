@@ -108,6 +108,12 @@ hosts (`docs/roadmap/sprints.md`, sprint 4); the tag replaces
   route and sends internet traffic around the tunnel; the choice is
   kept by peer id, so a different peer that later takes the old name
   is not used either.
+- A renamed device takes its new name: `client status`, its own
+  `<name>.thawr`, state.json and log hints follow the netmap. Before,
+  it kept the old name, and with the network lock on it could not
+  rotate its key or run `lock init` (both signed the old name) and
+  reported itself unsigned. `admin peer rename` says when the lock
+  needs the peer signed again.
 
 ### Security
 

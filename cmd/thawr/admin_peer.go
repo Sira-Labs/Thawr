@@ -123,8 +123,15 @@ rename with --force.`,
 			if err := newAdminClient(flags.socket).do(cmd.Context(), "PATCH", "/api/v1/peers/"+args[0], body, &p); err != nil {
 				return err
 			}
-			_, err := fmt.Fprintf(cmd.OutOrStdout(), "peer %s renamed to %s\n", args[0], p.Name)
-			return err
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "peer %s renamed to %s\n", args[0], p.Name); err != nil {
+				return err
+			}
+			if p.Signed != nil && !*p.Signed {
+				// Lock signatures cover the name (spec 012).
+				_, err := fmt.Fprintf(cmd.OutOrStdout(), "the network lock is on: other devices hold %s until a signer runs `thawr client lock sign %s`\n", p.Name, p.Name)
+				return err
+			}
+			return nil
 		},
 	}
 	rename.Flags().BoolVar(&forceRename, "force", false, "rename even though the policy selects the peer by name")

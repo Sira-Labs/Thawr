@@ -458,3 +458,28 @@ func TestDaemonLockSignerFailsClosed(t *testing.T) {
 		t.Errorf("d device after a foreign record: %+v", last.Peers)
 	}
 }
+
+// TestDaemonLockAfterRename: lock records carry the name, so a renamed
+// signer must sign with its new name, as the server checks it.
+func TestDaemonLockAfterRename(t *testing.T) {
+	cp := newControlPlane(t)
+	ctx := context.Background()
+	dirA := t.TempDir()
+	cp.enrol(dirA, "a")
+	a, _, stopA := startDaemon(t, dirA)
+	defer stopA()
+	lcA := NewLocalClient(a.opts.Socket)
+	waitStatus(t, lcA, "connected", func(s Status) bool { return s.Server.State == ServerConnected })
+
+	if err := cp.registry.Rename(ctx, cp.admin, "a", "a2", false); err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, lcA, "renamed", func(s Status) bool { return s.Self.Name == "a2" })
+	if _, err := lcA.LockInit(ctx); err != nil {
+		t.Fatalf("lock init after rename: %v", err)
+	}
+	waitStatus(t, lcA, "self signed", func(s Status) bool { return s.Lock.Enabled && s.Lock.SelfSigned })
+	if err := lcA.RotateKey(ctx); err != nil {
+		t.Fatalf("rotate after rename: %v", err)
+	}
+}

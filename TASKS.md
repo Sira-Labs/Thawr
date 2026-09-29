@@ -625,6 +625,11 @@ tree that followed. One commit each, highest severity first.
       state.json), with `exit_node` as the last known name for status.
       State written by rc5 names the peer only; the first netmap with
       an exit node of that name fills in the id.
+- [x] The client adopts `SelfName` from every netmap (it was parsed and
+      never used) and persists it. Reads of the name moved under
+      `d.mu`, since it is no longer fixed after enrolment. The logger's
+      `peer` attribute keeps the name the daemon started with until
+      the next start; the "renamed by the server" line links the two.
 
 ## Phase 2 candidates (scheduled as specs 014–021 in `docs/roadmap/`)
 

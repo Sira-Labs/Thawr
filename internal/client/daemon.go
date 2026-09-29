@@ -630,7 +630,7 @@ func (d *Daemon) advertiseRoutes(ctx context.Context, client thawrv1.ControlClie
 	d.mu.Unlock()
 	for _, r := range advertised {
 		if !r.Approved {
-			d.log.Info("advertised route waits for approval", "prefix", r.Prefix, "hint", "thawr admin peer routes approve "+d.state.Name+" "+r.Prefix)
+			d.log.Info("advertised route waits for approval", "prefix", r.Prefix, "hint", "thawr admin peer routes approve "+d.selfName()+" "+r.Prefix)
 		}
 	}
 }
@@ -664,6 +664,7 @@ func (d *Daemon) reapply(ctx context.Context) error {
 func (d *Daemon) applyLocked(ctx context.Context, nm NetMap, cache bool) error {
 	now := d.opts.Now()
 	d.mu.Lock()
+	renamedFrom := adoptSelfName(&d.state, nm)
 	exitMoved := followExitNode(&d.state, nm.Peers)
 	key, dev, prev, exitNode, st := d.key, d.dev, d.held, d.state.ExitNodeID, d.state
 	if nm.Advertised != nil {
@@ -694,9 +695,12 @@ func (d *Daemon) applyLocked(ctx context.Context, nm NetMap, cache bool) error {
 		d.offered, d.held, d.lockRejected = &offered, held, rejected
 	}
 	d.mu.Unlock()
-	if exitMoved {
+	if renamedFrom != "" {
+		d.log.Info("renamed by the server", "from", renamedFrom, "to", st.Name)
+	}
+	if exitMoved || renamedFrom != "" {
 		if serr := SaveState(d.opts.StateDir, st); serr != nil {
-			d.log.Warn("exit node: save state", "err", serr)
+			d.log.Warn("save state", "err", serr)
 		}
 	}
 	if err != nil {
@@ -974,9 +978,16 @@ func (d *Daemon) RotateKey(ctx context.Context) error {
 	if signer != "" {
 		d.log.Info("key rotated and signed; other devices switch without a trust step", "key", wg.Fingerprint(newKey.PublicKey()))
 	} else {
-		d.log.Info("key rotated; other devices hold this peer until they trust the new key", "key", wg.Fingerprint(newKey.PublicKey()), "hint", "thawr client trust "+d.state.Name)
+		d.log.Info("key rotated; other devices hold this peer until they trust the new key", "key", wg.Fingerprint(newKey.PublicKey()), "hint", "thawr client trust "+d.selfName())
 	}
 	return nil
+}
+
+// selfName is this device's current peer name.
+func (d *Daemon) selfName() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.state.Name
 }
 
 // warnSelfUnsigned logs once, while it holds, that other devices hold
@@ -987,7 +998,7 @@ func (d *Daemon) warnSelfUnsigned() {
 	d.mu.Unlock()
 	if st.Enabled && !st.SelfSigned {
 		d.selfUnsignedWarn.Do(func() {
-			d.log.Warn("this device is not signed by the network lock; other devices hold it until a signer signs it", "hint", "thawr client lock sign "+d.state.Name)
+			d.log.Warn("this device is not signed by the network lock; other devices hold it until a signer signs it", "hint", "thawr client lock sign "+d.selfName())
 		})
 		return
 	}

@@ -621,3 +621,54 @@ func TestNewDaemonRejectsCorruptPins(t *testing.T) {
 		t.Errorf("corrupt pins accepted: %v", err)
 	}
 }
+
+// TestDaemonAdoptsRename: an admin renames the peer and the device takes
+// the new name for status, its own DNS name and state.json.
+func TestDaemonAdoptsRename(t *testing.T) {
+	cp := newControlPlane(t)
+	dir := t.TempDir()
+	cp.enrol(dir, "old-name")
+	d, _, stop := startDaemon(t, dir)
+	defer stop()
+	lc := NewLocalClient(d.opts.Socket)
+	waitStatus(t, lc, "connected", func(s Status) bool { return s.Server.State == ServerConnected })
+
+	if err := cp.registry.Rename(context.Background(), cp.admin, "old-name", "new-name", false); err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, lc, "renamed", func(s Status) bool { return s.Self.Name == "new-name" })
+	var own []string
+	for _, e := range d.dnsEntries() {
+		if e.Addr == d.selfIP {
+			own = append(own, e.Name)
+		}
+	}
+	if len(own) != 1 || own[0] != "new-name" {
+		t.Errorf("own DNS names = %v, want [new-name]", own)
+	}
+	if st, err := LoadState(dir); err != nil || st.Name != "new-name" {
+		t.Errorf("state name = %q (%v), want new-name", st.Name, err)
+	}
+}
+
+func TestAdoptSelfName(t *testing.T) {
+	cases := []struct {
+		name     string
+		nm       NetMap
+		wantName string
+		wantOld  string
+	}{
+		{"renamed", NetMap{SelfID: "p1", SelfName: "new"}, "new", "old"},
+		{"unchanged", NetMap{SelfID: "p1", SelfName: "old"}, "old", ""},
+		{"no name in the map", NetMap{SelfID: "p1"}, "old", ""},
+		{"another peer's map", NetMap{SelfID: "p2", SelfName: "new"}, "old", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			st := State{PeerID: "p1", Name: "old"}
+			if got := adoptSelfName(&st, tc.nm); got != tc.wantOld || st.Name != tc.wantName {
+				t.Errorf("adoptSelfName = %q, name %q; want %q, %q", got, st.Name, tc.wantOld, tc.wantName)
+			}
+		})
+	}
+}
