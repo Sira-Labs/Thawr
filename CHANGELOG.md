@@ -114,6 +114,10 @@ hosts (`docs/roadmap/sprints.md`, sprint 4); the tag replaces
   rotate its key or run `lock init` (both signed the old name) and
   reported itself unsigned. `admin peer rename` says when the lock
   needs the peer signed again.
+- `client status`, `client down` and `client up` run without the
+  rights to open the client socket say so and suggest sudo (exit 2).
+  Before, status reported a running client as "not running" (exit 3),
+  and `up` failed later with a bare "permission denied" on state.json.
 
 ### Security
 

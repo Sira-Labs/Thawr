@@ -114,7 +114,7 @@ func TestInstallRequiresRoot(t *testing.T) {
 	env.deps.isRoot = func() bool { return false }
 	for _, args := range [][]string{{"server", "install"}, {"server", "uninstall"}, {"client", "install"}, {"client", "uninstall"}} {
 		_, errOut, code := env.run(t, args...)
-		if code != exitConfigError || !strings.Contains(errOut, "run as root") {
+		if code != exitConfigError || !strings.Contains(errOut, "needs root") {
 			t.Errorf("%v: code %d, %q", args, code, errOut)
 		}
 	}

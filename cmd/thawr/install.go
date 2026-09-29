@@ -67,7 +67,7 @@ func addInstallFlags(cmd *cobra.Command, f *installFlags) {
 
 func requireRoot(deps cliDeps) error {
 	if !deps.isRoot() {
-		return &exitError{code: exitConfigError, err: errors.New("run as root (sudo)")}
+		return &exitError{code: exitConfigError, err: errors.New("this command needs root; " + elevateHint())}
 	}
 	return nil
 }

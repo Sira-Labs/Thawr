@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/netip"
@@ -181,7 +182,13 @@ SIGINT or SIGTERM. When the device is not enrolled yet, --server and
 			// Before enrolment and the flags that write state: a running
 			// client must not have its stored settings changed under it.
 			if err := client.CheckNotRunning(socket); err != nil {
-				return alreadyRunning(err)
+				if errors.Is(err, client.ErrAlreadyRunning) {
+					return alreadyRunning(err)
+				}
+				if errors.Is(err, fs.ErrPermission) {
+					return socketPermission(socket)
+				}
+				return err
 			}
 			logger := server.NewLogger(logConfig(upf.logLevel), cmd.ErrOrStderr())
 			if err := enrollIfNeeded(cmd.Context(), deps, logger, upf, stateDir); err != nil {
@@ -215,6 +222,9 @@ SIGINT or SIGTERM. When the device is not enrolled yet, --server and
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			lc := client.NewLocalClient(socket)
 			if err := lc.Down(cmd.Context()); err != nil {
+				if errors.Is(err, fs.ErrPermission) {
+					return socketPermission(socket)
+				}
 				if !forget {
 					return fmt.Errorf("client is not running (%w)", err)
 				}
@@ -259,6 +269,9 @@ server is unreachable, 2 usage error, 3 client not running.`,
 				return watchStatus(cmd.Context(), cmd.OutOrStdout(), lc, asJSON)
 			}
 			st, err := lc.Status(cmd.Context())
+			if errors.Is(err, fs.ErrPermission) {
+				return socketPermission(socket)
+			}
 			if err != nil {
 				return &exitError{code: exitNotRunning, err: fmt.Errorf("thawr client is not running (%w)", err)}
 			}
@@ -416,6 +429,9 @@ func watchStatus(ctx context.Context, w io.Writer, lc *client.LocalClient, asJSO
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
+			}
+			if errors.Is(err, fs.ErrPermission) {
+				return permissionError(err)
 			}
 			return &exitError{code: exitNotRunning, err: fmt.Errorf("thawr client is not running (%w)", err)}
 		}

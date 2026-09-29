@@ -630,6 +630,12 @@ tree that followed. One commit each, highest severity first.
       `d.mu`, since it is no longer fixed after enrolment. The logger's
       `peer` attribute keeps the name the daemon started with until
       the next start; the "renamed by the server" line links the two.
+- [x] A permission error on the client socket is no longer read as
+      "nobody there". `socketBusy` returns it; status, down and up exit
+      2 with "no permission to use the client socket …; run it with
+      sudo" (Administrator prompt on Windows), and `main` adds the same
+      hint to any other permission error. The socket test is skipped as
+      root, which bypasses file permissions.
 
 ## Phase 2 candidates (scheduled as specs 014–021 in `docs/roadmap/`)
 

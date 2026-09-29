@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"math"
 	"net"
@@ -328,8 +329,14 @@ var ErrAlreadyRunning = errors.New("client: another thawr client is already runn
 // socket. `client up` calls it before it touches the enrollment state
 // (--lock-signer, --advertise-routes); NewDaemon repeats it and then
 // takes the instance lock, which settles two clients starting together.
+// A socket this process may not open fails with a permission error: a
+// daemon may be behind it, and the caller could not run one anyway.
 func CheckNotRunning(socket string) error {
-	if socketBusy(socket) {
+	busy, err := socketBusy(socket)
+	switch {
+	case err != nil:
+		return fmt.Errorf("client: socket %s: %w", socket, err)
+	case busy:
 		return fmt.Errorf("%w on %s", ErrAlreadyRunning, socket)
 	}
 	return nil
@@ -337,15 +344,19 @@ func CheckNotRunning(socket string) error {
 
 // socketBusy reports whether something accepts connections on the
 // local socket. The file a dead daemon left behind refuses the
-// connection and is removed when the daemon listens.
-func socketBusy(socket string) bool {
+// connection and is removed when the daemon listens. A permission
+// failure is returned, not read as "nobody there".
+func socketBusy(socket string) (bool, error) {
 	d := net.Dialer{Timeout: time.Second}
 	c, err := d.Dial("unix", socket)
+	if errors.Is(err, fs.ErrPermission) {
+		return false, err
+	}
 	if err != nil {
-		return false
+		return false, nil
 	}
 	_ = c.Close()
-	return true
+	return true, nil
 }
 
 // freeListenPort returns port when nothing else listens on it, a random
