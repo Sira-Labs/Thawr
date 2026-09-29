@@ -234,7 +234,7 @@ and ` + "`client start`" + `.`,
 			} else {
 				// A service that exits cleanly is not restarted by
 				// launchd or systemd; say how to bring it back.
-				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "client stopping; it stays stopped until the next boot. To bring it back, "+startHint)
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "client stopping. An installed service stays stopped until the next boot; to bring it back, "+startHint)
 			}
 			if !forget {
 				return nil
