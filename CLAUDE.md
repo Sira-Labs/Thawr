@@ -63,6 +63,7 @@ internal/client/    device side: state dir, TLS pinning, enrollment, sync daemon
 internal/server/    composes the server: bootstrap order, readiness, reload, shutdown
 internal/svc/       service manager adapters: systemd units, launchd plists, Windows services
 web/                admin UI: plain HTML/JS, embedded via embed.FS
+site/               public product page: one static HTML file, no build; not embedded in the binary
 docs/               vision, architecture, ADRs, threat model, specs
 tests/              integration tests (netns-based)
 config/             example configs
