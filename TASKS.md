@@ -624,6 +624,10 @@ tree that followed. One commit each, highest severity first.
         name is a no-op.
       - Delete is not guarded: the freed name stays protected by the
         enrolment rule.
+      - Enrolment reads the policy's peer names inside its transaction,
+        which holds the store's only connection. `PolicyService.Compiled`
+        therefore no longer holds its mutex while it reads the registry;
+        before, the two deadlocked (caught by macOS CI).
 - [x] The exit-node choice is kept by peer id (`exit_node_id` in
       state.json), with `exit_node` as the last known name for status.
       State written by rc5 names the peer only; the first netmap with

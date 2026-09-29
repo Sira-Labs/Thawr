@@ -166,6 +166,11 @@ func (s *PolicyService) Current() *policy.Policy {
 
 // Compiled returns the running policy compiled against the registry,
 // recompiling when the policy or the persisted generation changed.
+//
+// s.mu is never held while the store is read: enrolment, rename and
+// token creation call Current (through PeerRefs) inside a transaction
+// that holds the store's only connection, so a registry read under s.mu
+// would wait on them while they wait on s.mu.
 func (s *PolicyService) Compiled(ctx context.Context) *policy.Compiled {
 	gen, err := s.store.Meta().Generation(ctx)
 	if err != nil {
@@ -173,21 +178,29 @@ func (s *PolicyService) Compiled(ctx context.Context) *policy.Compiled {
 		gen = -1
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	key := s.current.Hash
-	if s.compiled != nil && s.cacheGen == gen && s.cacheKey == key && gen >= 0 {
-		return s.compiled
+	cur, cached := s.current, s.compiled
+	hit := cached != nil && s.cacheGen == gen && s.cacheKey == cur.Hash && gen >= 0
+	s.mu.Unlock()
+	if hit {
+		return cached
 	}
 	peers, _, err := s.registry(ctx)
 	if err != nil {
 		s.log.Warn("policy: read registry", "err", err)
-		if s.compiled != nil {
-			return s.compiled
+		if cached != nil {
+			return cached
 		}
 		return policy.Compile(policy.Empty(), nil)
 	}
-	s.compiled, s.cacheGen, s.cacheKey = policy.CompileWith(s.current, peers, s.overlay), gen, key
-	return s.compiled
+	c := policy.CompileWith(cur, peers, s.overlay)
+	s.mu.Lock()
+	// A reload while the registry was read published a newer policy;
+	// the cache stays with that one.
+	if s.current == cur {
+		s.compiled, s.cacheGen, s.cacheKey = c, gen, cur.Hash
+	}
+	s.mu.Unlock()
+	return c
 }
 
 // FilterFor returns the compiled receiver-side rules of one peer, as

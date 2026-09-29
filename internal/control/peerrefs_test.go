@@ -3,8 +3,10 @@ package control
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sira-labs/thawr/internal/store"
 )
@@ -186,5 +188,60 @@ func TestRenameToSameNameIsNoOp(t *testing.T) {
 	}
 	if after, _ := env.st.Meta().Generation(ctx); after != before {
 		t.Errorf("generation %d -> %d on a no-op rename", before, after)
+	}
+}
+
+// TestEnrollWhileCompiling: enrolment asks the running policy for its
+// peer names inside a store transaction, which holds the store's only
+// connection, while netmap builds compile the policy against the
+// registry. Neither may wait on the other.
+func TestEnrollWhileCompiling(t *testing.T) {
+	ctx := context.Background()
+	env := newEnrollEnv(t, "100.64.0.0/10")
+	ps := NewPolicyService(env.st, quietLogger(), "", nil)
+	env.enroller.WithPeerRefs(ps.PeerRefs)
+	env.registry.WithPeerRefs(ps.PeerRefs)
+
+	stop := make(chan struct{})
+	compiling := make(chan struct{})
+	go func() {
+		defer close(compiling)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				ps.Compiled(ctx)
+			}
+		}
+	}()
+	const rounds = 40
+	reqs := make([]EnrollRequest, rounds)
+	for i := range reqs {
+		reqs[i] = EnrollRequest{Token: env.token(t, TokenRequest{}), PublicKey: newPubKey(t), Name: "box", ClientVersion: "0.1.0"}
+	}
+	done := make(chan error, 1)
+	go func() {
+		for i, req := range reqs {
+			if _, err := env.enroller.Enroll(ctx, req); err != nil {
+				done <- fmt.Errorf("enroll %d: %w", i, err)
+				return
+			}
+			if err := env.registry.Rename(ctx, env.admin, "box", fmt.Sprintf("box-r%d", i), false); err != nil {
+				done <- fmt.Errorf("rename %d: %w", i, err)
+				return
+			}
+		}
+		done <- nil
+	}()
+	select {
+	case err := <-done:
+		close(stop)
+		<-compiling
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("enrolment and policy compilation deadlocked")
 	}
 }
