@@ -219,3 +219,43 @@ func TestInvalidServiceNames(t *testing.T) {
 		t.Error("empty Exec accepted")
 	}
 }
+
+// TestArgsRoundTrip: what Install writes, Args reads back unchanged,
+// quotes, spaces, dollars and XML metacharacters included.
+func TestArgsRoundTrip(t *testing.T) {
+	args := []string{"client", "up", "--socket", "/var/run/my thawr/c.sock", "--name", `a"b\c`, "--state-dir", "/tmp/$HOME", "--x", "a<b&c", ""}
+	s := Service{Name: "thawr-client", Exec: "/opt/my tools/thawr", Args: args}
+	root := t.TempDir()
+	r := &fakeRunner{}
+	managers := map[string]Manager{
+		"systemd": newSystemd(Options{Root: filepath.Join(root, "s"), Runner: r.run}),
+		"launchd": newLaunchd(Options{Root: filepath.Join(root, "l"), Runner: r.run}),
+	}
+	for name, m := range managers {
+		if _, err := m.Install(context.Background(), s); err != nil {
+			t.Fatalf("%s install: %v", name, err)
+		}
+		got, err := m.Args(context.Background(), s.Name)
+		if err != nil {
+			t.Fatalf("%s args: %v", name, err)
+		}
+		if strings.Join(got, "\x00") != strings.Join(args, "\x00") || len(got) != len(args) {
+			t.Errorf("%s args = %q, want %q", name, got, args)
+		}
+		if _, err := m.Args(context.Background(), "thawr-absent"); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s args of an absent service: %v", name, err)
+		}
+	}
+}
+
+func TestSplitSystemdCommand(t *testing.T) {
+	for _, bad := range []string{`/bin/x "open`} {
+		if _, err := splitSystemdCommand(bad); err == nil {
+			t.Errorf("%q: no error", bad)
+		}
+	}
+	got, err := splitSystemdCommand("  /bin/x\ta  b ")
+	if err != nil || strings.Join(got, ",") != "/bin/x,a,b" {
+		t.Errorf("whitespace: %q %v", got, err)
+	}
+}

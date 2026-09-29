@@ -144,4 +144,25 @@ func (m *winsvc) Status(_ context.Context, name string) (State, error) {
 	return Stopped, nil
 }
 
+// Args splits the service's command line back into its arguments.
+func (m *winsvc) Args(_ context.Context, name string) ([]string, error) {
+	c, s, err := m.open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = s.Close(); _ = c.Disconnect() }()
+	cfg, err := s.Config()
+	if err != nil {
+		return nil, fmt.Errorf("svc: read config of %s: %w", name, err)
+	}
+	argv, err := windows.DecomposeCommandLine(cfg.BinaryPathName)
+	if err != nil {
+		return nil, fmt.Errorf("svc: parse command line of %s: %w", name, err)
+	}
+	if len(argv) == 0 {
+		return nil, fmt.Errorf("svc: service %s has an empty command line", name)
+	}
+	return argv[1:], nil
+}
+
 func (m *winsvc) Logs(name string) string { return "sc query " + name }

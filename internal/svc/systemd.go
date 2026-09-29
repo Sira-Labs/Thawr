@@ -107,6 +107,30 @@ func (m *systemd) Status(ctx context.Context, name string) (State, error) {
 	return Stopped, nil
 }
 
+// Args reads the ExecStart line of the installed unit.
+func (m *systemd) Args(_ context.Context, name string) ([]string, error) {
+	if err := validName(name); err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(m.unitPath(name))
+	if err != nil {
+		return nil, fmt.Errorf("svc: read unit: %w", err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if cmd, ok := strings.CutPrefix(line, "ExecStart="); ok {
+			words, err := splitSystemdCommand(cmd)
+			if err != nil {
+				return nil, fmt.Errorf("svc: unit %s: ExecStart %q: %w", name, cmd, err)
+			}
+			if len(words) == 0 {
+				return nil, fmt.Errorf("svc: unit %s has an empty ExecStart line", name)
+			}
+			return words[1:], nil
+		}
+	}
+	return nil, fmt.Errorf("svc: unit %s has no ExecStart line", name)
+}
+
 func (m *systemd) Logs(name string) string { return "journalctl -u " + name + " -f" }
 
 // RenderSystemdUnit renders the unit file for s. The process runs as
@@ -151,4 +175,46 @@ func systemdQuote(s string) string {
 	}
 	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, `$`, `$$`)
 	return `"` + r.Replace(s) + `"`
+}
+
+// splitSystemdCommand reverses systemdCommand: it splits on whitespace
+// outside double quotes and undoes the escapes systemdQuote adds.
+func splitSystemdCommand(line string) ([]string, error) {
+	var (
+		words         []string
+		cur           strings.Builder
+		inWord, quote bool
+	)
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		switch {
+		case quote && c == '\\' && i+1 < len(line):
+			i++
+			cur.WriteByte(line[i])
+		case quote && c == '"':
+			quote = false
+		case c == '$' && i+1 < len(line) && line[i+1] == '$':
+			i++
+			cur.WriteByte('$')
+			inWord = true
+		case !quote && c == '"':
+			quote, inWord = true, true
+		case !quote && (c == ' ' || c == '\t'):
+			if inWord {
+				words = append(words, cur.String())
+				cur.Reset()
+				inWord = false
+			}
+		default:
+			cur.WriteByte(c)
+			inWord = true
+		}
+	}
+	if quote {
+		return nil, errors.New("unterminated quote")
+	}
+	if inWord {
+		words = append(words, cur.String())
+	}
+	return words, nil
 }
