@@ -16,13 +16,11 @@ const startHint = "start the installed service with `sudo thawr client start`, o
 // after `client down` or `client stop`: neither launchd nor systemd
 // restarts a service that exited cleanly.
 func newClientStartCmd(deps cliDeps) *cobra.Command {
-	var stateDir, socket string
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:   "start",
 		Short: "Start the installed client service (after `client down` or `client stop`)",
 		Long: "Start the installed client service (after `client down` or `client stop`).\n\n" +
-			"It refuses while a foreground `client up` holds the socket. A service installed\n" +
-			"with a non-default --socket needs the same --socket here.",
+			"It refuses while a foreground `client up` holds the socket the service uses.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := requireRoot(deps); err != nil {
@@ -43,10 +41,7 @@ func newClientStartCmd(deps cliDeps) *cobra.Command {
 				_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s is already running\n", serviceClient)
 				return err
 			}
-			// The service uses the socket it was installed with: the default
-			// unless `client install --socket` chose another, which --socket
-			// here must then name as well.
-			if err := foregroundClientCheck(socket)(); err != nil {
+			if err := installedClientCheck(cmd.Context(), m)(); err != nil {
 				return err
 			}
 			if err := m.Start(cmd.Context(), serviceClient); err != nil {
@@ -56,8 +51,6 @@ func newClientStartCmd(deps cliDeps) *cobra.Command {
 			return err
 		},
 	}
-	addClientCommonFlags(cmd, &stateDir, &socket)
-	return cmd
 }
 
 // newClientStopCmd stops the installed client service; it stays

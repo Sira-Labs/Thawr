@@ -196,16 +196,39 @@ func refuseStateChange(cmd *cobra.Command) error {
 	return nil
 }
 
-// foregroundClientCheck refuses to start the service while a foreground
-// `client up` holds socket: the service would exit at once with
-// "already running".
-func foregroundClientCheck(socket string) func() error {
+// installedClientCheck refuses to start the installed client service
+// while a foreground `client up` holds the socket that service uses: it
+// would exit at once with "already running". The socket is read back
+// from the service definition, not taken from this command's flags.
+func installedClientCheck(ctx context.Context, m svc.Manager) func() error {
 	return func() error {
+		socket, err := installedSocket(ctx, m)
+		if err != nil {
+			return err
+		}
 		if err := client.CheckNotRunning(socket); errors.Is(err, client.ErrAlreadyRunning) {
 			return &exitError{code: exitConfigError, err: fmt.Errorf("%w; a foreground `thawr client up` is running: stop it (Ctrl-C or `sudo thawr client down`) first", err)}
 		}
 		return nil
 	}
+}
+
+// installedSocket is the --socket the installed client service runs
+// with, or the client default when its definition names none.
+func installedSocket(ctx context.Context, m svc.Manager) (string, error) {
+	args, err := m.Args(ctx, serviceClient)
+	if err != nil {
+		return "", fmt.Errorf("read the %s service definition: %w", serviceClient, err)
+	}
+	for i, a := range args {
+		if v, ok := strings.CutPrefix(a, "--socket="); ok {
+			return v, nil
+		}
+		if a == "--socket" && i+1 < len(args) {
+			return args[i+1], nil
+		}
+	}
+	return client.DefaultSocket, nil
 }
 
 // refuseHubHost rejects a client on a host that runs the server: both
@@ -407,7 +430,7 @@ Requires root.`,
 				if err := refuseStateChange(cmd); err != nil {
 					return err
 				}
-				return startInstalled(cmd.Context(), cmd.OutOrStdout(), m, serviceClient, installed, f.noStart, foregroundClientCheck(socket))
+				return startInstalled(cmd.Context(), cmd.OutOrStdout(), m, serviceClient, installed, f.noStart, installedClientCheck(cmd.Context(), m))
 			}
 			if err := client.CheckNotRunning(socket); err != nil {
 				if errors.Is(err, client.ErrAlreadyRunning) {

@@ -651,8 +651,9 @@ tree that followed. One commit each, highest severity first.
       `--log-level`, `--bin`) and otherwise starts the service if
       stopped, unless a foreground client holds the socket. Not
       installed, it runs the same `CheckNotRunning` as `up` first.
-      `client start` checks the socket given by `--socket` (default the
-      default install's); the service definition is not read back.
+      Both that and `client start` check the socket the service was
+      installed with, read back from the unit, plist or SCM entry
+      (`svc.Manager.Args`), not one given on the command line.
 - [x] The admin socket error tells "no socket here" (run on the server
       host) from "permission denied" (sudo). Left as is: the `thawr`
       group on admin.sock grants nothing while the socket sits in the

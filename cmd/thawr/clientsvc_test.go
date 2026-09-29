@@ -1,7 +1,6 @@
 package main
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -28,11 +27,7 @@ func TestClientStartStop(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			env := newInstallEnv(t)
 			env.mgr.states = map[string]svc.State{serviceClient: tc.state}
-			args := tc.args
-			if tc.args[1] == "start" {
-				args = append(args, "--socket", filepath.Join(t.TempDir(), "none.sock"))
-			}
-			out, errOut, code := env.run(t, args...)
+			out, errOut, code := env.run(t, tc.args...)
 			if code != tc.wantCode || !strings.Contains(out+errOut, tc.wantOut) {
 				t.Errorf("code %d (want %d), output %q (want %q)", code, tc.wantCode, out+errOut, tc.wantOut)
 			}

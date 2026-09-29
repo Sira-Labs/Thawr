@@ -22,7 +22,9 @@ type fakeManager struct {
 	states    map[string]svc.State
 	calls     *[]string
 	installed []svc.Service
-	err       error
+	// args is what Args reports for the installed service.
+	args []string
+	err  error
 }
 
 func (m *fakeManager) Install(_ context.Context, s svc.Service) ([]string, error) {
@@ -48,7 +50,8 @@ func (m *fakeManager) Status(_ context.Context, name string) (svc.State, error) 
 	}
 	return m.state, nil
 }
-func (m *fakeManager) Logs(name string) string { return "journalctl -u " + name }
+func (m *fakeManager) Args(context.Context, string) ([]string, error) { return m.args, nil }
+func (m *fakeManager) Logs(name string) string                        { return "journalctl -u " + name }
 
 // enrolledState is a complete state.json for an already enrolled device.
 func enrolledState() client.State {
@@ -75,7 +78,8 @@ func newInstallEnv(t *testing.T) *installEnv {
 	if err := os.WriteFile(env.exe, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	env.mgr = &fakeManager{state: svc.Absent, calls: &env.calls}
+	env.mgr = &fakeManager{state: svc.Absent, calls: &env.calls,
+		args: []string{"client", "up", "--socket", filepath.Join(t.TempDir(), "none.sock")}}
 	env.deps = cliDeps{
 		newManager: func(svc.Options) (svc.Manager, error) { return env.mgr, nil },
 		isRoot:     func() bool { return true },
@@ -414,9 +418,33 @@ func TestClientInstallDoesNotStartOverForegroundClient(t *testing.T) {
 		t.Fatal(err)
 	}
 	env.mgr.states = map[string]svc.State{serviceClient: svc.Stopped}
-	sock := fakeDaemonSocket(t, http.NotFoundHandler()) // a foreground client answers here
-	_, errOut, code := env.run(t, "client", "install", "--state-dir", stateDir, "--socket", sock)
-	if code != exitConfigError || !strings.Contains(errOut, "foreground") || len(env.calls) != 0 {
-		t.Errorf("code %d, calls %v: %s", code, env.calls, errOut)
+	// A foreground client answers on the socket the service was
+	// installed with; the command line names none, and the check must
+	// still find it.
+	env.mgr.args = []string{"client", "up", "--socket", fakeDaemonSocket(t, http.NotFoundHandler())}
+	for _, args := range [][]string{{"client", "install", "--state-dir", stateDir}, {"client", "start"}} {
+		env.calls = nil
+		_, errOut, code := env.run(t, args...)
+		if code != exitConfigError || !strings.Contains(errOut, "foreground") || len(env.calls) != 0 {
+			t.Errorf("%v: code %d, calls %v: %s", args, code, env.calls, errOut)
+		}
+	}
+}
+
+func TestInstalledSocket(t *testing.T) {
+	cases := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"client", "up", "--socket", "/run/a.sock", "--dns", "on"}, "/run/a.sock"},
+		{[]string{"client", "up", "--socket=/run/b.sock"}, "/run/b.sock"},
+		{[]string{"client", "up"}, client.DefaultSocket},
+		{[]string{"client", "up", "--socket"}, client.DefaultSocket},
+	}
+	for _, tc := range cases {
+		got, err := installedSocket(context.Background(), &fakeManager{args: tc.args})
+		if err != nil || got != tc.want {
+			t.Errorf("%q: %q %v, want %q", tc.args, got, err, tc.want)
+		}
 	}
 }
