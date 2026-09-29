@@ -642,6 +642,10 @@ tree that followed. One commit each, highest severity first.
       service would exit at once with "already running". The service
       restart policies (`SuccessfulExit=false`, `Restart=on-failure`)
       stay: a clean `down` staying down is what `down` promises.
+- [x] `client install` checks for an installed service before
+      enrolment and `--advertise-*`; installed, it refuses any flag that
+      writes state and otherwise starts the service if stopped. Not
+      installed, it runs the same `CheckNotRunning` as `up` first.
 
 ## Phase 2 candidates (scheduled as specs 014–021 in `docs/roadmap/`)
 

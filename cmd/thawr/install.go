@@ -133,8 +133,7 @@ func installService(ctx context.Context, w io.Writer, m svc.Manager, s svc.Servi
 		return err
 	}
 	if state != svc.Absent {
-		_, err := fmt.Fprintf(w, "%s is already installed (%s); run `thawr %s uninstall` first to change it\n", s.Name, state, strings.TrimPrefix(s.Name, "thawr-"))
-		return err
+		return startInstalled(ctx, w, m, s.Name, state, noStart)
 	}
 	files, err := m.Install(ctx, s)
 	if err != nil {
@@ -154,6 +153,38 @@ func installService(ctx context.Context, w io.Writer, m svc.Manager, s svc.Servi
 	}
 	_, err = fmt.Fprintf(w, "%s started and enabled at boot\nlogs: %s\n", s.Name, m.Logs(s.Name))
 	return err
+}
+
+// startInstalled handles install on a machine where the service already
+// exists: a stopped one is started (unless --no-start), since that is
+// what running install again is usually for. Changing the service's
+// settings needs uninstall first.
+func startInstalled(ctx context.Context, w io.Writer, m svc.Manager, name string, state svc.State, noStart bool) error {
+	cmd := strings.TrimPrefix(name, "thawr-")
+	if state == svc.Stopped && !noStart {
+		if err := m.Start(ctx, name); err != nil {
+			return fmt.Errorf("start %s: %w", name, err)
+		}
+		_, err := fmt.Fprintf(w, "%s was already installed and is started again; to change its settings, run `thawr %s uninstall` first\nlogs: %s\n", name, cmd, m.Logs(name))
+		return err
+	}
+	_, err := fmt.Fprintf(w, "%s is already installed (%s); to change its settings, run `thawr %s uninstall` first\n", name, state, cmd)
+	return err
+}
+
+// stateFlags are the client flags that write the enrollment state.
+var stateFlags = []string{"server", "token", "fingerprint", "accept-fingerprint", "name", "lock-signer", "advertise-routes", "advertise-exit-node"}
+
+// refuseStateChange rejects install flags that would rewrite the state
+// of an installed client: the running service would not see them, and
+// install would report success.
+func refuseStateChange(cmd *cobra.Command) error {
+	for _, f := range stateFlags {
+		if cmd.Flags().Changed(f) {
+			return &exitError{code: exitConfigError, err: fmt.Errorf("%s is already installed; --%s would change its enrollment state under it. Run `thawr client uninstall` first, or `thawr client start` to start it as it is", serviceClient, f)}
+		}
+	}
+	return nil
 }
 
 // refuseHubHost rejects a client on a host that runs the server: both
@@ -344,6 +375,23 @@ Requires root.`,
 				return err
 			}
 			if err := validateDNSMode(upf.dnsMode); err != nil {
+				return err
+			}
+			// Nothing below may touch the state of a client that runs.
+			installed, err := m.Status(cmd.Context(), serviceClient)
+			if err != nil {
+				return err
+			}
+			if installed != svc.Absent {
+				if err := refuseStateChange(cmd); err != nil {
+					return err
+				}
+				return startInstalled(cmd.Context(), cmd.OutOrStdout(), m, serviceClient, installed, f.noStart)
+			}
+			if err := client.CheckNotRunning(socket); err != nil {
+				if errors.Is(err, client.ErrAlreadyRunning) {
+					return alreadyRunning(err)
+				}
 				return err
 			}
 			logger := server.NewLogger(logConfig(upf.logLevel), cmd.ErrOrStderr())

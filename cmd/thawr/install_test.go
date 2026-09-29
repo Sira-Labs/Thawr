@@ -360,3 +360,30 @@ func TestServerUninstallPurgeDeletesDataDir(t *testing.T) {
 		t.Errorf("calls: %s", got)
 	}
 }
+
+func TestClientInstallStartsStoppedServiceAndKeepsState(t *testing.T) {
+	env := newInstallEnv(t)
+	stateDir := t.TempDir()
+	if err := client.SaveState(stateDir, enrolledState()); err != nil {
+		t.Fatal(err)
+	}
+	env.mgr.states = map[string]svc.State{serviceClient: svc.Stopped}
+
+	out, errOut, code := env.run(t, "client", "install", "--state-dir", stateDir)
+	if code != 0 || !strings.Contains(out, "started again") {
+		t.Fatalf("code %d: %s %s", code, out, errOut)
+	}
+	if got := strings.Join(env.calls, ","); got != "start "+serviceClient {
+		t.Errorf("calls = %s, want only the start", got)
+	}
+
+	// A flag that writes state is refused and state.json is untouched.
+	env.calls = nil
+	_, errOut, code = env.run(t, "client", "install", "--state-dir", stateDir, "--advertise-exit-node")
+	if code != exitConfigError || !strings.Contains(errOut, "--advertise-exit-node") || len(env.calls) != 0 {
+		t.Errorf("code %d, calls %v: %s", code, env.calls, errOut)
+	}
+	if st, err := client.LoadState(stateDir); err != nil || len(st.AdvertiseRoutes) != 0 {
+		t.Errorf("state changed under an installed client: %+v %v", st.AdvertiseRoutes, err)
+	}
+}

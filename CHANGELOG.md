@@ -124,6 +124,10 @@ hosts (`docs/roadmap/sprints.md`, sprint 4); the tag replaces
   `launchctl kickstart` or `systemctl start` brought it back. `down`,
   `status` and the "already running" error now point there; the last
   no longer suggests `client uninstall`.
+- Running `client install` again starts a stopped service instead of
+  only reporting it as installed, and refuses flags that would rewrite
+  the enrollment state under the running client (`--advertise-routes`
+  used to change state.json and still print "already installed").
 
 ### Security
 
