@@ -72,8 +72,9 @@ func mkQuery(t *testing.T, id uint16, name string, typ dnsmessage.Type, edns boo
 }
 
 type reply struct {
-	header  dnsmessage.Header
-	answers []dnsmessage.Resource
+	header    dnsmessage.Header
+	answers   []dnsmessage.Resource
+	authority []dnsmessage.Resource
 }
 
 func parseReply(t *testing.T, msg []byte) reply {
@@ -90,7 +91,11 @@ func parseReply(t *testing.T, msg []byte) reply {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return reply{header: h, answers: answers}
+	authority, err := p.AllAuthorities()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return reply{header: h, answers: answers, authority: authority}
 }
 
 func TestHandleZone(t *testing.T) {
@@ -137,6 +142,7 @@ func TestHandleZone(t *testing.T) {
 				if len(r.answers) != 0 {
 					t.Fatalf("unexpected answers %v", r.answers)
 				}
+				checkNegativeSOA(t, c.qname, c.rcode, r)
 				return
 			}
 			if len(r.answers) != 1 {
@@ -422,5 +428,26 @@ func TestServeReportsListenerFailure(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Serve did not return after the listener failed")
+	}
+}
+
+// checkNegativeSOA: a negative answer inside the zone carries the zone's
+// SOA, whose MINIMUM bounds how long it is cached (RFC 2308); answers
+// outside the zone carry none.
+func checkNegativeSOA(t *testing.T, qname string, rcode dnsmessage.RCode, r reply) {
+	t.Helper()
+	inZone := strings.HasSuffix(strings.ToLower(qname), "thawr.") && rcode != dnsmessage.RCodeRefused
+	if !inZone {
+		if len(r.authority) != 0 {
+			t.Errorf("authority outside the zone: %v", r.authority)
+		}
+		return
+	}
+	if len(r.authority) != 1 {
+		t.Fatalf("authority = %v, want the zone SOA", r.authority)
+	}
+	soa, ok := r.authority[0].Body.(*dnsmessage.SOAResource)
+	if !ok || r.authority[0].Header.Name.String() != "thawr." || soa.MinTTL != uint32(TTL.Seconds()) || r.authority[0].Header.TTL != uint32(TTL.Seconds()) {
+		t.Errorf("SOA = %+v %+v", r.authority[0].Header, r.authority[0].Body)
 	}
 }

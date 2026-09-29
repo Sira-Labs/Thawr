@@ -356,24 +356,27 @@ func parseQuery(req []byte) (query, error) {
 	return q, nil
 }
 
-// answerZone handles a name at or under the zone.
+// answerZone handles a name at or under the zone. Negative answers
+// carry the zone's SOA so resolvers cache "no such name" for TTL, not
+// for a platform default of minutes (RFC 2308): a peer enrolled right
+// after someone looked its name up resolves within seconds.
 func (s *Server) answerZone(ctx context.Context, q query, from netip.Addr, name string, tcp bool) ([]byte, error) {
 	if name == s.zone {
-		return s.respond(q, dnsmessage.RCodeSuccess, nil, tcp)
+		return s.respondNegative(q, dnsmessage.RCodeSuccess, tcp)
 	}
 	label := strings.TrimSuffix(name, "."+s.zone)
 	if strings.Contains(label, ".") {
-		return s.respond(q, dnsmessage.RCodeNameError, nil, tcp)
+		return s.respondNegative(q, dnsmessage.RCodeNameError, tcp)
 	}
 	addr, ok := s.opts.Source.Lookup(ctx, from, label)
 	if !ok {
-		return s.respond(q, dnsmessage.RCodeNameError, nil, tcp)
+		return s.respondNegative(q, dnsmessage.RCodeNameError, tcp)
 	}
 	if q.question.Type != dnsmessage.TypeA && q.question.Type != dnsmessage.TypeALL {
-		return s.respond(q, dnsmessage.RCodeSuccess, nil, tcp)
+		return s.respondNegative(q, dnsmessage.RCodeSuccess, tcp)
 	}
 	if !addr.Is4() {
-		return s.respond(q, dnsmessage.RCodeSuccess, nil, tcp)
+		return s.respondNegative(q, dnsmessage.RCodeSuccess, tcp)
 	}
 	rr := dnsmessage.Resource{
 		Header: dnsmessage.ResourceHeader{Name: q.question.Name, Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET, TTL: uint32(TTL.Seconds())},
@@ -406,17 +409,53 @@ func (s *Server) answerReverse(ctx context.Context, q query, from, addr netip.Ad
 // flags a stub resolver expects. Over UDP a reply larger than the
 // client's buffer is sent truncated without answers.
 func (s *Server) respond(q query, rcode dnsmessage.RCode, answers []dnsmessage.Resource, tcp bool) ([]byte, error) {
-	msg, err := s.build(q, rcode, answers, false)
+	return s.respondWith(q, rcode, answers, nil, tcp)
+}
+
+// respondNegative answers NXDOMAIN or an empty NOERROR in the zone with
+// its SOA in the authority section.
+func (s *Server) respondNegative(q query, rcode dnsmessage.RCode, tcp bool) ([]byte, error) {
+	soa, err := s.zoneSOA()
+	if err != nil {
+		return s.respond(q, rcode, nil, tcp)
+	}
+	return s.respondWith(q, rcode, nil, []dnsmessage.Resource{soa}, tcp)
+}
+
+func (s *Server) respondWith(q query, rcode dnsmessage.RCode, answers, authority []dnsmessage.Resource, tcp bool) ([]byte, error) {
+	msg, err := s.build(q, rcode, answers, authority, false)
 	if err != nil {
 		return nil, err
 	}
 	if !tcp && len(msg) > q.udpSize {
-		return s.build(q, rcode, nil, true)
+		return s.build(q, rcode, nil, nil, true)
 	}
 	return msg, nil
 }
 
-func (s *Server) build(q query, rcode dnsmessage.RCode, answers []dnsmessage.Resource, truncated bool) ([]byte, error) {
+// zoneSOA is the zone's SOA record. Its TTL and MINIMUM are TTL, which
+// is how long a resolver may cache a negative answer.
+func (s *Server) zoneSOA() (dnsmessage.Resource, error) {
+	apex, err := dnsmessage.NewName(s.zone + ".")
+	if err != nil {
+		return dnsmessage.Resource{}, err
+	}
+	ns, err := dnsmessage.NewName("hub." + s.zone + ".")
+	if err != nil {
+		return dnsmessage.Resource{}, err
+	}
+	mbox, err := dnsmessage.NewName("hostmaster." + s.zone + ".")
+	if err != nil {
+		return dnsmessage.Resource{}, err
+	}
+	ttl := uint32(TTL.Seconds())
+	return dnsmessage.Resource{
+		Header: dnsmessage.ResourceHeader{Name: apex, Type: dnsmessage.TypeSOA, Class: dnsmessage.ClassINET, TTL: ttl},
+		Body:   &dnsmessage.SOAResource{NS: ns, MBox: mbox, Serial: 1, Refresh: ttl, Retry: ttl, Expire: ttl, MinTTL: ttl},
+	}, nil
+}
+
+func (s *Server) build(q query, rcode dnsmessage.RCode, answers, authority []dnsmessage.Resource, truncated bool) ([]byte, error) {
 	h := dnsmessage.Header{
 		ID:                 q.header.ID,
 		Response:           true,
@@ -453,6 +492,20 @@ func (s *Server) build(q query, rcode dnsmessage.RCode, answers []dnsmessage.Res
 			}
 			if err != nil {
 				return nil, fmt.Errorf("dns: build answer: %w", err)
+			}
+		}
+	}
+	if len(authority) > 0 {
+		if err := b.StartAuthorities(); err != nil {
+			return nil, fmt.Errorf("dns: build: %w", err)
+		}
+		for _, rr := range authority {
+			body, ok := rr.Body.(*dnsmessage.SOAResource)
+			if !ok {
+				return nil, fmt.Errorf("dns: build authority: unsupported record type %v", rr.Header.Type)
+			}
+			if err := b.SOAResource(rr.Header, *body); err != nil {
+				return nil, fmt.Errorf("dns: build authority: %w", err)
 			}
 		}
 	}
