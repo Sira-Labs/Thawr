@@ -166,5 +166,13 @@ hosts (`docs/roadmap/sprints.md`, sprint 4); the tag replaces
 - The network lock closes the compromised-server key-substitution
   threat once a device has pinned the lock record; the first record a
   device sees is trusted unless it was enrolled with `--lock-signer`.
+- Windows: the client's control socket defaulted to
+  `C:\var\run\thawr\client.sock`, and its state directory
+  `%ProgramData%\Thawr` (with `node.key`) inherited an access list that
+  lets every local user read, so another user could stop the client,
+  rotate its key or read the private key. The socket now defaults to
+  `%ProgramData%\Thawr\client.sock`; the state directory and the socket
+  admit only SYSTEM, Administrators and the owner. Existing services
+  keep the old socket until `client uninstall` and install again.
 
 [0.1.0]: https://github.com/Sira-Labs/Thawr/compare/v0.1.0-rc3...main

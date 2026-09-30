@@ -174,6 +174,11 @@ func writeSecret(dir, name string, data []byte) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("client: create %s: %w", dir, err)
 	}
+	// Every write re-applies the access list, so a state directory from
+	// before it existed is fixed on the first save.
+	if err := restrictToAdmins(dir); err != nil {
+		return err
+	}
 	path := filepath.Join(dir, name)
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {

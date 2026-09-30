@@ -231,7 +231,7 @@ func installedSocket(ctx context.Context, m svc.Manager) (string, error) {
 			return args[i+1], nil
 		}
 	}
-	return client.DefaultSocket, nil
+	return client.DefaultSocket(), nil
 }
 
 // refuseHubHost rejects a client on a host that runs the server: both

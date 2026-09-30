@@ -32,3 +32,7 @@ func secureSocket(path string) error {
 	}
 	return nil
 }
+
+// restrictToAdmins is a no-op outside Windows: the state directory is
+// created 0700 and each secret file 0600.
+func restrictToAdmins(string) error { return nil }

@@ -682,6 +682,18 @@ tree that followed. One commit each, highest severity first.
       `main` points stdout, stderr and the standard handles (for panics)
       at it when running as a service; not rotated, like the launchd log.
       `svc.LogPath` is shared by the redirect and `Logs`.
+- [x] Windows client socket and state directory (changes the "same
+      socket path on every platform" line in ARCHITECTURE.md, agreed
+      with the owner): `DefaultSocket()` is `%ProgramData%\Thawr\client.sock`
+      on Windows. `restrictToAdmins` sets a protected access list
+      (SYSTEM, Administrators, owner rights) on the state directory at
+      every secret write, which fixes existing installs on the first
+      save, and on the socket file. The owner entry keeps non-elevated
+      test runs working and adds nobody, since owners may rewrite the
+      list anyway. Not covered: a non-admin who creates
+      `%ProgramData%\Thawr` before the first install owns it; and the
+      server's admin socket on Windows still sits under `C:\var\lib\thawr`
+      with an inherited list (`internal/server/perms_windows.go`).
 
 ## Phase 2 candidates (scheduled as specs 014–021 in `docs/roadmap/`)
 

@@ -30,7 +30,7 @@ func defaultClientSocket() string {
 	if s := os.Getenv(envClientSocket); s != "" {
 		return s
 	}
-	return client.DefaultSocket
+	return client.DefaultSocket()
 }
 
 // clientUpFlags are shared by `client up` and `client install`.

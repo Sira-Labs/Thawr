@@ -460,8 +460,8 @@ func TestInstalledSocket(t *testing.T) {
 	}{
 		{[]string{"client", "up", "--socket", "/run/a.sock", "--dns", "on"}, "/run/a.sock"},
 		{[]string{"client", "up", "--socket=/run/b.sock"}, "/run/b.sock"},
-		{[]string{"client", "up"}, client.DefaultSocket},
-		{[]string{"client", "up", "--socket"}, client.DefaultSocket},
+		{[]string{"client", "up"}, client.DefaultSocket()},
+		{[]string{"client", "up", "--socket"}, client.DefaultSocket()},
 	}
 	for _, tc := range cases {
 		got, err := installedSocket(context.Background(), &fakeManager{args: tc.args})
