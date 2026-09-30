@@ -672,6 +672,12 @@ tree that followed. One commit each, highest severity first.
       README: the server host resolves no `.thawr` names, `dig` bypasses
       the macOS resolver file, phones from before the resolver need the
       DNS line added in the app.
+- [x] Windows service stop: the process reports Stopped before it exits
+      (`lifecycleContext` returns `func(error)`; the handler returns
+      once the work ended, with service exit code 1 on failure). Install
+      sets `SetRecoveryActionsOnNonCrashFailures`, so a failed run still
+      restarts. Found by reading the code; the handler is tested on the
+      windows-latest runner, not yet on a real installed service.
 
 ## Phase 2 candidates (scheduled as specs 014–021 in `docs/roadmap/`)
 

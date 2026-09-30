@@ -29,7 +29,8 @@ func (m *winsvc) connect() (*mgr.Mgr, error) {
 }
 
 // Install creates an auto-start service that restarts 2 s after a
-// failure. No file is written; the arguments live in the service entry.
+// failure: a crash, or a stop with a non-zero exit code. No file is
+// written; the arguments live in the service entry.
 func (m *winsvc) Install(_ context.Context, s Service) ([]string, error) {
 	if err := s.validate(); err != nil {
 		return nil, err
@@ -48,6 +49,11 @@ func (m *winsvc) Install(_ context.Context, s Service) ([]string, error) {
 	defer func() { _ = svcHandle.Close() }()
 	if err := svcHandle.SetRecoveryActions([]mgr.RecoveryAction{{Type: mgr.ServiceRestart, Delay: 2 * time.Second}}, 0); err != nil {
 		return nil, fmt.Errorf("svc: set recovery for %s: %w", s.Name, err)
+	}
+	// The binary reports Stopped with a non-zero exit code when its work
+	// fails; without this flag only a crash would trigger the restart.
+	if err := svcHandle.SetRecoveryActionsOnNonCrashFailures(true); err != nil {
+		return nil, fmt.Errorf("svc: set recovery on failure exit for %s: %w", s.Name, err)
 	}
 	m.opts.Logger.Info("windows service installed", "service", s.Name)
 	return nil, nil

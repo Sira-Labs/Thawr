@@ -143,6 +143,12 @@ hosts (`docs/roadmap/sprints.md`, sprint 4); the tag replaces
   once that entry expires.
 - `add-mobile` (CLI and UI) warns when the hub resolver has no upstream,
   which leaves the phone with only `.thawr` names while the tunnel is up.
+- Windows: `thawr client down` on the installed service stuck. The
+  process exited while the service control manager still saw it
+  running, which counts as a crash, so the manager restarted it after
+  2 s. The service now reports Stopped first, with a non-zero exit code
+  only when the client or server failed; new installs restart on that
+  code (existing ones: `client uninstall`, then install again).
 
 ### Security
 
