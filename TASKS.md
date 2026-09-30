@@ -708,10 +708,15 @@ tree that followed. One commit each, highest severity first.
       uniquely named one (`os.CreateTemp`), so a planted `*.tmp` cannot
       pass its access list on through the rename and concurrent writers
       of one file never share it. An access list already in place is
-      left alone, so only the first save walks the directory. Not
-      covered: the server's admin socket on Windows still sits under
-      `C:\var\lib\thawr` with an inherited list
-      (`internal/server/perms_windows.go`).
+      left alone, so only the first save walks the directory.
+- [x] Windows server: `data_dir` (holding `server.key`, the TLS key and
+      the database) and the admin socket (full admin without a login)
+      kept the inherited access list of `C:\`, which lets every local
+      user create and read. `secureDataDir` runs `fsperm.RestrictToAdmins`
+      on every start, also on a new directory, and `secureSocket` on the
+      admin socket; `writeSecretFile` uses a fresh `os.CreateTemp` file.
+      The default path stays `C:\var\lib\thawr`: moving it would leave
+      an existing server's keys and database behind.
 
 ## Phase 2 candidates (scheduled as specs 014–021 in `docs/roadmap/`)
 

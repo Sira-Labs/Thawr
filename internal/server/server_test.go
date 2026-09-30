@@ -609,9 +609,9 @@ func TestAuditOverAdminSocket(t *testing.T) {
 		t.Errorf("user.create entry: %+v", entries)
 	}
 	waitFor(t, func() bool { return len(list("?actor=old")) == 0 })
-	if !strings.Contains(h.logs.String(), "audit: pruned old entries") {
-		t.Error("prune not logged")
-	}
+	// The pruner logs after its delete commits, so the rows can be gone
+	// before the line is written.
+	waitFor(t, func() bool { return strings.Contains(h.logs.String(), "audit: pruned old entries") })
 	if got := list(""); len(got) < 2 {
 		t.Errorf("recent entries pruned: %+v", got)
 	}

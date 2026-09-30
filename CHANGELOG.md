@@ -179,5 +179,11 @@ hosts (`docs/roadmap/sprints.md`, sprint 4); the tag replaces
   become the owner of the state directory, so one a standard user
   created beforehand is taken back. Existing services keep the old
   socket until `client uninstall` and install again.
+- Windows server: `data_dir` (default `C:\var\lib\thawr`, holding the
+  server keys and the database) and the admin socket inherited an
+  access list that lets every local user read, and the admin socket
+  grants full admin. The server now makes Administrators the owner of
+  `data_dir` on every start and limits it and the admin socket to
+  SYSTEM, Administrators and the owner.
 
 [0.1.0]: https://github.com/Sira-Labs/Thawr/compare/v0.1.0-rc3...main
