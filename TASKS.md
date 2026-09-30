@@ -681,7 +681,15 @@ tree that followed. One commit each, highest severity first.
 - [x] Windows service output goes to `%ProgramData%\Thawr\logs\<service>.log`:
       `main` points stdout, stderr and the standard handles (for panics)
       at it when running as a service; not rotated, like the launchd log.
-      `svc.LogPath` is shared by the redirect and `Logs`.
+      `svc.LogPath` is shared by the redirect and `Logs`. The file is
+      opened through `fsperm.OpenLog`, which secures `%ProgramData%\Thawr`
+      and `logs` first and refuses a link or a file with a second name
+      (checked on the open handle): as SYSTEM the service must not
+      append through a link a standard user planted. The owner and
+      access-list code moved from `internal/client` to `internal/fsperm`
+      for that; socket files are secured through a handle opened with
+      `FILE_FLAG_OPEN_REPARSE_POINT`, and a socket that cannot be
+      secured is no longer served (it was a warning).
 - [x] Windows client socket and state directory (changes the "same
       socket path on every platform" line in ARCHITECTURE.md, agreed
       with the owner): `DefaultSocket()` is `%ProgramData%\Thawr\client.sock`

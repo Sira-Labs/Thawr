@@ -95,6 +95,7 @@ flowchart TD
 | `internal/server` | Compose the server: data dir, store, server key, TLS, hub interface, policy, listeners; startup order, readiness, reload, shutdown | `New(cfg, Deps)`, `Run(ctx, reload)`, `Check()`, `Status(ctx)` | `internal/config`, `internal/store`, `internal/wg`, `internal/control`, `internal/api`, `web` |
 | `web` | Static admin UI, embedded | `embed.FS` | nothing |
 | `internal/svc` | Register the binary as a system service: render systemd units and launchd plists, drive `systemctl`/`launchctl` through an injected runner, create Windows services via x/sys | `New(Options) (Manager, error)`, `Manager.Install/Start/Stop/Uninstall/Status/Logs`, `RenderSystemdUnit`, `RenderLaunchdPlist` | `golang.org/x/sys/windows/svc` |
+| `internal/fsperm` | Secure what holds secrets or is written by a privileged service on Windows: Administrators as owner, an access list for SYSTEM, Administrators and the owner, links refused; no-op elsewhere | `RestrictToAdmins(path)`, `OpenLog(root, path)` (Windows) | `golang.org/x/sys/windows` |
 | `internal/dns` | Serve the `thawr` zone from an injected `Source` (A and PTR, NXDOMAIN, REFUSED or forwarding outside the zone), and route the zone to the resolver per platform | `NewServer(Options)`, `Server.Handle/Serve`, `Listen`, `Source`, `Registrar`, `NewRegistrar(RegistrarOptions)` | `golang.org/x/net/dns/dnsmessage` |
 | `cmd/thawr` | Flags, config, dependency wiring, signal handling, install commands | `main` | all of the above |
 

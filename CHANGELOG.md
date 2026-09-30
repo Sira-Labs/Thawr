@@ -152,7 +152,10 @@ hosts (`docs/roadmap/sprints.md`, sprint 4); the tag replaces
 - Windows: a service's output was lost, and the `logs:` hint printed
   `sc query`, which shows only its state. The server and client
   services now write to `%ProgramData%\Thawr\logs\<service>.log`
-  (panics included), and the hint follows that file.
+  (panics included), and the hint follows that file. The folder is
+  secured like the state directory before the file is opened, and a
+  planted link or second name is refused, so the service never writes
+  through someone else's link; reading the log takes an elevated shell.
 
 ### Security
 

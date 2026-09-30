@@ -63,6 +63,7 @@ internal/config/    YAML loading, validation, defaults
 internal/client/    device side: state dir, TLS pinning, enrollment, sync daemon, local socket API
 internal/server/    composes the server: bootstrap order, readiness, reload, shutdown
 internal/svc/       service manager adapters: systemd units, launchd plists, Windows services
+internal/fsperm/    Windows owner and access lists for secret and service-written paths (no-op elsewhere)
 web/                admin UI: plain HTML/JS, embedded via embed.FS
 site/               public product page: one static HTML file, no build; not embedded in the binary
 docs/               vision, architecture, ADRs, threat model, specs

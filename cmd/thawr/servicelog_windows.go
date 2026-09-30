@@ -8,13 +8,15 @@ import (
 	"golang.org/x/sys/windows"
 	winsvc "golang.org/x/sys/windows/svc"
 
+	"github.com/sira-labs/thawr/internal/fsperm"
 	"github.com/sira-labs/thawr/internal/svc"
 )
 
 // redirectServiceOutput sends stdout and stderr to the service's log
 // file when this process runs as a Windows service: the control manager
 // keeps no output, so log lines, the final error and a panic would be
-// lost. The file is appended to and not rotated, like the launchd log.
+// lost. The file is appended to and not rotated, like the launchd log,
+// and opened through fsperm.OpenLog, which refuses a planted link.
 func redirectServiceOutput(args []string) error {
 	isService, err := winsvc.IsWindowsService()
 	if err != nil || !isService {
@@ -25,10 +27,9 @@ func redirectServiceOutput(args []string) error {
 		return nil
 	}
 	path := svc.LogPath(name)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil { //nolint:gosec // logs hold no secrets and are meant to be read
-		return fmt.Errorf("create log directory: %w", err)
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644) //nolint:gosec // path is built from a fixed service name
+	// LogPath is <ProgramData>\Thawr\logs\<name>.log; the Thawr folder
+	// is secured as the root, since a standard user may have created it.
+	f, err := fsperm.OpenLog(filepath.Dir(filepath.Dir(path)), path)
 	if err != nil {
 		return fmt.Errorf("open service log: %w", err)
 	}
