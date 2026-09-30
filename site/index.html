@@ -192,6 +192,8 @@ section { padding-block: clamp(56px, 9vw, 104px); }
 .os.me .tag { display: block; }
 .dl { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 3px; color: var(--fg); text-decoration: none; background: var(--bg); transition: border-color .2s, transform .2s; }
 .dl:hover { border-color: var(--accent); transform: translateX(3px); }
+.dl.pick { border-color: var(--accent); }
+.os .hint { margin: 0; color: var(--muted); font-size: 0.82rem; line-height: 1.45; }
 .dl b { font-weight: 600; }
 .dl small { grid-column: 1; color: var(--muted); font: 400 0.72rem/1.3 var(--mono); overflow-wrap: anywhere; }
 .dl span { grid-row: 1 / span 2; grid-column: 2; font: 500 0.78rem/1 var(--mono); color: var(--accent); }
@@ -337,7 +339,7 @@ footer a:hover { color: var(--fg); }
         <a class="btn" id="cta-main" href="#download">Download</a>
         <a class="btn ghost" href="https://github.com/Sira-Labs/Thawr">View on GitHub</a>
       </div>
-      <p class="meta"><span><b data-tag>v0.1.0-rc6</b> release candidate</span><span>Apache-2.0</span><span>Linux · macOS · Windows</span></p>
+      <p class="meta"><span><b data-tag>v0.1.0-rc7</b> release candidate</span><span>Apache-2.0</span><span>Linux · macOS · Windows</span></p>
     </div>
     <div class="art" aria-hidden="true">
       <svg id="rosette" viewBox="-260 -260 520 520" focusable="false">
@@ -505,31 +507,32 @@ Filter: 3 rules · 0 dropped (last 5 min)
   <div class="wrap">
     <div class="head">
       <p class="eyebrow">Download</p>
-      <h2>Get <span data-tag>v0.1.0-rc6</span> for your system.</h2>
+      <h2>Get <span data-tag>v0.1.0-rc7</span> for your system.</h2>
       <p>The <code>thawr</code> binary is the same on every machine. What differs is the subcommand you install: <code>server</code> on the host, <code>client</code> everywhere else. This is a release candidate; <code>v0.1.0</code> follows once the manual checklists have passed on real hosts.</p>
     </div>
     <div class="dl-grid">
       <div class="os" data-os="darwin">
         <span class="tag">Your system</span>
         <h3>macOS</h3>
-        <a class="dl" data-key="darwin_arm64" href="https://github.com/Sira-Labs/Thawr/releases/download/v0.1.0-rc6/thawr_v0.1.0-rc6_darwin_arm64.tar.gz"><b>Apple silicon</b><span>7.9 MB</span><small>thawr_v0.1.0-rc6_darwin_arm64.tar.gz</small></a>
-        <a class="dl" data-key="darwin_amd64" href="https://github.com/Sira-Labs/Thawr/releases/download/v0.1.0-rc6/thawr_v0.1.0-rc6_darwin_amd64.tar.gz"><b>Intel</b><span>8.4 MB</span><small>thawr_v0.1.0-rc6_darwin_amd64.tar.gz</small></a>
+        <a class="dl" data-key="darwin_arm64" href="https://github.com/Sira-Labs/Thawr/releases/download/v0.1.0-rc7/thawr_v0.1.0-rc7_darwin_arm64.tar.gz"><b>Apple silicon</b><span>7.9 MB</span><small>thawr_v0.1.0-rc7_darwin_arm64.tar.gz</small></a>
+        <a class="dl" data-key="darwin_amd64" href="https://github.com/Sira-Labs/Thawr/releases/download/v0.1.0-rc7/thawr_v0.1.0-rc7_darwin_amd64.tar.gz"><b>Intel</b><span>8.4 MB</span><small>thawr_v0.1.0-rc7_darwin_amd64.tar.gz</small></a>
+        <p class="hint">Not sure which? Apple menu &rarr; About This Mac: &ldquo;Chip: Apple M&hellip;&rdquo; is Apple silicon, &ldquo;Processor: Intel&rdquo; is Intel.</p>
       </div>
       <div class="os" data-os="linux">
         <span class="tag">Your system</span>
         <h3>Linux</h3>
-        <a class="dl" data-key="linux_amd64" href="https://github.com/Sira-Labs/Thawr/releases/download/v0.1.0-rc6/thawr_v0.1.0-rc6_linux_amd64.tar.gz"><b>x86-64</b><span>8.7 MB</span><small>thawr_v0.1.0-rc6_linux_amd64.tar.gz</small></a>
-        <a class="dl" data-key="linux_arm64" href="https://github.com/Sira-Labs/Thawr/releases/download/v0.1.0-rc6/thawr_v0.1.0-rc6_linux_arm64.tar.gz"><b>ARM64</b><span>8.0 MB</span><small>thawr_v0.1.0-rc6_linux_arm64.tar.gz</small></a>
+        <a class="dl" data-key="linux_amd64" href="https://github.com/Sira-Labs/Thawr/releases/download/v0.1.0-rc7/thawr_v0.1.0-rc7_linux_amd64.tar.gz"><b>x86-64</b><span>8.7 MB</span><small>thawr_v0.1.0-rc7_linux_amd64.tar.gz</small></a>
+        <a class="dl" data-key="linux_arm64" href="https://github.com/Sira-Labs/Thawr/releases/download/v0.1.0-rc7/thawr_v0.1.0-rc7_linux_arm64.tar.gz"><b>ARM64</b><span>8.0 MB</span><small>thawr_v0.1.0-rc7_linux_arm64.tar.gz</small></a>
       </div>
       <div class="os" data-os="windows">
         <span class="tag">Your system</span>
         <h3>Windows</h3>
-        <a class="dl" data-key="windows_amd64" href="https://github.com/Sira-Labs/Thawr/releases/download/v0.1.0-rc6/thawr_v0.1.0-rc6_windows_amd64.zip"><b>x86-64</b><span>8.5 MB</span><small>thawr_v0.1.0-rc6_windows_amd64.zip</small></a>
+        <a class="dl" data-key="windows_amd64" href="https://github.com/Sira-Labs/Thawr/releases/download/v0.1.0-rc7/thawr_v0.1.0-rc7_windows_amd64.zip"><b>x86-64</b><span>8.5 MB</span><small>thawr_v0.1.0-rc7_windows_amd64.zip</small></a>
       </div>
     </div>
     <p class="rel">
-      <a id="l-sums" href="https://github.com/Sira-Labs/Thawr/releases/download/v0.1.0-rc6/SHA256SUMS">SHA256SUMS</a>
-      <a id="l-brew" href="https://github.com/Sira-Labs/Thawr/releases/download/v0.1.0-rc6/thawr.rb">Homebrew formula (thawr.rb)</a>
+      <a id="l-sums" href="https://github.com/Sira-Labs/Thawr/releases/download/v0.1.0-rc7/SHA256SUMS">SHA256SUMS</a>
+      <a id="l-brew" href="https://github.com/Sira-Labs/Thawr/releases/download/v0.1.0-rc7/thawr.rb">Homebrew formula (thawr.rb)</a>
       <a id="l-rel" href="https://github.com/Sira-Labs/Thawr/releases">All releases</a>
     </p>
     <div class="verify">
@@ -541,11 +544,11 @@ Filter: 3 rules · 0 dropped (last 5 min)
         <button type="button" data-key="darwin_amd64" aria-pressed="false">macOS Intel</button>
         <button type="button" data-key="windows_amd64" aria-pressed="false">Windows</button>
       </div>
-      <div class="code"><pre id="verify">curl -LO https://github.com/Sira-Labs/Thawr/releases/download/v0.1.0-rc6/thawr_v0.1.0-rc6_linux_amd64.tar.gz
-curl -LO https://github.com/Sira-Labs/Thawr/releases/download/v0.1.0-rc6/SHA256SUMS
+      <div class="code"><pre id="verify">curl -LO https://github.com/Sira-Labs/Thawr/releases/download/v0.1.0-rc7/thawr_v0.1.0-rc7_linux_amd64.tar.gz
+curl -LO https://github.com/Sira-Labs/Thawr/releases/download/v0.1.0-rc7/SHA256SUMS
 sha256sum -c SHA256SUMS --ignore-missing
-tar xzf thawr_v0.1.0-rc6_linux_amd64.tar.gz
-sudo install -m 0755 thawr_v0.1.0-rc6_linux_amd64/thawr /usr/local/bin/thawr
+tar xzf thawr_v0.1.0-rc7_linux_amd64.tar.gz
+sudo install -m 0755 thawr_v0.1.0-rc7_linux_amd64/thawr /usr/local/bin/thawr
 thawr version</pre><button class="copy" type="button">Copy</button></div>
       <p class="note">Releases are built by CI from a tag, reproducibly, and ship with checksums. Phones do not need this download: they use the official WireGuard app with a QR code from the server.</p>
     </div>
@@ -697,7 +700,7 @@ thawr version</pre><button class="copy" type="button">Copy</button></div>
 
   // Downloads
   var verify = document.getElementById("verify"), tabs = document.getElementById("tabs");
-  var state = { tag: "v0.1.0-rc6", key: "linux_amd64" };
+  var state = { tag: "v0.1.0-rc7", key: "linux_amd64" };
   var BASE = "https://github.com/" + REPO + "/releases/download/";
   var LABEL = { linux_amd64: "linux_amd64", linux_arm64: "linux_arm64", darwin_arm64: "darwin_arm64", darwin_amd64: "darwin_amd64", windows_amd64: "windows_amd64" };
 
@@ -728,29 +731,63 @@ thawr version</pre><button class="copy" type="button">Copy</button></div>
     b.addEventListener("click", function () { showVerify(b.getAttribute("data-key")); });
   });
 
-  function detect() {
+  // The OS, from the user agent. A Mac is only "darwin": browsers report
+  // "MacIntel" on Apple silicon too, so the CPU is found by macArch().
+  function detectOS() {
     var s = ((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "") + " " + (navigator.userAgent || "");
     s = s.toLowerCase();
     if (/android|iphone|ipad|ipod/.test(s)) return null;
     if (/windows|win32|win64/.test(s)) return "windows_amd64";
-    if (/mac/.test(s)) return "darwin_arm64";
+    if (/mac/.test(s)) return "darwin";
     if (/linux|x11|cros/.test(s)) return /aarch64|arm/.test(s) ? "linux_arm64" : "linux_amd64";
     return null;
   }
+  // The Mac's CPU, or null when the browser does not tell. Chromium
+  // reports the architecture and Firefox names the GPU (Apple M… or
+  // Intel, AMD); Safari hides both, and then the visitor chooses.
+  function macArch() {
+    function fromGL() {
+      try {
+        var gl = document.createElement("canvas").getContext("webgl");
+        if (!gl) return null;
+        var ext = gl.getExtension("WEBGL_debug_renderer_info");
+        var r = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) || "").toLowerCase() : "";
+        if (/apple m\d/.test(r)) return "darwin_arm64";
+        if (/intel|amd|radeon|nvidia|geforce/.test(r)) return "darwin_amd64";
+      } catch (e) {}
+      return null;
+    }
+    var uad = navigator.userAgentData;
+    if (uad && uad.getHighEntropyValues) {
+      return uad.getHighEntropyValues(["architecture"]).then(function (v) {
+        if (v.architecture === "arm") return "darwin_arm64";
+        if (v.architecture === "x86") return "darwin_amd64";
+        return fromGL();
+      }, fromGL);
+    }
+    return Promise.resolve(fromGL());
+  }
+  var detected = null;
   function applyDetected(key) {
     if (!key) return;
+    detected = key;
     var card = document.querySelector('.os[data-os="' + key.split("_")[0] + '"]');
     if (card) card.classList.add("me");
-    var a = document.querySelector('.dl[data-key="' + key + '"]');
+    Array.prototype.forEach.call(document.querySelectorAll(".dl"), function (d) { d.classList.toggle("pick", d.getAttribute("data-key") === key); });
     var cta = document.getElementById("cta-main");
-    if (a && cta) {
-      cta.href = a.href;
-      var os = { darwin: "macOS", linux: "Linux", windows: "Windows" }[key.split("_")[0]];
-      cta.textContent = "Download for " + os;
+    var os = { darwin: "macOS", linux: "Linux", windows: "Windows" }[key.split("_")[0]];
+    var a = document.querySelector('.dl[data-key="' + key + '"]');
+    if (cta) {
+      // A Mac whose CPU is unknown gets the choice, not a guess.
+      cta.href = a ? a.href : "#download";
+      cta.textContent = a ? "Download for " + os + (key === "darwin_amd64" ? " (Intel)" : key === "darwin_arm64" ? " (Apple silicon)" : "") : "Download for " + os;
     }
-    showVerify(key);
+    // An unknown Mac still gets macOS commands; the tabs switch them.
+    showVerify(a ? key : key + "_arm64");
   }
-  applyDetected(detect());
+  var os = detectOS();
+  applyDetected(os);
+  if (os === "darwin") macArch().then(function (key) { if (key) applyDetected(key); }, function () {});
 
   function fmt(n) { return (n / 1e6).toFixed(1) + " MB"; }
   function applyRelease(rel) {
@@ -773,8 +810,8 @@ thawr version</pre><button class="copy" type="button">Copy</button></div>
     Array.prototype.forEach.call(document.querySelectorAll("[data-tag]"), function (n) { n.textContent = tag; });
     document.getElementById("l-sums").href = BASE + tag + "/SHA256SUMS";
     document.getElementById("l-brew").href = BASE + tag + "/thawr.rb";
-    var hero = document.getElementById("cta-main"), det = detect();
-    if (det) { var d = document.querySelector('.dl[data-key="' + det + '"]'); if (d && hero) hero.href = d.href; }
+    var hero = document.getElementById("cta-main");
+    if (detected) { var d = document.querySelector('.dl[data-key="' + detected + '"]'); if (d && hero) hero.href = d.href; }
     showVerify(state.key);
   }
   // Newest published release, pre-releases included. Falls back silently to the links above.
