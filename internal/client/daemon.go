@@ -1097,8 +1097,11 @@ func (d *Daemon) listenLocal(ctx context.Context) (*http.Server, net.Listener, e
 	if err != nil {
 		return nil, nil, fmt.Errorf("client: listen %s: %w", d.opts.Socket, err)
 	}
+	// The local API has no authentication of its own; a socket that could
+	// not be restricted is not served.
 	if err := secureSocket(d.opts.Socket); err != nil {
-		d.log.Warn("socket permissions", "err", err)
+		_ = ln.Close()
+		return nil, nil, fmt.Errorf("client: socket permissions: %w", err)
 	}
 	srv := &http.Server{Handler: d.localHandler(), ReadHeaderTimeout: 5 * time.Second}
 	return srv, ln, nil
