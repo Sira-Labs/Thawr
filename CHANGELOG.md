@@ -149,6 +149,10 @@ hosts (`docs/roadmap/sprints.md`, sprint 4); the tag replaces
   2 s. The service now reports Stopped first, with a non-zero exit code
   only when the client or server failed; new installs restart on that
   code (existing ones: `client uninstall`, then install again).
+- Windows: a service's output was lost, and the `logs:` hint printed
+  `sc query`, which shows only its state. The server and client
+  services now write to `%ProgramData%\Thawr\logs\<service>.log`
+  (panics included), and the hint follows that file.
 
 ### Security
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -171,4 +173,17 @@ func (m *winsvc) Args(_ context.Context, name string) ([]string, error) {
 	return argv[1:], nil
 }
 
-func (m *winsvc) Logs(name string) string { return "sc query " + name }
+// Logs follows the log file the service writes; see LogPath.
+func (m *winsvc) Logs(name string) string {
+	return `powershell Get-Content -Wait -Tail 50 "` + LogPath(name) + `"`
+}
+
+// LogPath is where a service registered under name writes its output:
+// the control manager keeps no output of a service process.
+func LogPath(name string) string {
+	base := os.Getenv("ProgramData")
+	if base == "" {
+		base = `C:\ProgramData`
+	}
+	return filepath.Join(base, "Thawr", "logs", name+".log")
+}

@@ -3,24 +3,27 @@ package main
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
-	"golang.org/x/sys/windows/svc"
+	winsvc "golang.org/x/sys/windows/svc"
+
+	"github.com/sira-labs/thawr/internal/svc"
 )
 
 // runHandler starts Execute and consumes its StartPending and Running
 // reports.
-func runHandler(t *testing.T, h *serviceHandler) (chan svc.ChangeRequest, chan svc.Status, chan uint32) {
+func runHandler(t *testing.T, h *serviceHandler) (chan winsvc.ChangeRequest, chan winsvc.Status, chan uint32) {
 	t.Helper()
-	requests := make(chan svc.ChangeRequest)
-	status := make(chan svc.Status, 8)
+	requests := make(chan winsvc.ChangeRequest)
+	status := make(chan winsvc.Status, 8)
 	exit := make(chan uint32, 1)
 	go func() {
 		_, code := h.Execute(nil, requests, status)
 		exit <- code
 	}()
-	for _, want := range []svc.State{svc.StartPending, svc.Running} {
+	for _, want := range []winsvc.State{winsvc.StartPending, winsvc.Running} {
 		if got := (<-status).State; got != want {
 			t.Fatalf("state %v, want %v", got, want)
 		}
@@ -57,8 +60,8 @@ func TestServiceHandlerStopWaitsForWork(t *testing.T) {
 	h := newServiceHandler(cancel)
 	requests, status, exit := runHandler(t, h)
 
-	requests <- svc.ChangeRequest{Cmd: svc.Stop}
-	if got := (<-status).State; got != svc.StopPending {
+	requests <- winsvc.ChangeRequest{Cmd: winsvc.Stop}
+	if got := (<-status).State; got != winsvc.StopPending {
 		t.Fatalf("state after stop %v, want StopPending", got)
 	}
 	select {
@@ -71,9 +74,9 @@ func TestServiceHandlerStopWaitsForWork(t *testing.T) {
 		t.Fatal("handler reported Stopped before the work ended")
 	default:
 	}
-	cur := svc.Status{State: svc.StopPending}
-	requests <- svc.ChangeRequest{Cmd: svc.Interrogate, CurrentStatus: cur}
-	if got := <-status; got.State != svc.StopPending {
+	cur := winsvc.Status{State: winsvc.StopPending}
+	requests <- winsvc.ChangeRequest{Cmd: winsvc.Interrogate, CurrentStatus: cur}
+	if got := <-status; got.State != winsvc.StopPending {
 		t.Errorf("interrogate while stopping: %v", got.State)
 	}
 	h.finish(0)
@@ -84,5 +87,16 @@ func TestServiceHandlerStopWaitsForWork(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("handler did not return after the work ended")
+	}
+}
+
+func TestServiceNameFor(t *testing.T) {
+	for args, want := range map[string]string{"server --config c.yaml": serviceServer, "client up --dns on": serviceClient, "admin peer list": "", "": ""} {
+		if got := serviceNameFor(strings.Fields(args)); got != want {
+			t.Errorf("serviceNameFor(%q) = %q, want %q", args, got, want)
+		}
+	}
+	if p := svc.LogPath(serviceClient); !strings.HasSuffix(p, `\Thawr\logs\thawr-client.log`) {
+		t.Errorf("log path %q", p)
 	}
 }

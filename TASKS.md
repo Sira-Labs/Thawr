@@ -678,6 +678,10 @@ tree that followed. One commit each, highest severity first.
       sets `SetRecoveryActionsOnNonCrashFailures`, so a failed run still
       restarts. Found by reading the code; the handler is tested on the
       windows-latest runner, not yet on a real installed service.
+- [x] Windows service output goes to `%ProgramData%\Thawr\logs\<service>.log`:
+      `main` points stdout, stderr and the standard handles (for panics)
+      at it when running as a service; not rotated, like the launchd log.
+      `svc.LogPath` is shared by the redirect and `Logs`.
 
 ## Phase 2 candidates (scheduled as specs 014–021 in `docs/roadmap/`)
 
