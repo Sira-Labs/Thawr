@@ -657,7 +657,8 @@ tree that followed. One commit each, highest severity first.
       installed, it runs the same `CheckNotRunning` as `up` first.
       Both that and `client start` check the socket the service was
       installed with, read back from the unit, plist or SCM entry
-      (`svc.Manager.Args`), not one given on the command line.
+      (`svc.Manager.Args`), not one given on the command line. A socket
+      the check may not open stops the start instead of counting as free.
 - [x] The admin socket error tells "no socket here" (run on the server
       host) from "permission denied" (sudo). Left as is: the `thawr`
       group on admin.sock grants nothing while the socket sits in the
