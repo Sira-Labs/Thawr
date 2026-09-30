@@ -14,7 +14,8 @@ import (
 // it exists on the host.
 const adminGroup = "thawr"
 
-func checkDirPerms(dir string, fi os.FileInfo) error {
+// secureDataDir refuses a data_dir group or others may write to.
+func secureDataDir(dir string, fi os.FileInfo) error {
 	if fi.Mode().Perm()&0o022 != 0 {
 		return fmt.Errorf("server: data_dir %s is group- or world-writable (%o); fix with chmod 700", dir, fi.Mode().Perm())
 	}

@@ -140,7 +140,10 @@ generates its WireGuard key (`server.key`, 0600), generates a self-signed
 TLS certificate valid 10 years with SAN = public host
 (`tls/cert.pem`, `tls/key.pem`), brings up `thawr0` with `100.64.0.1/10`,
 starts STUN, relay, gRPC, REST, and prints the TLS fingerprint. Subsequent
-starts reuse everything. Spec 001.
+starts reuse everything. Spec 001. On Windows, where the mode bits mean
+nothing, every start makes Administrators the owner of `data_dir` and
+limits it, like the admin socket, to SYSTEM, Administrators and the
+owner (`internal/fsperm`).
 
 ### 4.2 Enrollment
 
