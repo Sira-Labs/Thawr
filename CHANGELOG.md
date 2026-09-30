@@ -172,7 +172,9 @@ hosts (`docs/roadmap/sprints.md`, sprint 4); the tag replaces
   lets every local user read, so another user could stop the client,
   rotate its key or read the private key. The socket now defaults to
   `%ProgramData%\Thawr\client.sock`; the state directory and the socket
-  admit only SYSTEM, Administrators and the owner. Existing services
-  keep the old socket until `client uninstall` and install again.
+  admit only SYSTEM, Administrators and the owner, and Administrators
+  become the owner of the state directory, so one a standard user
+  created beforehand is taken back. Existing services keep the old
+  socket until `client uninstall` and install again.
 
 [0.1.0]: https://github.com/Sira-Labs/Thawr/compare/v0.1.0-rc3...main

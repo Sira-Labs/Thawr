@@ -690,10 +690,17 @@ tree that followed. One commit each, highest severity first.
       every secret write, which fixes existing installs on the first
       save, and on the socket file. The owner entry keeps non-elevated
       test runs working and adds nobody, since owners may rewrite the
-      list anyway. Not covered: a non-admin who creates
-      `%ProgramData%\Thawr` before the first install owns it; and the
-      server's admin socket on Windows still sits under `C:\var\lib\thawr`
-      with an inherited list (`internal/server/perms_windows.go`).
+      list anyway. Before the access list, Administrators become the
+      owner (with the take-ownership privilege where the current owner
+      shut them out), since a standard user who created
+      `%ProgramData%\Thawr` before the first install would otherwise
+      keep owner rights; a non-elevated run accepts only SYSTEM,
+      Administrators or itself as owner. A link or junction is refused,
+      and a secret's temporary file is always created new (`O_EXCL`), so
+      a planted `*.tmp` cannot pass its access list on through the
+      rename. Not covered: the server's admin socket on Windows still
+      sits under `C:\var\lib\thawr` with an inherited list
+      (`internal/server/perms_windows.go`).
 
 ## Phase 2 candidates (scheduled as specs 014–021 in `docs/roadmap/`)
 

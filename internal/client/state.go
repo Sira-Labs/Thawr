@@ -181,8 +181,23 @@ func writeSecret(dir, name string, data []byte) error {
 	}
 	path := filepath.Join(dir, name)
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return fmt.Errorf("client: write %s: %w", name, err)
+	// The temporary file is always new: an existing one, left over or
+	// planted, would keep its own owner and access list through the
+	// rename.
+	if err := os.Remove(tmp); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("client: remove stale %s: %w", tmp, err)
+	}
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return fmt.Errorf("client: create %s: %w", tmp, err)
+	}
+	_, werr := f.Write(data)
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("client: write %s: %w", name, werr)
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
