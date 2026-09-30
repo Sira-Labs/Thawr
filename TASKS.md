@@ -696,10 +696,13 @@ tree that followed. One commit each, highest severity first.
       `%ProgramData%\Thawr` before the first install would otherwise
       keep owner rights; a non-elevated run accepts only SYSTEM,
       Administrators or itself as owner. A link or junction is refused,
-      and a secret's temporary file is always created new (`O_EXCL`), so
-      a planted `*.tmp` cannot pass its access list on through the
-      rename. Not covered: the server's admin socket on Windows still
-      sits under `C:\var\lib\thawr` with an inherited list
+      and a secret's temporary file is always a new,
+      uniquely named one (`os.CreateTemp`), so a planted `*.tmp` cannot
+      pass its access list on through the rename and concurrent writers
+      of one file never share it. An access list already in place is
+      left alone, so only the first save walks the directory. Not
+      covered: the server's admin socket on Windows still sits under
+      `C:\var\lib\thawr` with an inherited list
       (`internal/server/perms_windows.go`).
 
 ## Phase 2 candidates (scheduled as specs 014–021 in `docs/roadmap/`)

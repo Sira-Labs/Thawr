@@ -83,8 +83,8 @@ func TestStateDirOwner(t *testing.T) {
 }
 
 // TestPlantedTempFileNotReused: a state.json.tmp that allows everyone
-// is replaced, not written into, so state.json does not inherit its
-// access list.
+// is never written into (each save uses a new, uniquely named file), so
+// state.json does not inherit its access list.
 func TestPlantedTempFileNotReused(t *testing.T) {
 	dir := t.TempDir()
 	tmp := filepath.Join(dir, StateFile+".tmp")

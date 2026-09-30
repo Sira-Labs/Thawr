@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"golang.org/x/sys/windows"
 )
@@ -32,7 +33,16 @@ func restrictToAdmins(path string) error {
 	if fi.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 {
 		return fmt.Errorf("client: %s is a link or junction; refusing to keep secrets behind it", path)
 	}
-	if err := secureOwner(path); err != nil {
+	admins, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
+	if err != nil {
+		return fmt.Errorf("client: administrators SID: %w", err)
+	}
+	// Setting the list walks every file in a directory; a list already
+	// in place is left alone, so only the first save pays for it.
+	if alreadyRestricted(path, admins) {
+		return nil
+	}
+	if err := secureOwner(path, admins); err != nil {
 		return err
 	}
 	sd, err := windows.SecurityDescriptorFromString(adminsOnlySDDL)
@@ -56,15 +66,11 @@ func restrictToAdmins(path string) error {
 // first. A process that is not an administrator cannot, and then
 // accepts path only if SYSTEM, Administrators or the process's own user
 // already owns it.
-func secureOwner(path string) error {
-	admins, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
-	if err != nil {
-		return fmt.Errorf("client: administrators SID: %w", err)
-	}
+func secureOwner(path string, admins *windows.SID) error {
 	setOwner := func() error {
 		return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION, admins, nil, nil, nil)
 	}
-	err = setOwner()
+	err := setOwner()
 	if errors.Is(err, windows.ERROR_ACCESS_DENIED) && enablePrivilege("SeTakeOwnershipPrivilege") == nil {
 		err = setOwner()
 	}
@@ -75,6 +81,22 @@ func secureOwner(path string) error {
 		return fmt.Errorf("client: make administrators the owner of %s: %w", path, err)
 	}
 	return nil
+}
+
+// alreadyRestricted reports whether path is owned by Administrators and
+// carries exactly adminsOnlySDDL. Any doubt answers false, so the list
+// is set again.
+func alreadyRestricted(path string, admins *windows.SID) bool {
+	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
+		windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		return false
+	}
+	owner, _, err := sd.Owner()
+	if err != nil || !owner.Equals(admins) {
+		return false
+	}
+	return strings.TrimPrefix(sd.String(), "O:BA") == adminsOnlySDDL
 }
 
 // requireTrustedOwner accepts path when SYSTEM, Administrators or the

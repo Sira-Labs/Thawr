@@ -174,23 +174,21 @@ func writeSecret(dir, name string, data []byte) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("client: create %s: %w", dir, err)
 	}
-	// Every write re-applies the access list, so a state directory from
+	// Every write checks the access list, so a state directory from
 	// before it existed is fixed on the first save.
 	if err := restrictToAdmins(dir); err != nil {
 		return err
 	}
 	path := filepath.Join(dir, name)
-	tmp := path + ".tmp"
-	// The temporary file is always new: an existing one, left over or
-	// planted, would keep its own owner and access list through the
-	// rename.
-	if err := os.Remove(tmp); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("client: remove stale %s: %w", tmp, err)
-	}
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	// The temporary file is always new and uniquely named: an existing
+	// one, left over or planted, would keep its own owner and access
+	// list through the rename, and two writers of the same file must
+	// not share one.
+	f, err := os.CreateTemp(dir, name+".*.tmp")
 	if err != nil {
-		return fmt.Errorf("client: create %s: %w", tmp, err)
+		return fmt.Errorf("client: create temporary %s: %w", name, err)
 	}
+	tmp := f.Name()
 	_, werr := f.Write(data)
 	if cerr := f.Close(); werr == nil {
 		werr = cerr
