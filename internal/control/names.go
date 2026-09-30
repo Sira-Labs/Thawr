@@ -36,9 +36,15 @@ func SanitizeName(hostname string) string {
 	return name
 }
 
+// PeerRefs reports where the running policy selects a peer by name
+// (peer:<name>), empty when it does not. A name the policy selects
+// carries grants, so taking or giving it up changes who may reach what.
+type PeerRefs func(name string) []string
+
 // uniqueName returns base if free, else base-2, base-3, ... using one
-// query for all candidates.
-func uniqueName(ctx context.Context, peers *store.Peers, base string) (string, error) {
+// query for all candidates. A name reserved reports true for counts as
+// taken.
+func uniqueName(ctx context.Context, peers *store.Peers, base string, reserved func(string) bool) (string, error) {
 	taken, err := peers.NamesWithPrefix(ctx, base)
 	if err != nil {
 		return "", err
@@ -47,7 +53,8 @@ func uniqueName(ctx context.Context, peers *store.Peers, base string) (string, e
 	for _, n := range taken {
 		set[n] = true
 	}
-	if !set[base] {
+	free := func(n string) bool { return !set[n] && (reserved == nil || !reserved(n)) }
+	if free(base) {
 		return base, nil
 	}
 	for i := 2; i < 10000; i++ {
@@ -55,7 +62,7 @@ func uniqueName(ctx context.Context, peers *store.Peers, base string) (string, e
 		if len(candidate) > 63 {
 			candidate = base[:63-len("-"+strconv.Itoa(i))] + "-" + strconv.Itoa(i)
 		}
-		if !set[candidate] {
+		if free(candidate) {
 			return candidate, nil
 		}
 	}

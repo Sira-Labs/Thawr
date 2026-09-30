@@ -51,6 +51,10 @@ type Manager interface {
 	// not stop a running instance first.
 	Uninstall(ctx context.Context, name string) error
 	Status(ctx context.Context, name string) (State, error)
+	// Args returns the arguments the installed service passes to its
+	// binary, the binary itself not included, read back from the unit,
+	// plist or service entry.
+	Args(ctx context.Context, name string) ([]string, error)
 	// Logs is the command a user runs to follow the service's output.
 	Logs(name string) string
 }

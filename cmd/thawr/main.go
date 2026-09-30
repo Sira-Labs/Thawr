@@ -20,6 +20,7 @@ var (
 
 func main() {
 	if err := newRootCmd(os.Stdout, os.Stderr).ExecuteContext(context.Background()); err != nil {
+		err = permissionError(err)
 		fmt.Fprintln(os.Stderr, "thawr:", err)
 		var ee *exitError
 		if errors.As(err, &ee) {

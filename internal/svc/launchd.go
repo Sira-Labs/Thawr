@@ -1,10 +1,12 @@
 package svc
 
 import (
+	"bytes"
 	"context"
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -113,6 +115,25 @@ func (m *launchd) Status(ctx context.Context, name string) (State, error) {
 	return Stopped, nil
 }
 
+// Args reads ProgramArguments from the installed plist.
+func (m *launchd) Args(_ context.Context, name string) ([]string, error) {
+	if err := validName(name); err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(m.plistPath(name))
+	if err != nil {
+		return nil, fmt.Errorf("svc: read plist: %w", err)
+	}
+	argv, err := plistProgramArguments(data)
+	if err != nil {
+		return nil, fmt.Errorf("svc: plist %s: %w", name, err)
+	}
+	if len(argv) == 0 {
+		return nil, fmt.Errorf("svc: plist %s has an empty ProgramArguments array", name)
+	}
+	return argv[1:], nil
+}
+
 func (m *launchd) Logs(name string) string {
 	return "tail -f " + path.Join(launchdLogDir, name+".log")
 }
@@ -144,4 +165,51 @@ func xmlText(s string) string {
 	var b strings.Builder
 	_ = xml.EscapeText(&b, []byte(s))
 	return b.String()
+}
+
+// plistProgramArguments returns the strings of the array that follows
+// the ProgramArguments key in a plist.
+func plistProgramArguments(data []byte) ([]string, error) {
+	dec := xml.NewDecoder(bytes.NewReader(data))
+	var (
+		elem, lastKey string
+		inArgs        bool
+		args          []string
+	)
+	for {
+		tok, err := dec.Token()
+		if errors.Is(err, io.EOF) {
+			return nil, errors.New("no ProgramArguments array")
+		}
+		if err != nil {
+			return nil, err
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			elem = t.Name.Local
+			switch {
+			case elem == "key":
+				lastKey = ""
+			case elem == "array" && lastKey == "ProgramArguments":
+				inArgs, args = true, []string{}
+			case elem == "string" && inArgs:
+				args = append(args, "")
+			}
+		case xml.CharData:
+			switch {
+			case elem == "key":
+				lastKey += string(t)
+			case elem == "string" && inArgs:
+				args[len(args)-1] += string(t)
+			}
+		case xml.EndElement:
+			if t.Name.Local == "array" && inArgs {
+				return args, nil
+			}
+			if t.Name.Local != "key" {
+				lastKey = ""
+			}
+			elem = ""
+		}
+	}
 }

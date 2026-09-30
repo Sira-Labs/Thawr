@@ -238,7 +238,7 @@ func (d *Daemon) setLockRecord(ctx context.Context, client thawrv1.ControlClient
 // which lists them all.
 func (d *Daemon) LockInit(ctx context.Context) (LockResult, error) {
 	d.mu.Lock()
-	client, offered, rec, selfKey := d.client, d.offered, d.pins.Lock(), d.key.PublicKey().String()
+	client, offered, rec, selfKey, selfName := d.client, d.offered, d.pins.Lock(), d.key.PublicKey().String(), d.state.Name
 	d.mu.Unlock()
 	if client == nil {
 		return LockResult{}, errors.New("client: not connected to the server")
@@ -271,7 +271,7 @@ func (d *Daemon) LockInit(ctx context.Context) (LockResult, error) {
 	if err := add(lock.HubID, lock.HubID, offered.Hub.PublicKey); err != nil {
 		return LockResult{}, err
 	}
-	if err := add(d.state.PeerID, d.state.Name, selfKey); err != nil {
+	if err := add(d.state.PeerID, selfName, selfKey); err != nil {
 		return LockResult{}, err
 	}
 	for _, p := range offered.Peers {

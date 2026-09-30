@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"math"
 	"net"
@@ -193,11 +194,12 @@ type Daemon struct {
 	lockKey      lock.PrivateKey
 	lockRejected string
 	// advertise is what this device offers to route (from state),
-	// advertised what the server last reported about it, and exitNode
-	// the peer whose exit node this device uses (spec 013).
+	// advertised what the server last reported about it (spec 013).
+	// The exit-node choice lives in state.
 	advertise  []netip.Prefix
 	advertised []AdvertisedRoute
-	exitNode   string
+	// saveMu serialises writes of state.json (saveState).
+	saveMu     sync.Mutex
 	routesWarn sync.Once
 	// resyncNow ends the current sync stream so the next one carries
 	// fresh SyncRequest fields (a new lock key); resyncWanted tells the
@@ -291,7 +293,7 @@ func NewDaemon(opts DaemonOptions) (*Daemon, error) {
 		return nil, err
 	}
 	return &Daemon{opts: opts, log: log, state: st, overlay: overlay.Masked(), selfIP: selfIP, key: key, pins: pins, lockKey: lockKey,
-		instance: lk, advertise: advertise, exitNode: st.ExitNode,
+		instance: lk, advertise: advertise,
 		mapCh: make(chan NetMap, 16), paths: map[string]*peerPath{}, pathWake: make(chan struct{}, 1), relay: relay.NewClient(ro),
 		drops: newDropWindow(5 * time.Minute)}, nil
 }
@@ -329,8 +331,14 @@ var ErrAlreadyRunning = errors.New("client: another thawr client is already runn
 // socket. `client up` calls it before it touches the enrollment state
 // (--lock-signer, --advertise-routes); NewDaemon repeats it and then
 // takes the instance lock, which settles two clients starting together.
+// A socket this process may not open fails with a permission error: a
+// daemon may be behind it, and the caller could not run one anyway.
 func CheckNotRunning(socket string) error {
-	if socketBusy(socket) {
+	busy, err := socketBusy(socket)
+	switch {
+	case err != nil:
+		return fmt.Errorf("client: socket %s: %w", socket, err)
+	case busy:
 		return fmt.Errorf("%w on %s", ErrAlreadyRunning, socket)
 	}
 	return nil
@@ -338,15 +346,19 @@ func CheckNotRunning(socket string) error {
 
 // socketBusy reports whether something accepts connections on the
 // local socket. The file a dead daemon left behind refuses the
-// connection and is removed when the daemon listens.
-func socketBusy(socket string) bool {
+// connection and is removed when the daemon listens. A permission
+// failure is returned, not read as "nobody there".
+func socketBusy(socket string) (bool, error) {
 	d := net.Dialer{Timeout: time.Second}
 	c, err := d.Dial("unix", socket)
+	if errors.Is(err, fs.ErrPermission) {
+		return false, err
+	}
 	if err != nil {
-		return false
+		return false, nil
 	}
 	_ = c.Close()
-	return true
+	return true, nil
 }
 
 // freeListenPort returns port when nothing else listens on it, a random
@@ -631,7 +643,7 @@ func (d *Daemon) advertiseRoutes(ctx context.Context, client thawrv1.ControlClie
 	d.mu.Unlock()
 	for _, r := range advertised {
 		if !r.Approved {
-			d.log.Info("advertised route waits for approval", "prefix", r.Prefix, "hint", "thawr admin peer routes approve "+d.state.Name+" "+r.Prefix)
+			d.log.Info("advertised route waits for approval", "prefix", r.Prefix, "hint", "thawr admin peer routes approve "+d.selfName()+" "+r.Prefix)
 		}
 	}
 }
@@ -665,7 +677,9 @@ func (d *Daemon) reapply(ctx context.Context) error {
 func (d *Daemon) applyLocked(ctx context.Context, nm NetMap, cache bool) error {
 	now := d.opts.Now()
 	d.mu.Lock()
-	key, dev, prev, exitNode := d.key, d.dev, d.held, d.exitNode
+	renamedFrom, renamed := adoptSelfName(&d.state, nm)
+	exitMoved := followExitNode(&d.state, nm.Peers)
+	key, dev, prev, exitNode, newName := d.key, d.dev, d.held, d.state.ExitNodeID, d.state.Name
 	if nm.Advertised != nil {
 		d.advertised = nm.Advertised
 	}
@@ -694,6 +708,14 @@ func (d *Daemon) applyLocked(ctx context.Context, nm NetMap, cache bool) error {
 		d.offered, d.held, d.lockRejected = &offered, held, rejected
 	}
 	d.mu.Unlock()
+	if renamed {
+		d.log.Info("renamed by the server", "from", renamedFrom, "to", newName)
+	}
+	if exitMoved || renamed {
+		if serr := d.saveState(); serr != nil {
+			d.log.Warn("save state", "err", serr)
+		}
+	}
 	if err != nil {
 		return err
 	}
@@ -886,24 +908,23 @@ func (d *Daemon) SetExitNode(ctx context.Context, name string) (ExitNodeStatus, 
 	}
 	d.mu.Lock()
 	nm := d.netmap
+	id := ""
 	if name != "" {
-		found := false
 		if nm != nil {
 			for _, p := range nm.Peers {
 				if p.Name == name && p.ExitNode && !p.ViaHub {
-					found = true
+					id = p.ID
 				}
 			}
 		}
-		if !found {
+		if id == "" {
 			d.mu.Unlock()
 			return ExitNodeStatus{}, fmt.Errorf("%w: %s", ErrNotExitNode, name)
 		}
 	}
-	d.exitNode, d.state.ExitNode = name, name
-	st := d.state
+	d.state.ExitNode, d.state.ExitNodeID = name, id
 	d.mu.Unlock()
-	if err := SaveState(d.opts.StateDir, st); err != nil {
+	if err := d.saveState(); err != nil {
 		return ExitNodeStatus{}, err
 	}
 	if err := d.reapply(ctx); err != nil {
@@ -969,9 +990,29 @@ func (d *Daemon) RotateKey(ctx context.Context) error {
 	if signer != "" {
 		d.log.Info("key rotated and signed; other devices switch without a trust step", "key", wg.Fingerprint(newKey.PublicKey()))
 	} else {
-		d.log.Info("key rotated; other devices hold this peer until they trust the new key", "key", wg.Fingerprint(newKey.PublicKey()), "hint", "thawr client trust "+d.state.Name)
+		d.log.Info("key rotated; other devices hold this peer until they trust the new key", "key", wg.Fingerprint(newKey.PublicKey()), "hint", "thawr client trust "+d.selfName())
 	}
 	return nil
+}
+
+// saveState writes the current state. Saves are serialised and each one
+// takes its copy under saveMu, so a slower writer never replaces a newer
+// state with the older copy it took (a netmap that renames the device
+// racing an exit-node change, say).
+func (d *Daemon) saveState() error {
+	d.saveMu.Lock()
+	defer d.saveMu.Unlock()
+	d.mu.Lock()
+	st := d.state
+	d.mu.Unlock()
+	return SaveState(d.opts.StateDir, st)
+}
+
+// selfName is this device's current peer name.
+func (d *Daemon) selfName() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.state.Name
 }
 
 // warnSelfUnsigned logs once, while it holds, that other devices hold
@@ -982,7 +1023,7 @@ func (d *Daemon) warnSelfUnsigned() {
 	d.mu.Unlock()
 	if st.Enabled && !st.SelfSigned {
 		d.selfUnsignedWarn.Do(func() {
-			d.log.Warn("this device is not signed by the network lock; other devices hold it until a signer signs it", "hint", "thawr client lock sign "+d.state.Name)
+			d.log.Warn("this device is not signed by the network lock; other devices hold it until a signer signs it", "hint", "thawr client lock sign "+d.selfName())
 		})
 		return
 	}

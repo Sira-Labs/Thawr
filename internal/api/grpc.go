@@ -55,6 +55,10 @@ type HubInfo struct {
 	// DNS is the hub resolver phones are told to use; invalid when the
 	// server runs without one.
 	DNS netip.Addr
+	// DNSNoUpstream is set when the hub resolver found nowhere to send
+	// names outside the zone: a phone using it resolves only .thawr
+	// names while its tunnel is up.
+	DNSNoUpstream bool
 }
 
 // GRPCDeps are the collaborators of the Control service. Enroller and

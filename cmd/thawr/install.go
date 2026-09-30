@@ -67,7 +67,7 @@ func addInstallFlags(cmd *cobra.Command, f *installFlags) {
 
 func requireRoot(deps cliDeps) error {
 	if !deps.isRoot() {
-		return &exitError{code: exitConfigError, err: errors.New("run as root (sudo)")}
+		return &exitError{code: exitConfigError, err: errors.New("this command needs root; " + elevateHint())}
 	}
 	return nil
 }
@@ -133,8 +133,7 @@ func installService(ctx context.Context, w io.Writer, m svc.Manager, s svc.Servi
 		return err
 	}
 	if state != svc.Absent {
-		_, err := fmt.Fprintf(w, "%s is already installed (%s); run `thawr %s uninstall` first to change it\n", s.Name, state, strings.TrimPrefix(s.Name, "thawr-"))
-		return err
+		return startInstalled(ctx, w, m, s.Name, state, noStart, nil)
 	}
 	files, err := m.Install(ctx, s)
 	if err != nil {
@@ -154,6 +153,82 @@ func installService(ctx context.Context, w io.Writer, m svc.Manager, s svc.Servi
 	}
 	_, err = fmt.Fprintf(w, "%s started and enabled at boot\nlogs: %s\n", s.Name, m.Logs(s.Name))
 	return err
+}
+
+// startInstalled handles install on a machine where the service already
+// exists: a stopped one is started (unless --no-start), since that is
+// what running install again is usually for. Changing the service's
+// settings needs uninstall first. beforeStart, when set, may refuse the
+// start (a foreground client holding the socket).
+func startInstalled(ctx context.Context, w io.Writer, m svc.Manager, name string, state svc.State, noStart bool, beforeStart func() error) error {
+	cmd := strings.TrimPrefix(name, "thawr-")
+	if state == svc.Stopped && !noStart {
+		if beforeStart != nil {
+			if err := beforeStart(); err != nil {
+				return err
+			}
+		}
+		if err := m.Start(ctx, name); err != nil {
+			return fmt.Errorf("start %s: %w", name, err)
+		}
+		_, err := fmt.Fprintf(w, "%s was already installed and is started again; to change its settings, run `thawr %s uninstall` first\nlogs: %s\n", name, cmd, m.Logs(name))
+		return err
+	}
+	_, err := fmt.Fprintf(w, "%s is already installed (%s); to change its settings, run `thawr %s uninstall` first\n", name, state, cmd)
+	return err
+}
+
+// installedFlags are the client install flags an installed service
+// cannot take: the first ones write the enrollment state under it, the
+// rest are baked into the registered service definition.
+var installedFlags = []string{"server", "token", "fingerprint", "accept-fingerprint", "name", "lock-signer", "advertise-routes", "advertise-exit-node",
+	"interface", "dns", "log-level", "bin"}
+
+// refuseStateChange rejects install flags an installed client cannot
+// apply: install would otherwise report success and change nothing, or
+// change state.json under the running service.
+func refuseStateChange(cmd *cobra.Command) error {
+	for _, f := range installedFlags {
+		if cmd.Flags().Changed(f) {
+			return &exitError{code: exitConfigError, err: fmt.Errorf("%s is already installed; --%s cannot change it in place. Run `thawr client uninstall` first and install again, or `thawr client start` to start it as it is", serviceClient, f)}
+		}
+	}
+	return nil
+}
+
+// installedClientCheck refuses to start the installed client service
+// while a foreground `client up` holds the socket that service uses: it
+// would exit at once with "already running". The socket is read back
+// from the service definition, not taken from this command's flags.
+func installedClientCheck(ctx context.Context, m svc.Manager) func() error {
+	return func() error {
+		socket, err := installedSocket(ctx, m)
+		if err != nil {
+			return err
+		}
+		if err := client.CheckNotRunning(socket); errors.Is(err, client.ErrAlreadyRunning) {
+			return &exitError{code: exitConfigError, err: fmt.Errorf("%w; a foreground `thawr client up` is running: stop it (Ctrl-C or `sudo thawr client down`) first", err)}
+		}
+		return nil
+	}
+}
+
+// installedSocket is the --socket the installed client service runs
+// with, or the client default when its definition names none.
+func installedSocket(ctx context.Context, m svc.Manager) (string, error) {
+	args, err := m.Args(ctx, serviceClient)
+	if err != nil {
+		return "", fmt.Errorf("read the %s service definition: %w", serviceClient, err)
+	}
+	for i, a := range args {
+		if v, ok := strings.CutPrefix(a, "--socket="); ok {
+			return v, nil
+		}
+		if a == "--socket" && i+1 < len(args) {
+			return args[i+1], nil
+		}
+	}
+	return client.DefaultSocket, nil
 }
 
 // refuseHubHost rejects a client on a host that runs the server: both
@@ -344,6 +419,23 @@ Requires root.`,
 				return err
 			}
 			if err := validateDNSMode(upf.dnsMode); err != nil {
+				return err
+			}
+			// Nothing below may touch the state of a client that runs.
+			installed, err := m.Status(cmd.Context(), serviceClient)
+			if err != nil {
+				return err
+			}
+			if installed != svc.Absent {
+				if err := refuseStateChange(cmd); err != nil {
+					return err
+				}
+				return startInstalled(cmd.Context(), cmd.OutOrStdout(), m, serviceClient, installed, f.noStart, installedClientCheck(cmd.Context(), m))
+			}
+			if err := client.CheckNotRunning(socket); err != nil {
+				if errors.Is(err, client.ErrAlreadyRunning) {
+					return alreadyRunning(err)
+				}
 				return err
 			}
 			logger := server.NewLogger(logConfig(upf.logLevel), cmd.ErrOrStderr())

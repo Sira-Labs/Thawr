@@ -108,19 +108,33 @@ func newAdminPeerCmd(flags *adminFlags) *cobra.Command {
 			return renderPeerDetail(cmd.OutOrStdout(), d, time.Now())
 		},
 	}
+	var forceRename bool
 	rename := &cobra.Command{
 		Use:   "rename <name> <new-name>",
 		Short: "Rename a peer",
-		Args:  cobra.ExactArgs(2),
+		Long: `Renames a peer. The server refuses when the policy selects the peer
+as peer:<name>, since those grants would stop applying to it and pass
+to the next device that takes the name; change the policy first, then
+rename with --force.`,
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var p peerJSON
-			if err := newAdminClient(flags.socket).do(cmd.Context(), "PATCH", "/api/v1/peers/"+args[0], map[string]string{"name": args[1]}, &p); err != nil {
+			body := map[string]any{"name": args[1], "force": forceRename}
+			if err := newAdminClient(flags.socket).do(cmd.Context(), "PATCH", "/api/v1/peers/"+args[0], body, &p); err != nil {
 				return err
 			}
-			_, err := fmt.Fprintf(cmd.OutOrStdout(), "peer %s renamed to %s\n", args[0], p.Name)
-			return err
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "peer %s renamed to %s\n", args[0], p.Name); err != nil {
+				return err
+			}
+			if p.Signed != nil && !*p.Signed {
+				// Lock signatures cover the name (spec 012).
+				_, err := fmt.Fprintf(cmd.OutOrStdout(), "the network lock is on: other devices hold %s until a signer runs `thawr client lock sign %s`\n", p.Name, p.Name)
+				return err
+			}
+			return nil
 		},
 	}
+	rename.Flags().BoolVar(&forceRename, "force", false, "rename even though the policy selects the peer by name")
 	del := &cobra.Command{
 		Use:   "delete <name>",
 		Short: "Delete a peer; every client drops it on the next netmap",
@@ -143,6 +157,8 @@ type mobileJSON struct {
 	Config  string   `json:"config"`
 	QRSVG   string   `json:"qr_svg,omitempty"`
 	Warning string   `json:"warning"`
+	// DNSWarning is set when the phone will resolve only .thawr names.
+	DNSWarning string `json:"dns_warning,omitempty"`
 }
 
 func newAdminAddMobileCmd(flags *adminFlags) *cobra.Command {
@@ -189,7 +205,15 @@ phone's traffic (threat model T4).`,
 // printMobile prints the warning, the QR code and the config, or writes
 // the config to out.
 func printMobile(w io.Writer, m mobileJSON, out string, noQR bool) error {
-	if _, err := fmt.Fprintf(w, "Peer %s (%s) created for %s.\nWarning: %s\n\n", m.Peer.Name, m.Peer.IPv4, m.Peer.Owner, m.Warning); err != nil {
+	if _, err := fmt.Fprintf(w, "Peer %s (%s) created for %s.\nWarning: %s\n", m.Peer.Name, m.Peer.IPv4, m.Peer.Owner, m.Warning); err != nil {
+		return err
+	}
+	if m.DNSWarning != "" {
+		if _, err := fmt.Fprintf(w, "Warning: %s\n", m.DNSWarning); err != nil {
+			return err
+		}
+	}
+	if _, err := io.WriteString(w, "\n"); err != nil {
 		return err
 	}
 	if !noQR {

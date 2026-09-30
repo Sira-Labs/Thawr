@@ -96,9 +96,13 @@ Server, on a host with a public address (Linux with systemd, or macOS):
 
 ```
 sudo thawr server install --public-addr vpn.example.com
-thawr admin user create markus --role admin
-thawr admin token create --owner markus --kind human
+sudo thawr admin user create markus --role admin
+sudo thawr admin token create --owner markus --kind human
 ```
+
+`thawr admin` talks to the server over a local socket that only root
+can open, so every admin command runs on the server host with sudo
+(from a laptop: `ssh vpn.example.com sudo thawr admin …`).
 
 `server install` writes `/etc/thawr/server.yaml` with that one line,
 validates it, and registers `thawr-server` to start at boot
@@ -129,7 +133,8 @@ user thawr`) to run `client status` without sudo. `client status` shows
 in one table whether the control connection, the path to a peer or the
 policy is the problem (`--json` for scripts, validated by
 `docs/status.schema.json`; exit codes 0 connected, 1 server unreachable,
-2 usage, 3 not running):
+2 usage, 3 not running; without sudo or the group it says so and exits
+2 instead of reporting the client as not running):
 
 ```
 thawr 0.1.0 · alice-laptop 100.64.0.7 · server vpn.example.com:8443 connected (netmap #42, 3s ago)
@@ -143,6 +148,12 @@ hub           100.64.0.1    server   -       direct vpn.example.com:51820   25s 
 Filter: 3 rules · 0 dropped (last 5 min)
 ```
 
+The installed service is stopped with `sudo thawr client stop` and
+started with `sudo thawr client start`; it also starts at every boot.
+`sudo thawr client down` stops whichever client is running, the
+service included, and neither launchd nor systemd starts it again on
+their own, so `client start` is the way back after it.
+
 Every peer has a name: `ssh nas.thawr`, `curl http://build-box.thawr:8000`,
 `ping alice-laptop.thawr`. The client serves the `thawr` zone on its
 own overlay address from the netmap it already has, so names work
@@ -152,6 +163,11 @@ managed block in `/etc/hosts` where resolved is absent, a resolver file
 on macOS, an NRPT rule on Windows) and undoes that on `client down`.
 `--dns serve` keeps the resolver without touching the system
 configuration, `--dns off` disables it; `client status` shows which.
+The server host itself does not resolve `.thawr` names (it runs the
+hub, not a client): use peers' overlay addresses there, or ask the hub
+directly with `dig @100.64.0.1 <name>.thawr`. On macOS, `dig` and
+`nslookup` bypass the resolver file, so test names with `ping` or
+`curl`. `hub` is reserved for the server and no peer can take it.
 
 Phones join with the official WireGuard app: `thawr admin peer add-mobile
 --owner markus --name markus-phone` prints a QR code to scan (once; the
@@ -159,8 +175,12 @@ server keeps only the public key). The config points the phone at the
 hub's resolver, so names work there too; because the app then sends
 every DNS query through the tunnel, the server forwards anything
 outside `.thawr` to its own resolvers (`dns.upstream`, or the host's
-`/etc/resolv.conf`). A phone learns only the names of peers the policy
-lets it reach. Phone traffic goes through the
+`/etc/resolv.conf`); `add-mobile` warns when it found none, since the
+phone would then resolve only `.thawr` names. A phone learns only the
+names of peers the policy lets it reach. A phone added before the
+server ran the resolver has no DNS line: in the WireGuard app, edit the
+tunnel and set DNS servers to `100.64.0.1, thawr` (the hub address and
+the zone). Phone traffic goes through the
 server's hub, so the server can read it, unlike the end-to-end tunnels
 between laptops and servers; see the threat model.
 

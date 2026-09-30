@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/netip"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sira-labs/thawr/internal/lock"
@@ -25,6 +26,13 @@ type Registry struct {
 	tagAllowed TagAllowed
 	audit      *Auditor
 	lock       *LockService
+	peerRefs   PeerRefs
+}
+
+// WithPeerRefs makes Rename refuse to move a name the policy selects.
+func (r *Registry) WithPeerRefs(refs PeerRefs) *Registry {
+	r.peerRefs = refs
+	return r
 }
 
 // WithLock lets a signer vouch for its own key on rotation.
@@ -96,17 +104,28 @@ func (r *Registry) Get(ctx context.Context, by Principal, name string) (store.Pe
 	return p, err
 }
 
-// Rename changes a peer's name (admins only).
-func (r *Registry) Rename(ctx context.Context, by Principal, name, newName string) error {
+// Rename changes a peer's name (admins only). A name the policy selects
+// with peer:<name> is refused unless force is set: its grants would
+// silently stop applying to the peer and pass to the next device that
+// takes the name.
+func (r *Registry) Rename(ctx context.Context, by Principal, name, newName string, force bool) error {
 	if !by.IsAdmin() {
 		return ErrForbidden
 	}
-	if !validLabel(newName) {
-		return fmt.Errorf("%w: name %q must be a DNS label", ErrValidation, newName)
+	if !validPeerName(newName) {
+		return fmt.Errorf("%w: name %q must be a DNS label other than %q", ErrValidation, newName, HubName)
 	}
 	p, err := r.Get(ctx, by, name)
 	if err != nil {
 		return err
+	}
+	if newName == p.Name {
+		return nil // nothing changes: no write, no audit entry, no new netmap
+	}
+	if !force && r.peerRefs != nil {
+		if refs := r.peerRefs(p.Name); len(refs) > 0 {
+			return fmt.Errorf("%w: the policy selects peer:%s (%s); renaming would drop those grants from %s. Change the policy to peer:%s and reload, then rename with --force", ErrValidation, p.Name, strings.Join(refs, ", "), p.Name, newName)
+		}
 	}
 	err = r.store.InTx(ctx, func(tx *store.Store) error {
 		if err := tx.Peers().Rename(ctx, p.ID, newName); err != nil {

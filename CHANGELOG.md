@@ -99,6 +99,50 @@ hosts (`docs/roadmap/sprints.md`, sprint 4); the tag replaces
   client for the WireGuard port; a stored listen port held by another
   process is replaced at start; the userspace adapter no longer rebinds
   its socket on every netmap (found on macOS with v0.1.0-rc4).
+- A name the policy selects with `peer:<name>` can no longer change
+  hands silently: `thawr admin peer rename` refuses such a peer unless
+  `--force` is given, members can neither issue a token for such a name
+  nor add a phone with it, and at enrolment only a token an admin
+  issued for the name may take it; any other request gets a numbered
+  name instead of that peer's grants (found in a review after
+  v0.1.0-rc5). Schema version 6 records who issued a token.
+- Renaming the exit node a device uses no longer drops the default
+  route and sends internet traffic around the tunnel; the choice is
+  kept by peer id, so a different peer that later takes the old name
+  is not used either.
+- A renamed device takes its new name: `client status`, its own
+  `<name>.thawr`, state.json and log hints follow the netmap. Before,
+  it kept the old name, and with the network lock on it could not
+  rotate its key or run `lock init` (both signed the old name) and
+  reported itself unsigned. `admin peer rename` says when the lock
+  needs the peer signed again.
+- `client status`, `client down` and `client up` run without the
+  rights to open the client socket say so and suggest sudo (exit 2).
+  Before, status reported a running client as "not running" (exit 3),
+  and `up` failed later with a bare "permission denied" on state.json.
+- `thawr client start` and `thawr client stop` drive the installed
+  service. After `client down` the service stayed stopped until the
+  next boot (launchd and systemd do not restart a clean exit) and only
+  `launchctl kickstart` or `systemctl start` brought it back. `down`,
+  `status` and the "already running" error now point there; the last
+  no longer suggests `client uninstall`.
+- Running `client install` again starts a stopped service instead of
+  only reporting it as installed, and refuses flags that would rewrite
+  the enrollment state under the running client (`--advertise-routes`
+  used to change state.json and still print "already installed").
+- `thawr admin` run away from the server says that it talks to the
+  server's local socket and must run on the server host; a permission
+  error on that socket suggests sudo. The README's admin examples now
+  use sudo.
+- `hub` can no longer be a peer name: it collides with `hub.thawr`, the
+  server's address, so such a peer never resolved through the hub. A
+  host called `hub` enrols as `hub-2`.
+- "No such name" answers under `.thawr` carry the zone's SOA, so
+  resolvers cache them for at most 30 s instead of a platform default
+  of minutes; a peer enrolled right after a failed lookup resolves
+  once that entry expires.
+- `add-mobile` (CLI and UI) warns when the hub resolver has no upstream,
+  which leaves the phone with only `.thawr` names while the tunnel is up.
 
 ### Security
 

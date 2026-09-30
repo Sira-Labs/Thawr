@@ -33,7 +33,8 @@ make test          # go test -race -count=1 ./...
 make lint          # gofmt -l . ; go vet ./... ; golangci-lint run
 make run-server    # go run ./cmd/thawr server --config config/server.example.yaml
 make run-client    # go run ./cmd/thawr client up --server https://127.0.0.1:8443 --token $THAWR_TOKEN
-                   # (enrols when needed, then runs the sync daemon; client status|ping|down|rotate-key talk to its socket)
+                   # (enrols when needed, then runs the sync daemon; client status|ping|down|rotate-key talk to its socket;
+                   #  client start|stop drive the service `client install` registered)
 make integration   # go test -race -tags integration ./tests/... (Linux, needs CAP_NET_ADMIN)
                    # thawr admin policy check|reload|show and admin peer list|show|add-mobile talk to the server over the admin socket
                    # client status exits 0 connected, 1 server unreachable, 2 usage, 3 not running

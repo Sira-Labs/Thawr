@@ -92,3 +92,14 @@ func TestAdminAddMobile(t *testing.T) {
 		t.Error("unknown owner exited 0")
 	}
 }
+
+func TestPrintMobileDNSWarning(t *testing.T) {
+	var b strings.Builder
+	m := mobileJSON{Peer: peerJSON{Name: "p", IPv4: "100.64.0.3", Owner: "alice"}, Config: "[Interface]\n", Warning: "T4", DNSWarning: "only .thawr names"}
+	if err := printMobile(&b, m, "", true); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "Warning: T4\nWarning: only .thawr names\n\n[Interface]") {
+		t.Errorf("output:\n%s", b.String())
+	}
+}

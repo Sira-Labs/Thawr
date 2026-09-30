@@ -43,7 +43,7 @@ type TokensService interface {
 type PeersService interface {
 	List(ctx context.Context, by control.Principal) ([]store.Peer, error)
 	Get(ctx context.Context, by control.Principal, name string) (store.Peer, error)
-	Rename(ctx context.Context, by control.Principal, name, newName string) error
+	Rename(ctx context.Context, by control.Principal, name, newName string, force bool) error
 	Delete(ctx context.Context, by control.Principal, name string) error
 	// CreateStatic registers a static (mobile) peer and returns its
 	// private key once.
@@ -436,13 +436,14 @@ type pathView struct {
 func (h *rest) handleRenamePeer(w http.ResponseWriter, r *http.Request) {
 	p, _ := principalFrom(r.Context())
 	var body struct {
-		Name string `json:"name"`
+		Name  string `json:"name"`
+		Force bool   `json:"force"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := h.deps.Peers.Rename(r.Context(), p, r.PathValue("name"), body.Name); err != nil {
+	if err := h.deps.Peers.Rename(r.Context(), p, r.PathValue("name"), body.Name, body.Force); err != nil {
 		h.writeControlError(w, err)
 		return
 	}

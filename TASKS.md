@@ -603,6 +603,75 @@ batches).
         persisted, and the userspace adapter sends `listen_port` only
         when it changes. The kernel already ignores an unchanged port.
 
+## Fixes after v0.1.0-rc5 (review of 2026-09-29)
+
+Found while using rc5 on macOS with a phone and in a review of the
+tree that followed. One commit each, highest severity first.
+
+- [x] Policy names stay with their peer. `peer:<name>` grants follow
+      the name, so a rename dropped them and the next device taking the
+      name inherited them.
+      - Rename refuses a policy-selected name without `--force`; the
+        error names the rules. The new name is not checked: renaming
+        into a selected name is how an admin grants it on purpose.
+      - Only a token an admin issued for the name may take it at
+        enrolment, checked against the policy in force then (a member's
+        token from before a reload that selects the name gets a numbered
+        name). Migration 0006 adds `issued_by_admin`, since `created_by`
+        attributes socket-issued tokens to their owner; older tokens
+        count as not admin-issued. Members also cannot issue such a
+        token or add a static peer with the name. A rename to the same
+        name is a no-op.
+      - Delete is not guarded: the freed name stays protected by the
+        enrolment rule.
+      - Enrolment reads the policy's peer names inside its transaction,
+        which holds the store's only connection. `PolicyService.Compiled`
+        therefore no longer holds its mutex while it reads the registry;
+        before, the two deadlocked (caught by macOS CI).
+- [x] The exit-node choice is kept by peer id (`exit_node_id` in
+      state.json), with `exit_node` as the last known name for status.
+      State written by rc5 names the peer only; the first netmap with
+      an exit node of that name fills in the id.
+- [x] The client adopts `SelfName` from every netmap (it was parsed and
+      never used) and persists it. Reads of the name moved under
+      `d.mu`, since it is no longer fixed after enrolment. The logger's
+      `peer` attribute keeps the name the daemon started with until
+      the next start; the "renamed by the server" line links the two.
+- [x] A permission error on the client socket is no longer read as
+      "nobody there". `socketBusy` returns it; status, down and up exit
+      2 with "no permission to use the client socket …; run it with
+      sudo" (Administrator prompt on Windows), and `main` adds the same
+      hint to any other permission error. The socket test is skipped as
+      root, which bypasses file permissions.
+- [x] `client start|stop` wrap `svc.Manager.Start/Stop` (launchd
+      bootstrap or kickstart, systemctl, the Windows SCM). `start`
+      refuses while a foreground `client up` holds the socket, since the
+      service would exit at once with "already running". The service
+      restart policies (`SuccessfulExit=false`, `Restart=on-failure`)
+      stay: a clean `down` staying down is what `down` promises.
+- [x] `client install` checks for an installed service before
+      enrolment and `--advertise-*`; installed, it refuses any flag that
+      writes state or is baked into the service (`--dns`, `--interface`,
+      `--log-level`, `--bin`) and otherwise starts the service if
+      stopped, unless a foreground client holds the socket. Not
+      installed, it runs the same `CheckNotRunning` as `up` first.
+      Both that and `client start` check the socket the service was
+      installed with, read back from the unit, plist or SCM entry
+      (`svc.Manager.Args`), not one given on the command line.
+- [x] The admin socket error tells "no socket here" (run on the server
+      host) from "permission denied" (sudo). Left as is: the `thawr`
+      group on admin.sock grants nothing while the socket sits in the
+      0700 data_dir; moving it is a layout change for a spec.
+- [x] DNS: `hub` is refused as a peer name everywhere a name is set and
+      counts as taken at enrolment; an existing peer called `hub` is
+      left alone. Negative answers in the zone carry an SOA with TTL and
+      MINIMUM 30 s (reverse-zone negatives are unchanged); an SOA query
+      at the apex answers it. The no-upstream
+      state is decided once at start, like the upstream list itself.
+      README: the server host resolves no `.thawr` names, `dig` bypasses
+      the macOS resolver file, phones from before the resolver need the
+      DNS line added in the app.
+
 ## Phase 2 candidates (scheduled as specs 014–021 in `docs/roadmap/`)
 
 - OIDC identity provider plugin (ADR 0006).

@@ -167,3 +167,24 @@ func (p *Policy) parseRules() error {
 	}
 	return nil
 }
+
+// PeerReferences reports, for every name the policy selects with
+// peer:<name>, where it does so ("acls[0].dst[1]"). A peer holding that
+// name gets those grants, so renaming it or letting another device take
+// the name changes who may reach what.
+func (p *Policy) PeerReferences() map[string][]string {
+	refs := map[string][]string{}
+	for i, r := range p.rules {
+		for j, s := range r.src {
+			if s.Kind == SelPeer {
+				refs[s.Name] = append(refs[s.Name], fmt.Sprintf("acls[%d].src[%d]", i, j))
+			}
+		}
+		for j, d := range r.dst {
+			if d.Host.Kind == SelPeer {
+				refs[d.Host.Name] = append(refs[d.Host.Name], fmt.Sprintf("acls[%d].dst[%d]", i, j))
+			}
+		}
+	}
+	return refs
+}

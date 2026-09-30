@@ -50,10 +50,47 @@ type State struct {
 	LockSigner string `json:"lock_signer,omitempty"`
 	// AdvertiseRoutes are the prefixes this device offers to carry as a
 	// subnet router or exit node (0.0.0.0/0), reported to the server at
-	// every connect; ExitNode names the peer whose exit node this
-	// device uses, empty for none (spec 013).
+	// every connect; ExitNodeID is the peer whose exit node this
+	// device uses, empty for none, and ExitNode its last known name
+	// (spec 013). The id keeps the choice on that peer across a rename;
+	// state from before ids names the peer only and is resolved once.
 	AdvertiseRoutes []string `json:"advertise_routes,omitempty"`
 	ExitNode        string   `json:"exit_node,omitempty"`
+	ExitNodeID      string   `json:"exit_node_id,omitempty"`
+}
+
+// adoptSelfName takes this device's name from nm, where the server
+// reports it after an admin renamed the peer. It returns the previous
+// name (empty when state had none) and whether st changed. The name
+// serves DNS, status and the lock records this device signs, which the
+// server checks against the current name.
+func adoptSelfName(st *State, nm NetMap) (string, bool) {
+	if nm.SelfName == "" || nm.SelfName == st.Name || (nm.SelfID != "" && nm.SelfID != st.PeerID) {
+		return "", false
+	}
+	old := st.Name
+	st.Name = nm.SelfName
+	return old, true
+}
+
+// followExitNode keeps st's exit-node choice on the same peer: it
+// resolves a choice stored by name only and takes up a rename. It
+// reports whether st changed.
+func followExitNode(st *State, peers []Peer) bool {
+	for _, p := range peers {
+		switch {
+		case st.ExitNodeID != "" && p.ID == st.ExitNodeID:
+			if p.Name == st.ExitNode {
+				return false
+			}
+			st.ExitNode = p.Name
+			return true
+		case st.ExitNodeID == "" && st.ExitNode != "" && p.Name == st.ExitNode && p.ExitNode:
+			st.ExitNodeID = p.ID
+			return true
+		}
+	}
+	return false
 }
 
 // DefaultDir returns the platform's state directory unless THAWR_STATE_DIR

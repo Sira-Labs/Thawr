@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -21,7 +22,9 @@ type fakeManager struct {
 	states    map[string]svc.State
 	calls     *[]string
 	installed []svc.Service
-	err       error
+	// args is what Args reports for the installed service.
+	args []string
+	err  error
 }
 
 func (m *fakeManager) Install(_ context.Context, s svc.Service) ([]string, error) {
@@ -47,7 +50,8 @@ func (m *fakeManager) Status(_ context.Context, name string) (svc.State, error) 
 	}
 	return m.state, nil
 }
-func (m *fakeManager) Logs(name string) string { return "journalctl -u " + name }
+func (m *fakeManager) Args(context.Context, string) ([]string, error) { return m.args, nil }
+func (m *fakeManager) Logs(name string) string                        { return "journalctl -u " + name }
 
 // enrolledState is a complete state.json for an already enrolled device.
 func enrolledState() client.State {
@@ -74,7 +78,8 @@ func newInstallEnv(t *testing.T) *installEnv {
 	if err := os.WriteFile(env.exe, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	env.mgr = &fakeManager{state: svc.Absent, calls: &env.calls}
+	env.mgr = &fakeManager{state: svc.Absent, calls: &env.calls,
+		args: []string{"client", "up", "--socket", filepath.Join(t.TempDir(), "none.sock")}}
 	env.deps = cliDeps{
 		newManager: func(svc.Options) (svc.Manager, error) { return env.mgr, nil },
 		isRoot:     func() bool { return true },
@@ -114,7 +119,7 @@ func TestInstallRequiresRoot(t *testing.T) {
 	env.deps.isRoot = func() bool { return false }
 	for _, args := range [][]string{{"server", "install"}, {"server", "uninstall"}, {"client", "install"}, {"client", "uninstall"}} {
 		_, errOut, code := env.run(t, args...)
-		if code != exitConfigError || !strings.Contains(errOut, "run as root") {
+		if code != exitConfigError || !strings.Contains(errOut, "needs root") {
 			t.Errorf("%v: code %d, %q", args, code, errOut)
 		}
 	}
@@ -358,5 +363,88 @@ func TestServerUninstallPurgeDeletesDataDir(t *testing.T) {
 	}
 	if got := strings.Join(env.calls, ","); got != "uninstall thawr-server" {
 		t.Errorf("calls: %s", got)
+	}
+}
+
+func TestClientInstallStartsStoppedServiceAndKeepsState(t *testing.T) {
+	env := newInstallEnv(t)
+	stateDir := t.TempDir()
+	if err := client.SaveState(stateDir, enrolledState()); err != nil {
+		t.Fatal(err)
+	}
+	env.mgr.states = map[string]svc.State{serviceClient: svc.Stopped}
+
+	out, errOut, code := env.run(t, "client", "install", "--state-dir", stateDir)
+	if code != 0 || !strings.Contains(out, "started again") {
+		t.Fatalf("code %d: %s %s", code, out, errOut)
+	}
+	if got := strings.Join(env.calls, ","); got != "start "+serviceClient {
+		t.Errorf("calls = %s, want only the start", got)
+	}
+
+	// A flag that writes state is refused and state.json is untouched.
+	env.calls = nil
+	_, errOut, code = env.run(t, "client", "install", "--state-dir", stateDir, "--advertise-exit-node")
+	if code != exitConfigError || !strings.Contains(errOut, "--advertise-exit-node") || len(env.calls) != 0 {
+		t.Errorf("code %d, calls %v: %s", code, env.calls, errOut)
+	}
+	if st, err := client.LoadState(stateDir); err != nil || len(st.AdvertiseRoutes) != 0 {
+		t.Errorf("state changed under an installed client: %+v %v", st.AdvertiseRoutes, err)
+	}
+}
+
+func TestClientInstallRefusesServiceOptionsWhenInstalled(t *testing.T) {
+	env := newInstallEnv(t)
+	stateDir := t.TempDir()
+	if err := client.SaveState(stateDir, enrolledState()); err != nil {
+		t.Fatal(err)
+	}
+	env.mgr.states = map[string]svc.State{serviceClient: svc.Running}
+	for _, flag := range []string{"--dns=off", "--interface=utun9", "--log-level=debug"} {
+		_, errOut, code := env.run(t, "client", "install", "--state-dir", stateDir, flag)
+		if code != exitConfigError || !strings.Contains(errOut, "uninstall") || len(env.calls) != 0 {
+			t.Errorf("%s on an installed client: code %d, calls %v, %s", flag, code, env.calls, errOut)
+		}
+	}
+}
+
+func TestClientInstallDoesNotStartOverForegroundClient(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the client socket is a Unix socket")
+	}
+	env := newInstallEnv(t)
+	stateDir := t.TempDir()
+	if err := client.SaveState(stateDir, enrolledState()); err != nil {
+		t.Fatal(err)
+	}
+	env.mgr.states = map[string]svc.State{serviceClient: svc.Stopped}
+	// A foreground client answers on the socket the service was
+	// installed with; the command line names none, and the check must
+	// still find it.
+	env.mgr.args = []string{"client", "up", "--socket", fakeDaemonSocket(t, http.NotFoundHandler())}
+	for _, args := range [][]string{{"client", "install", "--state-dir", stateDir}, {"client", "start"}} {
+		env.calls = nil
+		_, errOut, code := env.run(t, args...)
+		if code != exitConfigError || !strings.Contains(errOut, "foreground") || len(env.calls) != 0 {
+			t.Errorf("%v: code %d, calls %v: %s", args, code, env.calls, errOut)
+		}
+	}
+}
+
+func TestInstalledSocket(t *testing.T) {
+	cases := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"client", "up", "--socket", "/run/a.sock", "--dns", "on"}, "/run/a.sock"},
+		{[]string{"client", "up", "--socket=/run/b.sock"}, "/run/b.sock"},
+		{[]string{"client", "up"}, client.DefaultSocket},
+		{[]string{"client", "up", "--socket"}, client.DefaultSocket},
+	}
+	for _, tc := range cases {
+		got, err := installedSocket(context.Background(), &fakeManager{args: tc.args})
+		if err != nil || got != tc.want {
+			t.Errorf("%q: %q %v, want %q", tc.args, got, err, tc.want)
+		}
 	}
 }

@@ -50,6 +50,15 @@ type Enroller struct {
 	limit      *rateLimit
 	notify     Notifier
 	audit      *Auditor
+	peerRefs   PeerRefs
+}
+
+// WithPeerRefs keeps names the policy selects with peer:<name> for
+// tokens issued for them: a device naming itself after such a peer
+// gets a numbered name instead of that peer's grants.
+func (e *Enroller) WithPeerRefs(refs PeerRefs) *Enroller {
+	e.peerRefs = refs
+	return e
 }
 
 // WithAuditor records each enrollment in the audit log.
@@ -95,8 +104,8 @@ func (e *Enroller) Enroll(ctx context.Context, req EnrollRequest) (EnrollResult,
 	if len(req.Hostname) > 63 {
 		return EnrollResult{}, fmt.Errorf("%w: hostname longer than 63 characters", ErrValidation)
 	}
-	if req.Name != "" && !validLabel(req.Name) {
-		return EnrollResult{}, fmt.Errorf("%w: name %q must be a DNS label", ErrValidation, req.Name)
+	if req.Name != "" && !validPeerName(req.Name) {
+		return EnrollResult{}, fmt.Errorf("%w: name %q must be a DNS label other than %q", ErrValidation, req.Name, HubName)
 	}
 	if !strings.HasPrefix(req.Token, TokenPrefix) || len(req.Token) != len(TokenPrefix)+43 {
 		e.log.Warn("enroll rejected: malformed token", "remote", req.RemoteIP)
@@ -153,9 +162,24 @@ func (e *Enroller) Enroll(ctx context.Context, req EnrollRequest) (EnrollResult,
 		if base == "" {
 			base = SanitizeName(req.Hostname)
 		}
-		name, err := uniqueName(ctx, tx.Peers(), base)
+		// Only a token an admin issued for a name may take one the
+		// policy selects now; the policy may have changed since the
+		// token was created, so this is checked here, not only there.
+		reserved := func(n string) bool {
+			if n == HubName {
+				return true // a host called "hub" gets hub-2
+			}
+			if e.peerRefs == nil || len(e.peerRefs(n)) == 0 {
+				return false
+			}
+			return n != tok.PeerName || !tok.IssuedByAdmin
+		}
+		name, err := uniqueName(ctx, tx.Peers(), base, reserved)
 		if err != nil {
 			return err
+		}
+		if reserved(base) {
+			e.log.Warn("enroll: requested name is selected by the policy, using another", "requested", base, "name", name, "token", tok.ID)
 		}
 
 		peer := store.Peer{

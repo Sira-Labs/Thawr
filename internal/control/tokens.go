@@ -46,6 +46,7 @@ type Tokens struct {
 	now        func() time.Time
 	log        *slog.Logger
 	tagAllowed TagAllowed
+	peerRefs   PeerRefs
 }
 
 // NewTokens builds the token service. Without WithTagAllowed only
@@ -57,6 +58,13 @@ func NewTokens(st *store.Store, now func() time.Time, log *slog.Logger) *Tokens 
 // WithAuditor records token creation and revocation in the audit log.
 func (t *Tokens) WithAuditor(a *Auditor) *Tokens {
 	t.audit = a
+	return t
+}
+
+// WithPeerRefs stops members from issuing tokens for a name the policy
+// selects with peer:<name>.
+func (t *Tokens) WithPeerRefs(refs PeerRefs) *Tokens {
+	t.peerRefs = refs
 	return t
 }
 
@@ -92,8 +100,13 @@ func (t *Tokens) Create(ctx context.Context, by Principal, req TokenRequest) (Cr
 			}
 		}
 	}
-	if req.PeerName != "" && !validLabel(req.PeerName) {
-		return CreatedToken{}, fmt.Errorf("%w: peer name %q must be a DNS label", ErrValidation, req.PeerName)
+	if req.PeerName != "" && !validPeerName(req.PeerName) {
+		return CreatedToken{}, fmt.Errorf("%w: peer name %q must be a DNS label other than %q", ErrValidation, req.PeerName, HubName)
+	}
+	if req.PeerName != "" && !by.IsAdmin() && t.peerRefs != nil {
+		if refs := t.peerRefs(req.PeerName); len(refs) > 0 {
+			return CreatedToken{}, fmt.Errorf("%w: the policy selects peer:%s (%s); only an admin may issue a token for that name", ErrForbidden, req.PeerName, strings.Join(refs, ", "))
+		}
 	}
 	ttl := req.TTL
 	switch {
@@ -126,8 +139,11 @@ func (t *Tokens) Create(ctx context.Context, by Principal, req TokenRequest) (Cr
 		Tags:       tags,
 		PeerName:   req.PeerName,
 		CreatedBy:  creator,
-		CreatedAt:  now,
-		ExpiresAt:  now.Add(ttl),
+		// Only an admin's token may take a name the policy selects; the
+		// check at enrolment reads this, since the policy may change.
+		IssuedByAdmin: by.IsAdmin(),
+		CreatedAt:     now,
+		ExpiresAt:     now.Add(ttl),
 	}
 	err = t.store.InTx(ctx, func(tx *store.Store) error {
 		if err := tx.Tokens().Create(ctx, tok); err != nil {

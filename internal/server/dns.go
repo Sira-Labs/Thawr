@@ -152,6 +152,7 @@ func (s *Server) startDNS(ctx context.Context) (stop func(), err error) {
 	for _, u := range upstreams {
 		ups = append(ups, u.String())
 	}
+	s.dnsNoUpstream = len(ups) == 0
 	if len(ups) == 0 {
 		s.log.Warn("dns: hub resolver serves only the zone; no upstream found, phones resolve only .thawr names", "listen", addr.String())
 	} else {

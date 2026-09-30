@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -53,5 +54,36 @@ func TestLoadUnreadable(t *testing.T) {
 	}
 	if _, err := Load(path); err == nil || errors.Is(err, ErrNotFound) {
 		t.Errorf("got %v, want a read error", err)
+	}
+}
+
+func TestPeerReferences(t *testing.T) {
+	p, err := Parse([]byte(`version: 1
+acls:
+  - action: accept
+    src: ["peer:ci", "*"]
+    dst: ["peer:db:5432", "self:*"]
+  - action: accept
+    src: ["peer:db"]
+    dst: ["tag:prod:22"]
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	got := p.PeerReferences()
+	want := map[string][]string{
+		"ci": {"acls[0].src[0]"},
+		"db": {"acls[0].dst[0]", "acls[1].src[0]"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("PeerReferences = %v, want %v", got, want)
+	}
+	for name, where := range want {
+		if strings.Join(got[name], ",") != strings.Join(where, ",") {
+			t.Errorf("PeerReferences[%q] = %v, want %v", name, got[name], where)
+		}
+	}
+	if refs := Empty().PeerReferences(); len(refs) != 0 {
+		t.Errorf("Empty().PeerReferences() = %v, want none", refs)
 	}
 }

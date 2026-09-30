@@ -300,13 +300,13 @@ func TestRegistry(t *testing.T) {
 	if _, err := env.registry.Get(ctx, alice, "admin-box"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("member sees foreign peer: %v", err)
 	}
-	if err := env.registry.Rename(ctx, alice, "alice-box", "x"); !errors.Is(err, ErrForbidden) {
+	if err := env.registry.Rename(ctx, alice, "alice-box", "x", false); !errors.Is(err, ErrForbidden) {
 		t.Errorf("member rename: %v", err)
 	}
-	if err := env.registry.Rename(ctx, env.admin, "alice-box", "admin-box"); !errors.Is(err, ErrValidation) {
+	if err := env.registry.Rename(ctx, env.admin, "alice-box", "admin-box", false); !errors.Is(err, ErrValidation) {
 		t.Errorf("rename to taken: %v", err)
 	}
-	if err := env.registry.Rename(ctx, env.admin, "alice-box", "alice-laptop"); err != nil {
+	if err := env.registry.Rename(ctx, env.admin, "alice-box", "alice-laptop", false); err != nil {
 		t.Errorf("rename: %v", err)
 	}
 	before, _ := env.registry.Generation(ctx)

@@ -24,7 +24,7 @@ const (
 )
 
 // HubName is the zone name of the server's hub address.
-const HubName = "hub"
+const HubName = "hub" // control.HubName: no peer may take it
 
 // DNS states in the status document.
 const (
@@ -126,9 +126,9 @@ func (s netmapSource) Reverse(_ context.Context, _ netip.Addr, addr netip.Addr) 
 // dnsEntries lists self, the hub and every netmap peer, sorted by name.
 func (d *Daemon) dnsEntries() []dns.Entry {
 	d.mu.Lock()
-	nm := d.netmap
+	nm, self := d.netmap, d.state.Name
 	d.mu.Unlock()
-	out := []dns.Entry{{Name: strings.ToLower(d.state.Name), Addr: d.selfIP}, {Name: HubName, Addr: d.overlay.Addr().Next()}}
+	out := []dns.Entry{{Name: strings.ToLower(self), Addr: d.selfIP}, {Name: HubName, Addr: d.overlay.Addr().Next()}}
 	if nm != nil {
 		for _, p := range nm.Peers {
 			ip, err := netip.ParseAddr(p.IPv4)

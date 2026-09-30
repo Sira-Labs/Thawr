@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"strings"
 
 	"github.com/sira-labs/thawr/internal/store"
 	"github.com/sira-labs/thawr/internal/wg"
@@ -54,8 +55,13 @@ func (r *Registry) CreateStatic(ctx context.Context, by Principal, req StaticReq
 	if !by.IsAdmin() && by.Name != req.OwnerName {
 		return StaticResult{}, fmt.Errorf("%w: %s may only add peers for themselves", ErrForbidden, by.Name)
 	}
-	if req.Name == "" || !validLabel(req.Name) {
-		return StaticResult{}, fmt.Errorf("%w: name %q must be a DNS label", ErrValidation, req.Name)
+	if req.Name == "" || !validPeerName(req.Name) {
+		return StaticResult{}, fmt.Errorf("%w: name %q must be a DNS label other than %q", ErrValidation, req.Name, HubName)
+	}
+	if !by.IsAdmin() && r.peerRefs != nil {
+		if refs := r.peerRefs(req.Name); len(refs) > 0 {
+			return StaticResult{}, fmt.Errorf("%w: the policy selects peer:%s (%s); only an admin may add a peer with that name", ErrForbidden, req.Name, strings.Join(refs, ", "))
+		}
 	}
 	kind := req.Kind
 	if kind == "" {

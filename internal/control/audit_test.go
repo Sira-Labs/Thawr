@@ -66,7 +66,7 @@ func TestAuditEveryMutation(t *testing.T) {
 		t.Errorf("peer.enrol: %+v", e)
 	}
 
-	if err := env.registry.Rename(ctx, env.admin, "nas", "nas2"); err != nil {
+	if err := env.registry.Rename(ctx, env.admin, "nas", "nas2", false); err != nil {
 		t.Fatal(err)
 	}
 	if e := lastAudit(t, env.st, AuditPeerRename); e.Actor != "markus" || e.Target != res.Peer.ID || e.Details["from"] != "nas" || e.Details["to"] != "nas2" {
@@ -186,7 +186,7 @@ func TestAuditFailureRollsBack(t *testing.T) {
 	if _, err := raw.ExecContext(ctx, `DROP TABLE audit_log`); err != nil {
 		t.Fatal(err)
 	}
-	if err := env.registry.Rename(ctx, env.admin, "nas", "nas2"); err == nil {
+	if err := env.registry.Rename(ctx, env.admin, "nas", "nas2", false); err == nil {
 		t.Fatal("rename succeeded without an audit row")
 	}
 	p, err := env.st.Peers().GetByID(ctx, res.Peer.ID)
