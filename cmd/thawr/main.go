@@ -19,6 +19,9 @@ var (
 )
 
 func main() {
+	if err := redirectServiceOutput(os.Args[1:]); err != nil {
+		fmt.Fprintln(os.Stderr, "thawr:", err)
+	}
 	if err := newRootCmd(os.Stdout, os.Stderr).ExecuteContext(context.Background()); err != nil {
 		err = permissionError(err)
 		fmt.Fprintln(os.Stderr, "thawr:", err)

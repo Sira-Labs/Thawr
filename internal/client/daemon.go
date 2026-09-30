@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -33,8 +35,16 @@ import (
 	"github.com/sira-labs/thawr/internal/wg"
 )
 
-// DefaultSocket is the local control socket of the running daemon.
-const DefaultSocket = "/var/run/thawr/client.sock"
+// DefaultSocket returns the local control socket of the running
+// daemon. On Windows it sits in the state directory, whose access list
+// admits only SYSTEM and Administrators; /var/run would resolve to
+// C:\var\run there, which every local user may write to.
+func DefaultSocket() string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(DefaultDir(), "client.sock")
+	}
+	return "/var/run/thawr/client.sock"
+}
 
 // DaemonOptions configure Run. Zero values select production defaults.
 type DaemonOptions struct {
@@ -81,7 +91,7 @@ func (o DaemonOptions) withDefaults() DaemonOptions {
 		o.StateDir = DefaultDir()
 	}
 	if o.Socket == "" {
-		o.Socket = DefaultSocket
+		o.Socket = DefaultSocket()
 	}
 	if o.Interface == "" {
 		o.Interface = "thawr0"
@@ -1087,8 +1097,11 @@ func (d *Daemon) listenLocal(ctx context.Context) (*http.Server, net.Listener, e
 	if err != nil {
 		return nil, nil, fmt.Errorf("client: listen %s: %w", d.opts.Socket, err)
 	}
+	// The local API has no authentication of its own; a socket that could
+	// not be restricted is not served.
 	if err := secureSocket(d.opts.Socket); err != nil {
-		d.log.Warn("socket permissions", "err", err)
+		_ = ln.Close()
+		return nil, nil, fmt.Errorf("client: socket permissions: %w", err)
 	}
 	srv := &http.Server{Handler: d.localHandler(), ReadHeaderTimeout: 5 * time.Second}
 	return srv, ln, nil

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -29,7 +31,8 @@ func (m *winsvc) connect() (*mgr.Mgr, error) {
 }
 
 // Install creates an auto-start service that restarts 2 s after a
-// failure. No file is written; the arguments live in the service entry.
+// failure: a crash, or a stop with a non-zero exit code. No file is
+// written; the arguments live in the service entry.
 func (m *winsvc) Install(_ context.Context, s Service) ([]string, error) {
 	if err := s.validate(); err != nil {
 		return nil, err
@@ -48,6 +51,11 @@ func (m *winsvc) Install(_ context.Context, s Service) ([]string, error) {
 	defer func() { _ = svcHandle.Close() }()
 	if err := svcHandle.SetRecoveryActions([]mgr.RecoveryAction{{Type: mgr.ServiceRestart, Delay: 2 * time.Second}}, 0); err != nil {
 		return nil, fmt.Errorf("svc: set recovery for %s: %w", s.Name, err)
+	}
+	// The binary reports Stopped with a non-zero exit code when its work
+	// fails; without this flag only a crash would trigger the restart.
+	if err := svcHandle.SetRecoveryActionsOnNonCrashFailures(true); err != nil {
+		return nil, fmt.Errorf("svc: set recovery on failure exit for %s: %w", s.Name, err)
 	}
 	m.opts.Logger.Info("windows service installed", "service", s.Name)
 	return nil, nil
@@ -165,4 +173,17 @@ func (m *winsvc) Args(_ context.Context, name string) ([]string, error) {
 	return argv[1:], nil
 }
 
-func (m *winsvc) Logs(name string) string { return "sc query " + name }
+// Logs follows the log file the service writes; see LogPath.
+func (m *winsvc) Logs(name string) string {
+	return `powershell Get-Content -Wait -Tail 50 "` + LogPath(name) + `"`
+}
+
+// LogPath is where a service registered under name writes its output:
+// the control manager keeps no output of a service process.
+func LogPath(name string) string {
+	base := os.Getenv("ProgramData")
+	if base == "" {
+		base = `C:\ProgramData`
+	}
+	return filepath.Join(base, "Thawr", "logs", name+".log")
+}

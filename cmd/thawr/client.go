@@ -30,7 +30,7 @@ func defaultClientSocket() string {
 	if s := os.Getenv(envClientSocket); s != "" {
 		return s
 	}
-	return client.DefaultSocket
+	return client.DefaultSocket()
 }
 
 // clientUpFlags are shared by `client up` and `client install`.
@@ -210,8 +210,9 @@ and ` + "`client start`" + `.`,
 				return err
 			}
 			ctx, stop := lifecycleContext(cmd.Context())
-			defer stop()
-			return d.Run(ctx)
+			err = d.Run(ctx)
+			stop(err)
+			return err
 		},
 	}
 	addClientUpFlags(up, &upf)
@@ -426,7 +427,7 @@ func printStatus(w io.Writer, st client.Status, asJSON bool) error {
 // daemon goes away (exit 3).
 func watchStatus(ctx context.Context, w io.Writer, lc *client.LocalClient, asJSON bool) error {
 	ctx, stop := lifecycleContext(ctx)
-	defer stop()
+	defer stop(nil)
 	ticker := time.NewTicker(watchInterval)
 	defer ticker.Stop()
 	for {

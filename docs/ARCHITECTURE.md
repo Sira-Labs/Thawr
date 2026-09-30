@@ -95,6 +95,7 @@ flowchart TD
 | `internal/server` | Compose the server: data dir, store, server key, TLS, hub interface, policy, listeners; startup order, readiness, reload, shutdown | `New(cfg, Deps)`, `Run(ctx, reload)`, `Check()`, `Status(ctx)` | `internal/config`, `internal/store`, `internal/wg`, `internal/control`, `internal/api`, `web` |
 | `web` | Static admin UI, embedded | `embed.FS` | nothing |
 | `internal/svc` | Register the binary as a system service: render systemd units and launchd plists, drive `systemctl`/`launchctl` through an injected runner, create Windows services via x/sys | `New(Options) (Manager, error)`, `Manager.Install/Start/Stop/Uninstall/Status/Logs`, `RenderSystemdUnit`, `RenderLaunchdPlist` | `golang.org/x/sys/windows/svc` |
+| `internal/fsperm` | Secure what holds secrets or is written by a privileged service on Windows: Administrators as owner, an access list for SYSTEM, Administrators and the owner, links refused; no-op elsewhere | `RestrictToAdmins(path)`, `OpenLog(root, path)` (Windows) | `golang.org/x/sys/windows` |
 | `internal/dns` | Serve the `thawr` zone from an injected `Source` (A and PTR, NXDOMAIN, REFUSED or forwarding outside the zone), and route the zone to the resolver per platform | `NewServer(Options)`, `Server.Handle/Serve`, `Listen`, `Source`, `Registrar`, `NewRegistrar(RegistrarOptions)` | `golang.org/x/net/dns/dnsmessage` |
 | `cmd/thawr` | Flags, config, dependency wiring, signal handling, install commands | `main` | all of the above |
 
@@ -515,7 +516,11 @@ access is filesystem permission (`root` and group `thawr`).
 
 `thawr client status` talks to the running daemon over
 `/var/run/thawr/client.sock` (a Unix socket on every platform; Windows
-supports `AF_UNIX`; mode 0660, group `thawr` where that group exists)
+supports `AF_UNIX`; mode 0660, group `thawr` where that group exists).
+On Windows the default is `%ProgramData%\Thawr\client.sock`, in the
+state directory, and the socket file's access list admits only SYSTEM,
+Administrators and its owner: `/var/run` would resolve to
+`C:\var\run`, which every local user may write to
 with a tiny JSON-over-HTTP API. A lock file next to the socket
 (`client.sock.lock`, `flock`; `LockFileEx` on Windows) is held by the
 running daemon, so a second `thawr client up` exits 2 with `already
@@ -596,7 +601,11 @@ Indexes: `peers(public_key)` unique, `peers(name)` unique,
 | `/var/lib/thawr/client/pins.json` | accepted hub key, per-peer `(id, key)` by name, and the pinned lock record | 0600 |
 | `/var/lib/thawr/client/lock.key` | Ed25519 lock private key; only on devices that ran `lock init` or `lock key`; removed by `down --forget` | 0600 |
 
-macOS: `/Library/Application Support/Thawr/`. Windows: `%ProgramData%\Thawr\`.
+macOS: `/Library/Application Support/Thawr/`. Windows: `%ProgramData%\Thawr\`,
+whose access list the client replaces on every state write with one
+for SYSTEM, Administrators and the owner only (inheritance from
+`%ProgramData%`, which every local user may read, is cut); the mode
+bits above mean nothing there.
 The cached netmap lets the client restore WireGuard peers before the
 server is reachable, so a mesh keeps working through a server outage as
 long as endpoints have not changed.

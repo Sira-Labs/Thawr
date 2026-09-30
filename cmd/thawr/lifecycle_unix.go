@@ -9,7 +9,10 @@ import (
 	"syscall"
 )
 
-// lifecycleContext ends the returned context on SIGINT or SIGTERM.
-func lifecycleContext(ctx context.Context) (context.Context, func()) {
-	return signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+// lifecycleContext ends the returned context on SIGINT or SIGTERM. The
+// returned function takes the work's result, which only the Windows
+// service variant reports.
+func lifecycleContext(ctx context.Context) (context.Context, func(error)) {
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	return ctx, func(error) { stop() }
 }

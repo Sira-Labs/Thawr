@@ -92,11 +92,12 @@ func runServer(cmd *cobra.Command, configPath string, check bool) error {
 	logger := server.NewLogger(cfg.Log, cmd.ErrOrStderr())
 
 	ctx, stop := lifecycleContext(cmd.Context())
-	defer stop()
 	reload := make(chan struct{}, 1)
 	stopReload := notifyReload(reload)
 	defer stopReload()
 
 	logger.Info("starting thawr server", "version", version, "config", configPath)
-	return srv.Run(ctx, reload)
+	err = srv.Run(ctx, reload)
+	stop(err)
+	return err
 }

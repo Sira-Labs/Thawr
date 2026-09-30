@@ -172,7 +172,10 @@ Two devices behind different home routers, server on a public host.
    `thawr client install --server ... --token ... --fingerprint ...`
    creates the `thawr-client` service (`sc query thawr-client` shows
    RUNNING) with `wintun.dll` next to `thawr.exe`; it survives a
-   reboot; `thawr client uninstall` deletes it.
+   reboot; `thawr client uninstall` deletes it. Its output goes to
+   `%ProgramData%\Thawr\logs\thawr-client.log`. `thawr client down`
+   leaves it STOPPED (not restarted 2 s later) until `thawr client
+   start`; `sc qfailure thawr-client` lists the restart action.
 4. Linux without systemd (Alpine, containers): `install` exits 2 with
    a message; `thawr client up` in the foreground still works.
 5. `install` as a normal user exits 2 with `run as root (sudo)`; a

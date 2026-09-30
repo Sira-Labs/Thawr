@@ -206,10 +206,13 @@ func installedClientCheck(ctx context.Context, m svc.Manager) func() error {
 		if err != nil {
 			return err
 		}
-		if err := client.CheckNotRunning(socket); errors.Is(err, client.ErrAlreadyRunning) {
+		err = client.CheckNotRunning(socket)
+		if errors.Is(err, client.ErrAlreadyRunning) {
 			return &exitError{code: exitConfigError, err: fmt.Errorf("%w; a foreground `thawr client up` is running: stop it (Ctrl-C or `sudo thawr client down`) first", err)}
 		}
-		return nil
+		// Any other error (a socket this user may not open) says nothing
+		// about whether a client runs there, so nothing is started.
+		return err
 	}
 }
 
@@ -228,7 +231,7 @@ func installedSocket(ctx context.Context, m svc.Manager) (string, error) {
 			return args[i+1], nil
 		}
 	}
-	return client.DefaultSocket, nil
+	return client.DefaultSocket(), nil
 }
 
 // refuseHubHost rejects a client on a host that runs the server: both

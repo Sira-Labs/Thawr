@@ -143,6 +143,19 @@ hosts (`docs/roadmap/sprints.md`, sprint 4); the tag replaces
   once that entry expires.
 - `add-mobile` (CLI and UI) warns when the hub resolver has no upstream,
   which leaves the phone with only `.thawr` names while the tunnel is up.
+- Windows: `thawr client down` on the installed service stuck. The
+  process exited while the service control manager still saw it
+  running, which counts as a crash, so the manager restarted it after
+  2 s. The service now reports Stopped first, with a non-zero exit code
+  only when the client or server failed; new installs restart on that
+  code (existing ones: `client uninstall`, then install again).
+- Windows: a service's output was lost, and the `logs:` hint printed
+  `sc query`, which shows only its state. The server and client
+  services now write to `%ProgramData%\Thawr\logs\<service>.log`
+  (panics included), and the hint follows that file. The folder is
+  secured like the state directory before the file is opened, and a
+  planted link or second name is refused, so the service never writes
+  through someone else's link; reading the log takes an elevated shell.
 
 ### Security
 
@@ -156,5 +169,15 @@ hosts (`docs/roadmap/sprints.md`, sprint 4); the tag replaces
 - The network lock closes the compromised-server key-substitution
   threat once a device has pinned the lock record; the first record a
   device sees is trusted unless it was enrolled with `--lock-signer`.
+- Windows: the client's control socket defaulted to
+  `C:\var\run\thawr\client.sock`, and its state directory
+  `%ProgramData%\Thawr` (with `node.key`) inherited an access list that
+  lets every local user read, so another user could stop the client,
+  rotate its key or read the private key. The socket now defaults to
+  `%ProgramData%\Thawr\client.sock`; the state directory and the socket
+  admit only SYSTEM, Administrators and the owner, and Administrators
+  become the owner of the state directory, so one a standard user
+  created beforehand is taken back. Existing services keep the old
+  socket until `client uninstall` and install again.
 
 [0.1.0]: https://github.com/Sira-Labs/Thawr/compare/v0.1.0-rc3...main

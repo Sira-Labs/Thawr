@@ -431,6 +431,28 @@ func TestClientInstallDoesNotStartOverForegroundClient(t *testing.T) {
 	}
 }
 
+// TestInstalledCheckPermission: a socket the check may not open is an
+// error, not a free socket, and the service is not started over it.
+func TestInstalledCheckPermission(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the client socket is a Unix socket")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses file permissions")
+	}
+	env := newInstallEnv(t)
+	env.mgr.states = map[string]svc.State{serviceClient: svc.Stopped}
+	sock := fakeDaemonSocket(t, http.NotFoundHandler())
+	if err := os.Chmod(sock, 0); err != nil {
+		t.Fatal(err)
+	}
+	env.mgr.args = []string{"client", "up", "--socket", sock}
+	_, errOut, code := env.run(t, "client", "start")
+	if code == 0 || !strings.Contains(errOut, "permission") || len(env.calls) != 0 {
+		t.Errorf("code %d, calls %v: %s", code, env.calls, errOut)
+	}
+}
+
 func TestInstalledSocket(t *testing.T) {
 	cases := []struct {
 		args []string
@@ -438,8 +460,8 @@ func TestInstalledSocket(t *testing.T) {
 	}{
 		{[]string{"client", "up", "--socket", "/run/a.sock", "--dns", "on"}, "/run/a.sock"},
 		{[]string{"client", "up", "--socket=/run/b.sock"}, "/run/b.sock"},
-		{[]string{"client", "up"}, client.DefaultSocket},
-		{[]string{"client", "up", "--socket"}, client.DefaultSocket},
+		{[]string{"client", "up"}, client.DefaultSocket()},
+		{[]string{"client", "up", "--socket"}, client.DefaultSocket()},
 	}
 	for _, tc := range cases {
 		got, err := installedSocket(context.Background(), &fakeManager{args: tc.args})

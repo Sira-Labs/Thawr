@@ -657,7 +657,8 @@ tree that followed. One commit each, highest severity first.
       installed, it runs the same `CheckNotRunning` as `up` first.
       Both that and `client start` check the socket the service was
       installed with, read back from the unit, plist or SCM entry
-      (`svc.Manager.Args`), not one given on the command line.
+      (`svc.Manager.Args`), not one given on the command line. A socket
+      the check may not open stops the start instead of counting as free.
 - [x] The admin socket error tells "no socket here" (run on the server
       host) from "permission denied" (sudo). Left as is: the `thawr`
       group on admin.sock grants nothing while the socket sits in the
@@ -671,6 +672,46 @@ tree that followed. One commit each, highest severity first.
       README: the server host resolves no `.thawr` names, `dig` bypasses
       the macOS resolver file, phones from before the resolver need the
       DNS line added in the app.
+- [x] Windows service stop: the process reports Stopped before it exits
+      (`lifecycleContext` returns `func(error)`; the handler returns
+      once the work ended, with service exit code 1 on failure). Install
+      sets `SetRecoveryActionsOnNonCrashFailures`, so a failed run still
+      restarts. Found by reading the code; the handler is tested on the
+      windows-latest runner, not yet on a real installed service.
+- [x] Windows service output goes to `%ProgramData%\Thawr\logs\<service>.log`:
+      `main` points stdout, stderr and the standard handles (for panics)
+      at it when running as a service; not rotated, like the launchd log.
+      `svc.LogPath` is shared by the redirect and `Logs`. The file is
+      opened through `fsperm.OpenLog`, which secures `%ProgramData%\Thawr`
+      and `logs` first and refuses a link or a file with a second name
+      (checked on the open handle): as SYSTEM the service must not
+      append through a link a standard user planted. The owner and
+      access-list code moved from `internal/client` to `internal/fsperm`
+      for that; socket files are secured through a handle opened with
+      `FILE_FLAG_OPEN_REPARSE_POINT`, and a socket that cannot be
+      secured is no longer served (it was a warning).
+- [x] Windows client socket and state directory (changes the "same
+      socket path on every platform" line in ARCHITECTURE.md, agreed
+      with the owner): `DefaultSocket()` is `%ProgramData%\Thawr\client.sock`
+      on Windows. `restrictToAdmins` sets a protected access list
+      (SYSTEM, Administrators, owner rights) on the state directory at
+      every secret write, which fixes existing installs on the first
+      save, and on the socket file. The owner entry keeps non-elevated
+      test runs working and adds nobody, since owners may rewrite the
+      list anyway. Before the access list, Administrators become the
+      owner (with the take-ownership privilege where the current owner
+      shut them out), since a standard user who created
+      `%ProgramData%\Thawr` before the first install would otherwise
+      keep owner rights; a non-elevated run accepts only SYSTEM,
+      Administrators or itself as owner. A link or junction is refused,
+      and a secret's temporary file is always a new,
+      uniquely named one (`os.CreateTemp`), so a planted `*.tmp` cannot
+      pass its access list on through the rename and concurrent writers
+      of one file never share it. An access list already in place is
+      left alone, so only the first save walks the directory. Not
+      covered: the server's admin socket on Windows still sits under
+      `C:\var\lib\thawr` with an inherited list
+      (`internal/server/perms_windows.go`).
 
 ## Phase 2 candidates (scheduled as specs 014–021 in `docs/roadmap/`)
 
