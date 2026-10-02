@@ -1,13 +1,20 @@
 name: pages
 
-# Publishes site/ (one static HTML file, no build) to GitHub Pages.
-# One-time setup: Settings -> Pages -> Source: GitHub Actions.
+# Publishes site/ (one static HTML file, no build) to GitHub Pages,
+# pointed at the newest release by scripts/site-release.sh. Runs again
+# after every successful release, so a new version reaches the page
+# without an edit. One-time setup: Settings -> Pages -> Source: GitHub
+# Actions.
 on:
   push:
     branches: [main]
     paths:
       - "site/**"
+      - "scripts/site-release.sh"
       - ".github/workflows/pages.yml"
+  workflow_run:
+    workflows: [release]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -21,12 +28,19 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: main
+      - name: Point the page at the newest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/site-release.sh site/index.html
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
