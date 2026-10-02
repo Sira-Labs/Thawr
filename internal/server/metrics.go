@@ -92,7 +92,10 @@ func (s *Server) listenMetrics(ctx context.Context, h http.Handler) (*http.Serve
 	srv := &http.Server{
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
-		ErrorLog:          slog.NewLogLogger(s.log.Handler(), slog.LevelWarn),
+		// A scrape is a bodyless GET; ReadTimeout also bounds reading
+		// any body a client sends, which ReadHeaderTimeout does not.
+		ReadTimeout: 10 * time.Second,
+		ErrorLog:    slog.NewLogLogger(s.log.Handler(), slog.LevelWarn),
 	}
 	s.log.Info("metrics listener ready", "addr", ln.Addr().String())
 	return srv, ln, nil

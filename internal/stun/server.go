@@ -87,10 +87,13 @@ func Serve(ctx context.Context, conn net.PacketConn, opts ServerOptions) error {
 			log.Debug("stun request ignored", "from", from, "err", err)
 			continue
 		}
-		opts.Counters.OK.Add(1)
-		if _, err := conn.WriteTo(Response(tx, from), addr); err != nil && ctx.Err() == nil {
-			log.Debug("stun response failed", "to", from, "err", err)
+		if _, err := conn.WriteTo(Response(tx, from), addr); err != nil {
+			if ctx.Err() == nil {
+				log.Debug("stun response failed", "to", from, "err", err)
+			}
+			continue
 		}
+		opts.Counters.OK.Add(1)
 	}
 }
 
