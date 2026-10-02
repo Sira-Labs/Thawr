@@ -96,6 +96,8 @@ func TestValidate(t *testing.T) {
 		{"acme bad email", "public_addr: vpn.example.org\ntls:\n  mode: acme\n  email: 'Ops <ops@example.org>'\n", []string{"tls.email"}},
 		{"acme ip public_addr", "public_addr: 203.0.113.7\ntls:\n  mode: acme\n  email: ops@example.org\n", []string{"tls.mode acme needs a DNS name"}},
 		{"acme ip domain", "public_addr: vpn.example.org\ntls:\n  mode: acme\n  email: ops@example.org\n  domain: 203.0.113.7\n", []string{"tls.domain"}},
+		{"acme pinned name", "public_addr: vpn.example.org\ntls:\n  mode: acme\n  email: ops@example.org\n  domain: Thawr-Pinned.INVALID\n", []string{"reserved .invalid"}},
+		{"acme invalid public_addr", "public_addr: vpn.invalid\ntls:\n  mode: acme\n  email: ops@example.org\n", []string{"reserved .invalid"}},
 		{"acme single label", "public_addr: vpn\ntls:\n  mode: acme\n  email: ops@example.org\n", []string{"tls.domain"}},
 		{"acme http directory", "public_addr: vpn.example.org\ntls:\n  mode: acme\n  email: ops@example.org\n  acme_directory: http://ca.example/dir\n", []string{"tls.acme_directory"}},
 		{"bad log level", "public_addr: a\nlog:\n  level: loud\n", []string{"log.level"}},

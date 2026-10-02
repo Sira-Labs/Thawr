@@ -128,6 +128,11 @@ func (c *Config) Validate() error {
 		}
 		if d := c.ACMEDomain(); !dnsNameRe.MatchString(d) {
 			add("tls.domain: tls.mode acme needs a DNS name in tls.domain or public_addr, got %q", d)
+		} else if strings.HasSuffix(strings.ToLower(strings.TrimSuffix(d, ".")), ".invalid") {
+			// .invalid is reserved (RFC 2606): no CA issues for it, and
+			// clients ask for the pinned certificate as thawr-pinned.invalid,
+			// which must never be routed to the ACME manager.
+			add("tls.domain: %q is under the reserved .invalid domain; use the name browsers reach the server by", d)
 		}
 		if c.TLS.ACMEDirectory != "" {
 			if u, err := url.Parse(c.TLS.ACMEDirectory); err != nil || u.Scheme != "https" || u.Host == "" {
