@@ -22,6 +22,13 @@ when one exists, and GitHub's generated notes otherwise.
 - The server locks `data_dir` (`thawr.lock`): a second server on the
   same directory exits before it opens the database.
 
+### Fixed
+
+- Windows: saving the client state (an exit-node choice, a rename)
+  could fail with "Access is denied" while another process, typically
+  a virus scanner, briefly held the previous `state.json` open. The
+  replace is now retried for up to two seconds.
+
 ## [0.1.0] - unreleased
 
 Ships once the manual checklists for specs 010–013 have passed on real

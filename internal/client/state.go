@@ -197,7 +197,7 @@ func writeSecret(dir, name string, data []byte) error {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("client: write %s: %w", name, werr)
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := replaceFile(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("client: rename %s: %w", name, err)
 	}
