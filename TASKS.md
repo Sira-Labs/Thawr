@@ -720,7 +720,7 @@ tree that followed. One commit each, highest severity first.
 
 ## Sprint 6 — operations
 
-- [~] **014 Operations** — `docs/specs/014-operations.md`
+- [x] **014 Operations** — `docs/specs/014-operations.md`
       Backup and restore, Prometheus metrics, ACME with the pinned
       certificate kept for clients. Three PRs: backup and restore,
       metrics, ACME.
@@ -766,6 +766,26 @@ tree that followed. One commit each, highest severity first.
         mux with `/metrics` only, so it can never expose the API.
       - `thawr_peers_online` adds static peers with a fresh hub handshake
         to the hub's agent count, the same rule `Server.Online` uses.
+      - ACME done. Only the configured domain goes to autocert; every
+        other server name (the clients' `thawr-pinned.invalid`, none,
+        or another name) gets the pinned certificate, which is narrower
+        than the spec's first draft ("any other name: ACME") and keeps
+        old clients that dial an alias working.
+      - The server asks for the ACME certificate once at start, in the
+        background: Go's HTTP server ends a TLS handshake after its
+        10 s header timeout, which a first issuance can exceed, and a
+        wrong domain or port shows in the log at once.
+      - Warnings (`Config.Warnings`, logged by `server` and `--check`)
+        for acme mode with `min_client_version` below 0.2 and for
+        `listen.https` off port 443, where TLS-ALPN-01 cannot reach it.
+      - Verified against Pebble with real TLS-ALPN-01 validation (DNS
+        from `pebble-challtestsrv`): issued, served to the domain only,
+        renewal changes the browser certificate and not the pinned one.
+        Pebble v2.10.1 answers the finalize request without the
+        `Location` header that x/crypto's `CreateOrderCert` reads, so
+        issuance fails there; v2.4.0 sends it and works. Let's Encrypt
+        itself is the manual staging step 8, kept instead of a
+        build-tagged test that CI would never run.
 
 ## Phase 2 candidates (scheduled as specs 014–021 in `docs/roadmap/`)
 

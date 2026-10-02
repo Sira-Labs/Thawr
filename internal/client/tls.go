@@ -17,6 +17,13 @@ import (
 // FingerprintPrefix is the scheme of certificate fingerprints.
 const FingerprintPrefix = "sha256:"
 
+// PinnedServerName is the TLS server name (SNI) every client sends. The
+// server answers it with the self-signed certificate clients pin, even
+// when it also holds an ACME certificate for browsers (spec 014). The
+// .invalid top-level domain is reserved (RFC 2606), so the name never
+// belongs to a real host.
+const PinnedServerName = "thawr-pinned.invalid"
+
 // ErrFingerprintMismatch means the server presented a certificate other
 // than the pinned one.
 var ErrFingerprintMismatch = errors.New("client: server certificate does not match the pinned fingerprint")
@@ -54,6 +61,7 @@ func PinnedTLSConfig(fingerprint string) (*tls.Config, error) {
 	}
 	return &tls.Config{
 		MinVersion:             tls.VersionTLS13,
+		ServerName:             PinnedServerName,
 		SessionTicketsDisabled: true,
 		InsecureSkipVerify:     true, //nolint:gosec // replaced by fingerprint pinning below
 		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
@@ -79,6 +87,7 @@ func ProbeFingerprint(ctx context.Context, addr string, timeout time.Duration) (
 		NetDialer: &net.Dialer{Timeout: timeout},
 		Config: &tls.Config{
 			MinVersion:         tls.VersionTLS13,
+			ServerName:         PinnedServerName,
 			InsecureSkipVerify: true, //nolint:gosec // probe only; nothing is sent on this connection
 		},
 	}

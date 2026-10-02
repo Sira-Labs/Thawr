@@ -59,7 +59,7 @@ Can observe, modify, inject and drop packets between any two parties.
 | Read or modify data-plane traffic | WireGuard (ChaCha20-Poly1305, authenticated). Not our code |
 | Read or modify control-channel traffic | TLS 1.3 minimum; clients pin the server certificate fingerprint delivered out of band in the join command |
 | Impersonate the server to a new client at enrollment | Fingerprint is part of the join command; the client refuses a mismatch. If the admin omits the fingerprint the client prints it and requires `--accept-fingerprint` to continue (explicit TOFU) |
-| Impersonate the server to an existing client | Pinned fingerprint in `state.json`; rotation requires the client to receive the new fingerprint through the still-valid old channel |
+| Impersonate the server to an existing client | Pinned fingerprint in `state.json`; clients ask for the pinned certificate by name (`thawr-pinned.invalid`), so in `tls.mode: acme` the browser certificate and its renewals never replace it; the pinned certificate does not rotate (ten years), and rotating it would require the client to receive the new fingerprint through the still-valid old channel. A CA-issued certificate for the server's domain gains an attacker nothing against clients, which ignore CAs |
 | Replay control messages | TLS; gRPC streams are stateful; enrollment tokens are single-use |
 | Learn topology from traffic analysis | Out of scope (endpoints and packet sizes are visible; WireGuard does not hide them) |
 | Denial of service by dropping packets | Out of scope beyond relay fallback |

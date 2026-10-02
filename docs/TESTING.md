@@ -381,3 +381,17 @@ host, and an enrolled laptop.
    the same text and `curl 127.0.0.1:9469/api/v1/status` a 404; without
    the key, `ss -ltn` shows no such port. `curl -k
    https://<server>/metrics` does not return metrics.
+8. ACME (VPS with a DNS name, port 443 open, the laptop on 0.2): set
+   `tls: {mode: acme, email: <you>, acme_directory:
+   https://acme-staging-v02.api.letsencrypt.org/directory}` and
+   `min_client_version: "0.2"`; `server --check` prints no warning.
+   After a restart the log has `acme certificate ready` within a
+   minute and `data_dir/acme` holds the account key and the
+   certificate (0600). `curl -v https://<domain>/` shows the staging
+   issuer (`(STAGING)` in its name) instead of the self-signed one, and
+   `openssl s_client -connect <domain>:443 -servername
+   thawr-pinned.invalid` shows the fingerprint `server ready` prints.
+   The laptop's `client status` stays `connected` throughout. Delete
+   `data_dir/acme/<domain>` and restart: the browser certificate
+   changes, the laptop notices nothing. Without `min_client_version`
+   (or with `listen.https` off port 443) `server --check` warns.

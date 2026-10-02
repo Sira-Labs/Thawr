@@ -3,7 +3,9 @@ package config
 import (
 	"fmt"
 	"net"
+	"net/mail"
 	"net/netip"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -20,6 +22,31 @@ func (e *ValidationError) Error() string {
 }
 
 var versionRe = regexp.MustCompile(`^\d+\.\d+$`)
+
+// dnsNameRe matches a fully qualified host name with at least two
+// labels; an IP literal never matches because its last label is numeric.
+var dnsNameRe = regexp.MustCompile(`^(?i)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`)
+
+// versionBelow reports whether MAJOR.MINOR v is older than minimum; an
+// empty v counts as older, since it enforces nothing.
+func versionBelow(v, minimum string) bool {
+	vMaj, vMin, ok := majorMinor(v)
+	if !ok {
+		return true
+	}
+	mMaj, mMin, _ := majorMinor(minimum)
+	return vMaj < mMaj || (vMaj == mMaj && vMin < mMin)
+}
+
+func majorMinor(v string) (int, int, bool) {
+	maj, minor, ok := strings.Cut(v, ".")
+	if !ok {
+		return 0, 0, false
+	}
+	a, err1 := strconv.Atoi(maj)
+	b, err2 := strconv.Atoi(minor)
+	return a, b, err1 == nil && err2 == nil
+}
 
 // Validate checks every field and returns a *ValidationError listing all
 // problems, or nil.
@@ -93,8 +120,27 @@ func (c *Config) Validate() error {
 		if c.TLS.KeyFile == "" {
 			add("tls.key_file: required when tls.mode is file")
 		}
+	case TLSModeACME:
+		if c.TLS.Email == "" {
+			add("tls.email: required when tls.mode is acme")
+		} else if a, err := mail.ParseAddress(c.TLS.Email); err != nil || a.Name != "" || a.Address != c.TLS.Email {
+			add("tls.email: %q is not an email address", c.TLS.Email)
+		}
+		if d := c.ACMEDomain(); !dnsNameRe.MatchString(d) {
+			add("tls.domain: tls.mode acme needs a DNS name in tls.domain or public_addr, got %q", d)
+		} else if strings.HasSuffix(strings.ToLower(strings.TrimSuffix(d, ".")), ".invalid") {
+			// .invalid is reserved (RFC 2606): no CA issues for it, and
+			// clients ask for the pinned certificate as thawr-pinned.invalid,
+			// which must never be routed to the ACME manager.
+			add("tls.domain: %q is under the reserved .invalid domain; use the name browsers reach the server by", d)
+		}
+		if c.TLS.ACMEDirectory != "" {
+			if u, err := url.Parse(c.TLS.ACMEDirectory); err != nil || u.Scheme != "https" || u.Host == "" {
+				add("tls.acme_directory: %q must be an https URL", c.TLS.ACMEDirectory)
+			}
+		}
 	default:
-		add("tls.mode: %q must be self-signed or file", c.TLS.Mode)
+		add("tls.mode: %q must be self-signed, file or acme", c.TLS.Mode)
 	}
 
 	if c.AdminSocket == "" {

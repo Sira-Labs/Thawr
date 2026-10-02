@@ -246,6 +246,25 @@ or key. For a Prometheus on the same host, set `metrics: {listen:
 listener has no authentication, so keep it on loopback or behind a
 firewall.
 
+**Browser-trusted certificate.** Clients pin the server's self-signed
+certificate, so browsers warn on the admin UI. With
+
+```yaml
+tls:
+  mode: acme
+  email: ops@example.org        # the domain is the host of public_addr
+min_client_version: "0.2"
+```
+
+the server also gets a certificate from Let's Encrypt for its domain,
+proved over the HTTPS port itself (port 443 must reach `listen.https`;
+no port 80), and renews it on its own. Clients keep asking for the
+pinned certificate by name, so they never see the new one and nothing
+needs re-enrolling. Upgrade every client to 0.2 before you switch:
+an older client that dials the domain would be handed the new
+certificate and refuse it. `tls.acme_directory` points at a staging CA
+for a first try.
+
 ## Upgrading
 
 Replace the binary and restart the service:

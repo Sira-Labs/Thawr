@@ -81,6 +81,7 @@ type Server struct {
 	undoForwarding func()
 	hubKey         wg.Key
 	tlsCert        tls.Certificate
+	certs          *certSelector
 	tlsFingerprint string
 	device         wg.Device
 	policySvc      *control.PolicyService
@@ -230,6 +231,11 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 	}
 	s.tlsFingerprint = tlsFingerprint(s.tlsCert)
 	s.log.Info("tls certificate ready", "mode", cfg.TLS.Mode, "generated", created, "fingerprint", s.tlsFingerprint)
+	s.certs = newCertSelector(cfg, &s.tlsCert)
+	if s.certs.acme != nil {
+		s.log.Info("acme certificate for browsers enabled; clients keep the pinned certificate",
+			"domain", s.certs.domain, "cache", filepath.Join(cfg.DataDir, ACMEDir))
+	}
 
 	if err := s.startHub(ctx); err != nil {
 		return err
@@ -348,6 +354,11 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 		"hub_endpoint", cfg.HubEndpoint(),
 		"dns", s.dnsListenAddr())
 	s.readyOnce.Do(func() { close(s.ready) })
+	if s.certs.acme != nil {
+		// Not awaited on shutdown: autocert bounds an issuance itself
+		// (five minutes) and offers no way to cancel it.
+		go s.warmACME()
+	}
 
 	for {
 		select {
@@ -526,6 +537,18 @@ func (s *Server) Online(peerID string) bool {
 	return !seen.IsZero() && s.deps.Now().Sub(seen) < staticOnline
 }
 
+// warmACME obtains the ACME certificate in the background and logs the
+// outcome; autocert renews it from then on.
+func (s *Server) warmACME() {
+	expires, err := s.certs.warm()
+	if err != nil {
+		s.log.Warn("acme certificate not obtained; browsers on the domain fail their handshake until it is, clients are unaffected",
+			"domain", s.certs.domain, "err", err, "hint", "the next browser connection retries after a minute")
+		return
+	}
+	s.log.Info("acme certificate ready", "domain", s.certs.domain, "expires", expires)
+}
+
 func (s *Server) listenHTTPS(ctx context.Context, h http.Handler) (*http.Server, net.Listener, error) {
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", s.cfg.Listen.HTTPS)
@@ -538,9 +561,9 @@ func (s *Server) listenHTTPS(ctx context.Context, h http.Handler) (*http.Server,
 		Handler:           h,
 		ReadHeaderTimeout: 10 * time.Second,
 		TLSConfig: &tls.Config{
-			MinVersion:   tls.VersionTLS13,
-			Certificates: []tls.Certificate{s.tlsCert},
-			NextProtos:   []string{"h2", "http/1.1"},
+			MinVersion:     tls.VersionTLS13,
+			GetCertificate: s.certs.GetCertificate,
+			NextProtos:     s.certs.nextProtos(),
 		},
 		ErrorLog: slog.NewLogLogger(s.log.Handler(), slog.LevelWarn),
 	}

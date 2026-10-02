@@ -46,6 +46,11 @@ Progress log:
   holds, `--lock-signer`). PRs #13–#26.
 - **2026-09-20/26** sprint 4 (in progress): this roadmap and sprint
   plan, manual checklists 010–012 on the owner's hosts, `v0.1.0`.
+- **2026-10-02** sprint 6: 014 operations (`admin backup` and `server
+  restore` with a verified archive and a `data_dir` lock, Prometheus
+  metrics on the admin socket and an opt-in listener, a browser
+  certificate from ACME chosen by server name while clients keep the
+  pinned one). PRs #41–#43.
 
 Exit criteria: specs 001–012 implemented with unit tests and the netns
 integration suite green on a Linux VM; the manual checklists in

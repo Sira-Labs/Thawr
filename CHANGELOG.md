@@ -21,6 +21,15 @@ when one exists, and GitHub's generated notes otherwise.
   database, and keeps every client's pin valid.
 - The server locks `data_dir` (`thawr.lock`): a second server on the
   same directory exits before it opens the database.
+- `tls.mode: acme` (spec 014): a browser-trusted certificate from
+  Let's Encrypt (or `tls.acme_directory`) for the server's domain,
+  validated over the HTTPS port (TLS-ALPN-01, no port 80) and renewed
+  on its own, while clients keep the pinned self-signed certificate:
+  every client now asks for it by the name `thawr-pinned.invalid`, and
+  only the domain is answered with the ACME one. Startup and `server
+  --check` warn while `min_client_version` is below 0.2 (older clients
+  dialling the domain would fail their pin) or `listen.https` is not
+  on port 443.
 - Prometheus metrics (spec 014) on the admin socket at `/metrics`, and
   on an opt-in plain-HTTP listener (`metrics.listen`): peers by kind and
   online, netmap generation, relay and STUN counters, failed logins,

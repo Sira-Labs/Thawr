@@ -91,7 +91,15 @@ func TestValidate(t *testing.T) {
 		{"negative relay limit", "public_addr: a\nrelay:\n  max_bytes_per_second: -1\n", []string{"relay.max_bytes_per_second"}},
 		{"three stun", "public_addr: a\nlisten:\n  stun: [':1', ':2', ':3']\n", []string{"at most two"}},
 		{"tls file without files", "public_addr: a\ntls:\n  mode: file\n", []string{"tls.cert_file", "tls.key_file"}},
-		{"tls bad mode", "public_addr: a\ntls:\n  mode: acme\n", []string{"tls.mode"}},
+		{"tls bad mode", "public_addr: a\ntls:\n  mode: letsencrypt\n", []string{"tls.mode"}},
+		{"acme without email", "public_addr: vpn.example.org\ntls:\n  mode: acme\n", []string{"tls.email: required"}},
+		{"acme bad email", "public_addr: vpn.example.org\ntls:\n  mode: acme\n  email: 'Ops <ops@example.org>'\n", []string{"tls.email"}},
+		{"acme ip public_addr", "public_addr: 203.0.113.7\ntls:\n  mode: acme\n  email: ops@example.org\n", []string{"tls.mode acme needs a DNS name"}},
+		{"acme ip domain", "public_addr: vpn.example.org\ntls:\n  mode: acme\n  email: ops@example.org\n  domain: 203.0.113.7\n", []string{"tls.domain"}},
+		{"acme pinned name", "public_addr: vpn.example.org\ntls:\n  mode: acme\n  email: ops@example.org\n  domain: Thawr-Pinned.INVALID\n", []string{"reserved .invalid"}},
+		{"acme invalid public_addr", "public_addr: vpn.invalid\ntls:\n  mode: acme\n  email: ops@example.org\n", []string{"reserved .invalid"}},
+		{"acme single label", "public_addr: vpn\ntls:\n  mode: acme\n  email: ops@example.org\n", []string{"tls.domain"}},
+		{"acme http directory", "public_addr: vpn.example.org\ntls:\n  mode: acme\n  email: ops@example.org\n  acme_directory: http://ca.example/dir\n", []string{"tls.acme_directory"}},
 		{"bad log level", "public_addr: a\nlog:\n  level: loud\n", []string{"log.level"}},
 		{"bad log format", "public_addr: a\nlog:\n  format: xml\n", []string{"log.format"}},
 		{"bad min version", "public_addr: a\nmin_client_version: v1\n", []string{"min_client_version"}},
@@ -109,6 +117,34 @@ func TestValidate(t *testing.T) {
 				if !strings.Contains(err.Error(), w) {
 					t.Errorf("error %q does not contain %q", err.Error(), w)
 				}
+			}
+		})
+	}
+}
+
+func TestACMEConfig(t *testing.T) {
+	cases := []struct {
+		name, yaml, domain string
+		warn               bool
+	}{
+		{"https not on 443", "public_addr: vpn.example.org\nmin_client_version: '0.2'\nlisten:\n  https: ':8443'\ntls:\n  mode: acme\n  email: ops@example.org\n", "vpn.example.org", true},
+		{"domain from public_addr", "public_addr: vpn.example.org:443\ntls:\n  mode: acme\n  email: ops@example.org\n", "vpn.example.org", true},
+		{"domain beside an ip", "public_addr: 203.0.113.7\ntls:\n  mode: acme\n  email: ops@example.org\n  domain: vpn.example.org\n  acme_directory: https://acme-staging-v02.api.letsencrypt.org/directory\n", "vpn.example.org", true},
+		{"old clients excluded", "public_addr: vpn.example.org\nmin_client_version: '0.2'\ntls:\n  mode: acme\n  email: ops@example.org\n", "vpn.example.org", false},
+		{"newer minimum", "public_addr: vpn.example.org\nmin_client_version: '1.0'\ntls:\n  mode: acme\n  email: ops@example.org\n", "vpn.example.org", false},
+		{"self-signed never warns", "public_addr: vpn.example.org\n", "vpn.example.org", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := Parse([]byte(tc.yaml), noEnv)
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if got := cfg.ACMEDomain(); got != tc.domain {
+				t.Errorf("ACMEDomain = %q, want %q", got, tc.domain)
+			}
+			if w := cfg.Warnings(); (len(w) > 0) != tc.warn {
+				t.Errorf("Warnings = %q, want warning %v", w, tc.warn)
 			}
 		})
 	}
