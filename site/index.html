@@ -547,7 +547,9 @@ Filter: 3 rules · 0 dropped (last 5 min)
       </div>
       <div class="code"><pre id="verify">curl -fLO https://github.com/Sira-Labs/Thawr/releases/download/v0.1.0-rc7/thawr_v0.1.0-rc7_linux_amd64.tar.gz &amp;&amp;
 curl -fLO https://github.com/Sira-Labs/Thawr/releases/download/v0.1.0-rc7/SHA256SUMS &amp;&amp;
-sha256sum -c SHA256SUMS --ignore-missing &amp;&amp;
+awk -v f=thawr_v0.1.0-rc7_linux_amd64.tar.gz '$2 == f' SHA256SUMS &gt; thawr.sha256 &amp;&amp;
+test -s thawr.sha256 &amp;&amp;
+sha256sum -c thawr.sha256 &amp;&amp;
 tar xzf thawr_v0.1.0-rc7_linux_amd64.tar.gz &amp;&amp;
 sudo install -m 0755 thawr_v0.1.0-rc7_linux_amd64/thawr /usr/local/bin/thawr &amp;&amp;
 thawr version</pre><button class="copy" type="button">Copy</button></div>
@@ -707,19 +709,26 @@ thawr version</pre><button class="copy" type="button">Copy</button></div>
 
   function snippet(key, tag) {
     var base = BASE + tag + "/", name = "thawr_" + tag + "_" + key;
-    // Pasted line by line, a failed check must still stop the install: PowerShell keeps the
-    // extraction inside the if, and the shell chains every step with &&.
+    // A failed download or check must stop the install even when the block is pasted line by
+    // line: PowerShell runs everything in one try with -ErrorAction Stop, and the shell chains
+    // every step with &&. The checksum line is the one whose file name is exactly the archive.
     if (key.indexOf("windows") === 0) {
-      return "Invoke-WebRequest " + base + name + ".zip -OutFile thawr.zip\n" +
-        "Invoke-WebRequest " + base + "SHA256SUMS -OutFile SHA256SUMS\n" +
-        "$expected = ((Select-String -SimpleMatch " + name + ".zip SHA256SUMS).Line -split '\\s+')[0]\n" +
-        "$actual = (Get-FileHash thawr.zip -Algorithm SHA256).Hash\n" +
-        "if ($expected -and $actual -eq $expected) { Expand-Archive thawr.zip .; & .\\" + name + "\\thawr.exe version } " +
-        "else { Write-Error 'SHA256 mismatch: do not use thawr.zip' }";
+      return "try {\n" +
+        "  Invoke-WebRequest " + base + name + ".zip -OutFile thawr.zip -ErrorAction Stop\n" +
+        "  Invoke-WebRequest " + base + "SHA256SUMS -OutFile SHA256SUMS -ErrorAction Stop\n" +
+        "  $line = Get-Content SHA256SUMS | Where-Object { ($_ -split '\\s+')[1] -eq '" + name + ".zip' }\n" +
+        "  $actual = (Get-FileHash thawr.zip -Algorithm SHA256).Hash\n" +
+        "  if (-not $line -or ($line -split '\\s+')[0] -ne $actual) { throw 'SHA256 mismatch: do not use thawr.zip' }\n" +
+        "  Expand-Archive thawr.zip . -Force -ErrorAction Stop\n" +
+        "  & .\\" + name + "\\thawr.exe version\n" +
+        "} catch { Write-Error $_ }";
     }
-    var check = key.indexOf("darwin") === 0 ? "grep " + name + ".tar.gz SHA256SUMS | shasum -a 256 -c" : "sha256sum -c SHA256SUMS --ignore-missing";
+    var sum = key.indexOf("darwin") === 0 ? "shasum -a 256" : "sha256sum";
     return "curl -fLO " + base + name + ".tar.gz &&\n" +
-      "curl -fLO " + base + "SHA256SUMS &&\n" + check + " &&\n" +
+      "curl -fLO " + base + "SHA256SUMS &&\n" +
+      "awk -v f=" + name + ".tar.gz '$2 == f' SHA256SUMS > thawr.sha256 &&\n" +
+      "test -s thawr.sha256 &&\n" +
+      sum + " -c thawr.sha256 &&\n" +
       "tar xzf " + name + ".tar.gz &&\n" +
       "sudo install -m 0755 " + name + "/thawr /usr/local/bin/thawr &&\n" +
       "thawr version";
