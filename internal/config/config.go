@@ -185,6 +185,10 @@ func (c *Config) Warnings() []string {
 		w = append(w, fmt.Sprintf("tls.mode acme: clients older than %s that dial %s are handed the ACME certificate and fail their pin; "+
 			"upgrade them and set min_client_version: %q", ACMEMinClientVersion, c.ACMEDomain(), ACMEMinClientVersion))
 	}
+	if _, port, err := net.SplitHostPort(c.Listen.HTTPS); c.TLS.Mode == TLSModeACME && err == nil && port != "443" {
+		w = append(w, fmt.Sprintf("tls.mode acme: the CA validates %s on port 443, but listen.https is %s; "+
+			"forward port 443 to it or the certificate is never issued", c.ACMEDomain(), c.Listen.HTTPS))
+	}
 	return w
 }
 

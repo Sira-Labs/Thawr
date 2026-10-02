@@ -125,6 +125,7 @@ func TestACMEConfig(t *testing.T) {
 		name, yaml, domain string
 		warn               bool
 	}{
+		{"https not on 443", "public_addr: vpn.example.org\nmin_client_version: '0.2'\nlisten:\n  https: ':8443'\ntls:\n  mode: acme\n  email: ops@example.org\n", "vpn.example.org", true},
 		{"domain from public_addr", "public_addr: vpn.example.org:443\ntls:\n  mode: acme\n  email: ops@example.org\n", "vpn.example.org", true},
 		{"domain beside an ip", "public_addr: 203.0.113.7\ntls:\n  mode: acme\n  email: ops@example.org\n  domain: vpn.example.org\n  acme_directory: https://acme-staging-v02.api.letsencrypt.org/directory\n", "vpn.example.org", true},
 		{"old clients excluded", "public_addr: vpn.example.org\nmin_client_version: '0.2'\ntls:\n  mode: acme\n  email: ops@example.org\n", "vpn.example.org", false},
