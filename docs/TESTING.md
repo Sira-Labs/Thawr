@@ -371,3 +371,13 @@ host, and an enrolled laptop.
 6. Cut the last byte off a copy of the archive (`cp b.tar.gz c.tar.gz
    && truncate -s -1 c.tar.gz`): `server restore c.tar.gz` exits 2
    with `invalid backup archive` and leaves `data_dir` untouched.
+7. Metrics: `sudo curl --unix-socket /var/lib/thawr/admin.sock
+   http://thawr/metrics` lists `thawr_peers{kind=...}`,
+   `thawr_peers_online`, `thawr_relay_*`, `thawr_stun_requests_total`,
+   `thawr_login_failures_total` and `thawr_audit_rows`, and none of the
+   peers' names or addresses. A wrong password in the admin UI raises
+   `thawr_login_failures_total` by one. With `metrics: {listen:
+   127.0.0.1:9469}` and a restart, `curl 127.0.0.1:9469/metrics` gives
+   the same text and `curl 127.0.0.1:9469/api/v1/status` a 404; without
+   the key, `ss -ltn` shows no such port. `curl -k
+   https://<server>/metrics` does not return metrics.

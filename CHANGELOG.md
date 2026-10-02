@@ -21,6 +21,11 @@ when one exists, and GitHub's generated notes otherwise.
   database, and keeps every client's pin valid.
 - The server locks `data_dir` (`thawr.lock`): a second server on the
   same directory exits before it opens the database.
+- Prometheus metrics (spec 014) on the admin socket at `/metrics`, and
+  on an opt-in plain-HTTP listener (`metrics.listen`): peers by kind and
+  online, netmap generation, relay and STUN counters, failed logins,
+  audit rows, uptime. Counts only, never a name, address or key; no
+  new dependency.
 
 ### Fixed
 

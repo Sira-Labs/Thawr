@@ -107,6 +107,7 @@ archive (A11), which holds the same keys and database.
 | Steal node secrets | Only SHA-256 hashes are stored; the attacker cannot impersonate existing clients from the DB alone, but as the server they can serve them anything |
 | Steal password hashes | argon2id (64 MiB, 3 iterations, 4 lanes) slows offline cracking; admins are told to use a password manager |
 | Steal enrollment tokens | Hashed; unused tokens can be revoked by deleting `data_dir` and re-issuing |
+| Read the metrics listener | `metrics.listen` is off by default and has no authentication when on. A scrape holds counts only (peers per kind and online, relay and STUN counters, failed logins, audit rows), never a name, address, key, fingerprint or token, which a test asserts; at most it tells an observer how big and how busy the network is (spec 014) |
 | Steal a backup archive | The archive is a copy of `data_dir`: everything in this table applies to whoever holds it. It is written 0600, offered only on the admin socket (never over HTTPS, for any role), and not encrypted by Thawr, which implements no cryptography; operators store it like the server disk (encrypted volume, or encrypted by their backup tool). Restoring it on another host makes that host the server for every enrolled client once `public_addr` points there (spec 014) |
 | Persist after cleanup | All state is in `data_dir`; rebuilding the server from a clean binary and a clean directory invalidates every node secret (clients must re-enrol). Peers' WireGuard keys can be kept |
 

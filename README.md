@@ -237,6 +237,15 @@ re-enrol, because the server key and certificate are the same.
 `--force` replaces an existing `data_dir` by moving it aside, never by
 deleting it.
 
+**Metrics.** `curl --unix-socket /var/lib/thawr/admin.sock
+http://thawr/metrics` prints Prometheus metrics: peers by kind and
+online, netmap generation, relay sessions and bytes, STUN requests,
+failed logins, audit rows. They are counts only: no peer name, address
+or key. For a Prometheus on the same host, set `metrics: {listen:
+127.0.0.1:9469}` and scrape `http://127.0.0.1:9469/metrics`; that
+listener has no authentication, so keep it on loopback or behind a
+firewall.
+
 ## Upgrading
 
 Replace the binary and restart the service:
