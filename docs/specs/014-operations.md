@@ -119,7 +119,9 @@ metrics:
 - Audit `backup.create`, actor as for every socket call (`local`),
   target the archive's suggested name, details `sha256` of the archive
   and `peers` (count). The row is written after the archive was
-  produced, in its own transaction; a failed backup leaves no row.
+  produced, in its own transaction; a failed backup leaves no row. The
+  snapshot is taken first, so an archive never contains its own
+  `backup.create` row.
 
 ### Restore
 

@@ -47,7 +47,7 @@ func newServerCmd(deps cliDeps) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&configPath, "config", defaultServerConfig(), "path to the server YAML config ($"+envConfig+")")
 	cmd.Flags().BoolVar(&check, "check", false, "validate config, TLS files and policy, then exit")
-	cmd.AddCommand(newServerInstallCmd(deps), newServerUninstallCmd(deps))
+	cmd.AddCommand(newServerInstallCmd(deps), newServerUninstallCmd(deps), newServerRestoreCmd(deps))
 	return cmd
 }
 

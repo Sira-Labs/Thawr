@@ -54,6 +54,16 @@ func loadMigrations() ([]migration, error) {
 	return out, nil
 }
 
+// LatestSchemaVersion is the schema version this binary migrates to;
+// a database (or a backup) newer than that cannot be opened.
+func LatestSchemaVersion() (int, error) {
+	m, err := loadMigrations()
+	if err != nil {
+		return 0, err
+	}
+	return len(m), nil
+}
+
 // migrate applies every migration newer than the recorded schema
 // version inside one transaction and records the new version.
 func (s *Store) migrate(ctx context.Context) error {

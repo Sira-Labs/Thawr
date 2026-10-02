@@ -11,27 +11,38 @@ import (
 	"testing"
 
 	"github.com/sira-labs/thawr/internal/backup"
+	"github.com/sira-labs/thawr/internal/config"
 	"github.com/sira-labs/thawr/internal/control"
 	"github.com/sira-labs/thawr/internal/store"
 )
 
 // startWithConfigFile runs a server whose Deps.ConfigPath names a real
 // file, as `thawr server --config` does, and with a policy on disk.
-func startWithConfigFile(t *testing.T) (*harness, string) {
+func startWithConfigFile(t *testing.T) *harness {
 	t.Helper()
 	cfg, dir := testConfig(t)
 	allowSelfPolicy(t, cfg)
-	cfgPath := filepath.Join(dir, "server.yaml")
-	if err := os.WriteFile(cfgPath, []byte("public_addr: 127.0.0.1\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	cfgPath := writeConfigFile(t, cfg, dir)
 	h := newHarness(t, cfg, func(d *Deps) { d.ConfigPath = cfgPath })
 	h.start(t)
-	return h, cfgPath
+	return h
+}
+
+// writeConfigFile writes cfg's paths to dir/server.yaml. Every path is a
+// test temp path: a config without data_dir would name /var/lib/thawr,
+// and restore tests act on the config in the archive.
+func writeConfigFile(t *testing.T, cfg *config.Config, dir string) string {
+	t.Helper()
+	p := filepath.Join(dir, "server.yaml")
+	body := "public_addr: 127.0.0.1\ndata_dir: " + cfg.DataDir + "\nadmin_socket: " + cfg.AdminSocket + "\npolicy_file: " + cfg.PolicyFile + "\n"
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
 }
 
 func TestBackupArchive(t *testing.T) {
-	h, _ := startWithConfigFile(t)
+	h := startWithConfigFile(t)
 	defer h.stop(t)
 	cfg := h.srv.cfg
 
