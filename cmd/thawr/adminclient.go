@@ -23,18 +23,21 @@ const envAdminSocket = "THAWR_ADMIN_SOCKET"
 // adminClient talks to the server's local admin API over the Unix socket.
 type adminClient struct {
 	http *http.Client
+	// long has no overall timeout, for streamed downloads (backup).
+	long *http.Client
 }
 
 func newAdminClient(socket string) *adminClient {
-	return &adminClient{http: &http.Client{
-		Timeout: 30 * time.Second,
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				var d net.Dialer
-				return d.DialContext(ctx, "unix", socket)
-			},
+	tr := &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "unix", socket)
 		},
-	}}
+	}
+	return &adminClient{
+		http: &http.Client{Timeout: 30 * time.Second, Transport: tr},
+		long: &http.Client{Transport: tr},
+	}
 }
 
 func defaultAdminSocket() string {
@@ -62,19 +65,8 @@ func (c *adminClient) do(ctx context.Context, method, path string, in, out any) 
 		}
 		body = bytes.NewReader(data)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, "http://thawr"+path, body)
+	resp, err := c.send(ctx, c.http, method, path, body)
 	if err != nil {
-		return err
-	}
-	if in != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		var opErr *net.OpError
-		if errors.As(err, &opErr) {
-			return adminDialError(opErr, err)
-		}
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -82,7 +74,41 @@ func (c *adminClient) do(ctx context.Context, method, path string, in, out any) 
 	if err != nil {
 		return fmt.Errorf("read response: %w", err)
 	}
+	if out != nil && len(data) > 0 {
+		if err := json.Unmarshal(data, out); err != nil {
+			return fmt.Errorf("decode response: %w", err)
+		}
+	}
+	return nil
+}
+
+// stream sends a GET without the 30-second timeout and size cap of do
+// and returns the response for the caller to read and close.
+func (c *adminClient) stream(ctx context.Context, path string) (*http.Response, error) {
+	return c.send(ctx, c.long, http.MethodGet, path, nil)
+}
+
+// send performs a request, explains a socket that did not answer, and
+// turns a non-2xx response into an *apiError (closing its body).
+func (c *adminClient) send(ctx context.Context, hc *http.Client, method, path string, body io.Reader) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, method, "http://thawr"+path, body)
+	if err != nil {
+		return nil, err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := hc.Do(req)
+	if err != nil {
+		var opErr *net.OpError
+		if errors.As(err, &opErr) {
+			return nil, adminDialError(opErr, err)
+		}
+		return nil, err
+	}
 	if resp.StatusCode >= 300 {
+		defer func() { _ = resp.Body.Close() }()
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 		var e struct {
 			Error string `json:"error"`
 		}
@@ -90,14 +116,9 @@ func (c *adminClient) do(ctx context.Context, method, path string, in, out any) 
 		if e.Error == "" {
 			e.Error = resp.Status
 		}
-		return &apiError{Status: resp.StatusCode, Message: e.Error}
+		return nil, &apiError{Status: resp.StatusCode, Message: e.Error}
 	}
-	if out != nil && len(data) > 0 {
-		if err := json.Unmarshal(data, out); err != nil {
-			return fmt.Errorf("decode response: %w", err)
-		}
-	}
-	return nil
+	return resp, nil
 }
 
 // adminDialError explains why the admin socket did not answer. `thawr

@@ -217,6 +217,26 @@ Docker hosts whose default `FORWARD` policy is `DROP`.
 Thawr trades breadth for sovereignty and simplicity; `docs/VISION.md`
 has the longer version and the non-goals.
 
+## Operations
+
+**Backup.** On the server, `sudo thawr admin backup --out
+/backup/thawr-$(date +%F).tar.gz` writes one archive with everything
+the network needs: the database, the server's WireGuard key, the pinned
+TLS certificate, and copies of the config and policy. It is written
+with mode 0600 and holds the server's private keys, so keep it like the
+server's disk (an encrypted volume, or encrypted by your backup tool).
+Running it from cron is safe while the server serves; every backup
+leaves a `backup.create` row in `thawr admin audit`.
+
+**Restore.** On a new host with the server stopped, `sudo thawr server
+restore thawr-2026-10-02.tar.gz` verifies the archive, refuses one from
+a newer release, and writes `data_dir`, plus the config and policy if
+none exist yet. Point the DNS name in `public_addr` at the new host and
+start the service: devices reconnect on their own, with nothing to
+re-enrol, because the server key and certificate are the same.
+`--force` replaces an existing `data_dir` by moving it aside, never by
+deleting it.
+
 ## Upgrading
 
 Replace the binary and restart the service:

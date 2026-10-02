@@ -47,7 +47,7 @@ func newServerCmd(deps cliDeps) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&configPath, "config", defaultServerConfig(), "path to the server YAML config ($"+envConfig+")")
 	cmd.Flags().BoolVar(&check, "check", false, "validate config, TLS files and policy, then exit")
-	cmd.AddCommand(newServerInstallCmd(deps), newServerUninstallCmd(deps))
+	cmd.AddCommand(newServerInstallCmd(deps), newServerUninstallCmd(deps), newServerRestoreCmd(deps))
 	return cmd
 }
 
@@ -70,7 +70,7 @@ func checkServer(configPath string, errOut io.Writer) (*config.Config, *server.S
 		return nil, nil, &exitError{code: exitConfigError, err: err}
 	}
 	logger := server.NewLogger(cfg.Log, errOut)
-	srv, err := server.New(cfg, server.Deps{Logger: logger, Version: version})
+	srv, err := server.New(cfg, server.Deps{Logger: logger, Version: version, ConfigPath: configPath})
 	if err != nil {
 		return nil, nil, &exitError{code: exitConfigError, err: err}
 	}

@@ -718,12 +718,53 @@ tree that followed. One commit each, highest severity first.
       The default path stays `C:\var\lib\thawr`: moving it would leave
       an existing server's keys and database behind.
 
+## Sprint 6 — operations
+
+- [~] **014 Operations** — `docs/specs/014-operations.md`
+      Backup and restore, Prometheus metrics, ACME with the pinned
+      certificate kept for clients. Three PRs: backup and restore
+      (this one), metrics, ACME.
+      - Owner decisions (2026-10-02): the archive is plain `tar.gz`
+        written 0600, not encrypted (no new dependency; Thawr implements
+        no cryptography, operators encrypt with their backup tool);
+        metrics on the admin socket plus an opt-in listener; ACME picks
+        the certificate by SNI so client pins survive renewals.
+      - Backup and restore done. The archive is a `tar.gz` with
+        `manifest.json` first (size and SHA-256 per file); `Extract`
+        verifies while it writes and refuses links, unsafe paths and
+        anything the manifest does not list exactly.
+      - `GET /api/v1/backup` is registered only on the admin socket's
+        handler (`RESTDeps.Local`), not by role: an admin session over
+        HTTPS gets 404, because the archive holds `server.key`.
+      - The server builds the archive in a temporary directory inside
+        `data_dir` before streaming it, so errors become a 500 instead
+        of a cut stream, the response has a Content-Length and a SHA-256
+        header, and the CLI writes nothing it could not verify.
+      - The snapshot is `VACUUM INTO` on the store's single connection
+        (ADR 0002), not modernc's backup API: no driver-specific code,
+        and the copy is compacted.
+      - Restore extracts into the system temp dir first because the
+        target `data_dir` is not known until the config is (on a fresh
+        host it comes from the archive). A restore that fails after
+        writing empties `data_dir` again (it was empty or moved aside),
+        so a retry needs no `--force`.
+      - The client's instance lock moved to `internal/flock`; the
+        server takes `data_dir/thawr.lock` with it, and restore takes
+        the same lock, so a restore and a server exclude each other
+        even when the admin socket is gone. `--force` renames data_dir
+        while still holding that lock (Unix keeps a lock across a
+        rename; on Windows the rename is retried once after releasing
+        it and fails if a server took it), rather than a lock file next
+        to data_dir: under the systemd unit the server may write only
+        inside data_dir.
+
 ## Phase 2 candidates (scheduled as specs 014–021 in `docs/roadmap/`)
 
 - OIDC identity provider plugin (ADR 0006).
 - IPv6 overlay.
 - Separate relay nodes (`thawr relay`).
-- ACME TLS mode, Prometheus metrics, `thawr admin backup`.
+- ACME TLS mode, Prometheus metrics, `thawr admin backup` (spec 014,
+  sprint 6).
 - Workload / agent identity: short-lived tokens issued by CI or an
   orchestrator, using the existing `kind: agent`.
 - Short-lived peer keys with automatic rotation and expiry, and binding
