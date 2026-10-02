@@ -722,8 +722,8 @@ tree that followed. One commit each, highest severity first.
 
 - [~] **014 Operations** — `docs/specs/014-operations.md`
       Backup and restore, Prometheus metrics, ACME with the pinned
-      certificate kept for clients. Three PRs: backup and restore
-      (this one), metrics, ACME.
+      certificate kept for clients. Three PRs: backup and restore,
+      metrics, ACME.
       - Owner decisions (2026-10-02): the archive is plain `tar.gz`
         written 0600, not encrypted (no new dependency; Thawr implements
         no cryptography, operators encrypt with their backup tool);
@@ -757,6 +757,15 @@ tree that followed. One commit each, highest severity first.
         it and fails if a server took it), rather than a lock file next
         to data_dir: under the systemd unit the server may write only
         inside data_dir.
+      - Metrics done. The text format is written by hand
+        (`internal/metrics`, ~100 lines) instead of pulling in the
+        Prometheus client and its dependencies; each scrape is built from
+        counters the server already has, so nothing registers globally.
+      - `/metrics` on the admin socket is registered like the backup
+        route (`RESTDeps.Local`); the optional TCP listener has its own
+        mux with `/metrics` only, so it can never expose the API.
+      - `thawr_peers_online` adds static peers with a fresh hub handshake
+        to the hub's agent count, the same rule `Server.Online` uses.
 
 ## Phase 2 candidates (scheduled as specs 014–021 in `docs/roadmap/`)
 

@@ -514,7 +514,10 @@ lock is on), `GET /peers/{name}/routes` and `PUT
 /peers/{name}/routes/{prefix}` with `{"approved": bool}` (admins; the
 peer detail lists `routes`). `GET /backup` streams a backup archive (spec 014)
 and exists on the admin socket only: the HTTPS listener answers 404 for
-every role, because the archive holds `server.key` and the TLS key. JSON bodies. Browser
+every role, because the archive holds `server.key` and the TLS key. `GET
+/metrics` (outside `/api/v1`) is the Prometheus text format and is also
+served on the admin socket only; `metrics.listen` adds a plain-HTTP
+listener that serves `/metrics` and nothing else (spec 014). JSON bodies. Browser
 sessions are in memory (12 h) behind one `HttpOnly`, `Secure`,
 `SameSite=Strict` cookie; the session's CSRF token is returned by
 `/login` and `/me` and must be sent as `X-CSRF-Token` on mutating calls.

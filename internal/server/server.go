@@ -24,6 +24,7 @@ import (
 	"github.com/sira-labs/thawr/internal/control"
 	"github.com/sira-labs/thawr/internal/control/policy"
 	"github.com/sira-labs/thawr/internal/dns"
+	"github.com/sira-labs/thawr/internal/metrics"
 	"github.com/sira-labs/thawr/internal/relay"
 	"github.com/sira-labs/thawr/internal/store"
 	"github.com/sira-labs/thawr/internal/stun"
@@ -113,6 +114,9 @@ type Server struct {
 	readyOnce sync.Once
 	httpsAddr atomic.Pointer[string]
 	stunAddrs atomic.Pointer[[]string]
+	// stunCounters is shared by every STUN listener (metrics).
+	stunCounters stun.Counters
+	metricsAddr  atomic.Pointer[string]
 }
 
 // New validates cfg and prepares a Server. Nothing is touched on disk
@@ -273,7 +277,8 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 	if err != nil {
 		return err
 	}
-	restDeps.Local, restDeps.Sessions, restDeps.Backup = true, nil, s
+	metricsHandler := metrics.Handler(s.collectMetrics, s.log)
+	restDeps.Local, restDeps.Sessions, restDeps.Backup, restDeps.Metrics = true, nil, s, metricsHandler
 	adminHandler, err := api.NewREST(restDeps)
 	if err != nil {
 		return err
@@ -297,6 +302,18 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 		_ = httpsLn.Close()
 		return err
 	}
+	metricsSrv, metricsLn, err := s.listenMetrics(ctx, metricsHandler)
+	if err != nil {
+		_ = httpsLn.Close()
+		_ = adminLn.Close()
+		return err
+	}
+	servers := []*http.Server{httpsSrv, adminSrv}
+	if metricsSrv != nil {
+		servers = append(servers, metricsSrv)
+		addr := metricsLn.Addr().String()
+		s.metricsAddr.Store(&addr)
+	}
 
 	hubCtx, stopHub := context.WithCancel(ctx)
 	defer stopHub()
@@ -305,7 +322,7 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 	go s.observeHub(hubCtx)
 	go s.pruneAudit(hubCtx)
 
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 3)
 	go func() {
 		if e := httpsSrv.ServeTLS(httpsLn, "", ""); e != nil && !errors.Is(e, http.ErrServerClosed) {
 			errCh <- fmt.Errorf("server: https: %w", e)
@@ -316,6 +333,13 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 			errCh <- fmt.Errorf("server: admin socket: %w", e)
 		}
 	}()
+	if metricsSrv != nil {
+		go func() {
+			if e := metricsSrv.Serve(metricsLn); e != nil && !errors.Is(e, http.ErrServerClosed) {
+				errCh <- fmt.Errorf("server: metrics: %w", e)
+			}
+		}()
+	}
 
 	s.log.Info("server ready",
 		"public_addr", cfg.PublicAddr,
@@ -329,10 +353,10 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 		select {
 		case <-ctx.Done():
 			stopGRPC(grpcSrv, shutdownTimeout/2)
-			return s.shutdown(httpsSrv, adminSrv)
+			return s.shutdown(servers...)
 		case e := <-errCh:
 			grpcSrv.Stop()
-			_ = s.shutdown(httpsSrv, adminSrv)
+			_ = s.shutdown(servers...)
 			return e
 		case <-reload:
 			s.reloadPolicy()
@@ -392,7 +416,7 @@ func (s *Server) bindSTUN(ctx context.Context) ([]net.PacketConn, error) {
 		conns = append(conns, c)
 		addrs = append(addrs, c.LocalAddr().String())
 		go func() {
-			if err := stun.Serve(ctx, c, stun.ServerOptions{Now: s.deps.Now, Logger: s.log}); err != nil && ctx.Err() == nil {
+			if err := stun.Serve(ctx, c, stun.ServerOptions{Now: s.deps.Now, Logger: s.log, Counters: &s.stunCounters}); err != nil && ctx.Err() == nil {
 				s.log.Error("stun listener stopped", "addr", c.LocalAddr().String(), "err", err)
 			}
 		}()
@@ -820,4 +844,13 @@ func stopGRPC(srv *grpc.Server, timeout time.Duration) {
 		srv.Stop()
 		<-done
 	}
+}
+
+// MetricsAddr is the bound address of the metrics listener, or "" when
+// metrics.listen is empty or the server is not running.
+func (s *Server) MetricsAddr() string {
+	if p := s.metricsAddr.Load(); p != nil {
+		return *p
+	}
+	return ""
 }

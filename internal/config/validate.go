@@ -61,6 +61,9 @@ func (c *Config) Validate() error {
 	for i, a := range c.Listen.STUN {
 		checkListen(fmt.Sprintf("listen.stun[%d]", i), a)
 	}
+	if c.Metrics.Listen != "" {
+		checkListen("metrics.listen", c.Metrics.Listen)
+	}
 
 	if p, err := netip.ParsePrefix(c.Overlay.CIDR); err != nil {
 		add("overlay.cidr: %q is not a CIDR", c.Overlay.CIDR)

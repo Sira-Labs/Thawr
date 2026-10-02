@@ -37,3 +37,6 @@ dns:
 
 audit:
   retention_days: 90             # audit log entries older than this are pruned daily; 0 keeps everything
+metrics:
+  listen: ""                     # host:port of a plain-HTTP /metrics listener, e.g. 127.0.0.1:9469; empty is off.
+                                 # /metrics is always on the admin socket. No authentication: keep it on loopback.

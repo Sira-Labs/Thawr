@@ -86,6 +86,7 @@ func TestValidate(t *testing.T) {
 		{"tiny cidr", "public_addr: a\noverlay:\n  cidr: 10.0.0.0/31\n", []string{"/30 or larger"}},
 		{"long interface", "public_addr: a\noverlay:\n  interface: abcdefghijklmnopq\n", []string{"overlay.interface"}},
 		{"bad listen", "public_addr: a\nlisten:\n  https: '443'\n", []string{"listen.https"}},
+		{"bad metrics listen", "public_addr: a\nmetrics:\n  listen: localhost\n", []string{"metrics.listen"}},
 		{"no stun", "public_addr: a\nlisten:\n  stun: []\n", []string{"listen.stun: at least one"}},
 		{"negative relay limit", "public_addr: a\nrelay:\n  max_bytes_per_second: -1\n", []string{"relay.max_bytes_per_second"}},
 		{"three stun", "public_addr: a\nlisten:\n  stun: [':1', ':2', ':3']\n", []string{"at most two"}},

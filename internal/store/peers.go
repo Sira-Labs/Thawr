@@ -92,6 +92,31 @@ func (s *Peers) Count(ctx context.Context) (int, error) {
 	return n, nil
 }
 
+// CountByKind returns the number of peers per kind; kinds without a
+// peer are absent.
+func (s *Peers) CountByKind(ctx context.Context) (map[string]int, error) {
+	rows, err := s.q.QueryContext(ctx, `SELECT kind, COUNT(*) FROM peers GROUP BY kind`)
+	if err != nil {
+		return nil, fmt.Errorf("store: count peers by kind: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]int{}
+	for rows.Next() {
+		var (
+			kind string
+			n    int
+		)
+		if err := rows.Scan(&kind, &n); err != nil {
+			return nil, fmt.Errorf("store: count peers by kind: %w", err)
+		}
+		out[kind] = n
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: count peers by kind: %w", err)
+	}
+	return out, nil
+}
+
 // List returns all peers ordered by name.
 func (s *Peers) List(ctx context.Context) ([]Peer, error) {
 	rows, err := s.q.QueryContext(ctx, `SELECT `+peerColumns+` FROM peers ORDER BY name`)
