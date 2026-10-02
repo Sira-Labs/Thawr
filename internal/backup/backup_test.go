@@ -64,6 +64,64 @@ func TestWriteExtractRoundTrip(t *testing.T) {
 	}
 }
 
+// The tar stream ends before the gzip trailer (CRC-32 and length), so a
+// cut or extended file must still be refused.
+func TestExtractChecksGzipTrailer(t *testing.T) {
+	src := t.TempDir()
+	var buf bytes.Buffer
+	if _, err := Write(&buf, Manifest{}, []Source{{Path: "a", From: writeFile(t, src, "a", "hello")}}); err != nil {
+		t.Fatal(err)
+	}
+	full := buf.Bytes()
+	tests := map[string][]byte{
+		"last byte cut":    full[:len(full)-1],
+		"trailer cut":      full[:len(full)-8],
+		"trailing garbage": append(append([]byte{}, full...), "junk"...),
+		"padding too long": craftPadded(t, maxTarPadding+1),
+	}
+	for name, data := range tests {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Extract(bytes.NewReader(data), filepath.Join(t.TempDir(), "out")); !errors.Is(err, ErrInvalid) {
+				t.Errorf("Extract = %v, want ErrInvalid", err)
+			}
+		})
+	}
+	for name, data := range map[string][]byte{"whole archive": full, "one record of padding": craftPadded(t, maxTarPadding)} {
+		if _, err := Extract(bytes.NewReader(data), filepath.Join(t.TempDir(), "out")); err != nil {
+			t.Errorf("Extract of %s: %v", name, err)
+		}
+	}
+}
+
+// craftPadded is an empty valid archive whose tar stream carries n zero
+// bytes after its end marker, inside the gzip stream.
+func craftPadded(t *testing.T, n int) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	m, err := json.Marshal(Manifest{Format: Format})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.WriteHeader(&tar.Header{Name: ManifestName, Mode: 0o600, Size: int64(len(m)), Typeflag: tar.TypeReg}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(m); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gz.Write(make([]byte, n)); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
 func TestWriteRefusesBadPaths(t *testing.T) {
 	f := writeFile(t, t.TempDir(), "x", "x")
 	for _, p := range []string{"", "../x", "/abs", "a/../../b", "manifest.json", `a\b`, "a//b"} {

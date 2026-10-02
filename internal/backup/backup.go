@@ -30,6 +30,10 @@ const ManifestName = "manifest.json"
 // maxManifestSize bounds the manifest read before anything is trusted.
 const maxManifestSize = 1 << 20
 
+// maxTarPadding is one tar record (20 blocks of 512 bytes), the most
+// padding a tar writer adds after the end marker.
+const maxTarPadding = 20 * 512
+
 // ErrInvalid marks an archive that is malformed, tampered with, or does
 // not match its manifest.
 var ErrInvalid = errors.New("invalid backup archive")
@@ -235,6 +239,17 @@ func Extract(r io.Reader, dir string) (Manifest, error) {
 		if !got[p] {
 			return m, fmt.Errorf("%w: %s missing", ErrInvalid, p)
 		}
+	}
+	// The tar end marker comes before the gzip trailer; only reading the
+	// stream to its end checks the trailer's CRC-32 and length, so a cut
+	// or extended file is refused. At most one tar record of padding
+	// may follow the end marker.
+	n, err := io.Copy(io.Discard, io.LimitReader(gz, maxTarPadding+1))
+	if err != nil {
+		return m, fmt.Errorf("%w: gzip: %w", ErrInvalid, err)
+	}
+	if n > maxTarPadding {
+		return m, fmt.Errorf("%w: data after the end of the archive", ErrInvalid)
 	}
 	return m, nil
 }
