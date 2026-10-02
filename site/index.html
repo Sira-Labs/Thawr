@@ -545,11 +545,11 @@ Filter: 3 rules · 0 dropped (last 5 min)
         <button type="button" data-key="darwin_amd64" aria-pressed="false">macOS Intel</button>
         <button type="button" data-key="windows_amd64" aria-pressed="false">Windows</button>
       </div>
-      <div class="code"><pre id="verify">curl -LO https://github.com/Sira-Labs/Thawr/releases/download/v0.1.0-rc7/thawr_v0.1.0-rc7_linux_amd64.tar.gz
-curl -LO https://github.com/Sira-Labs/Thawr/releases/download/v0.1.0-rc7/SHA256SUMS
-sha256sum -c SHA256SUMS --ignore-missing
-tar xzf thawr_v0.1.0-rc7_linux_amd64.tar.gz
-sudo install -m 0755 thawr_v0.1.0-rc7_linux_amd64/thawr /usr/local/bin/thawr
+      <div class="code"><pre id="verify">curl -fLO https://github.com/Sira-Labs/Thawr/releases/download/v0.1.0-rc7/thawr_v0.1.0-rc7_linux_amd64.tar.gz &amp;&amp;
+curl -fLO https://github.com/Sira-Labs/Thawr/releases/download/v0.1.0-rc7/SHA256SUMS &amp;&amp;
+sha256sum -c SHA256SUMS --ignore-missing &amp;&amp;
+tar xzf thawr_v0.1.0-rc7_linux_amd64.tar.gz &amp;&amp;
+sudo install -m 0755 thawr_v0.1.0-rc7_linux_amd64/thawr /usr/local/bin/thawr &amp;&amp;
 thawr version</pre><button class="copy" type="button">Copy</button></div>
       <p class="note">Releases are built by CI from a tag, reproducibly, and ship with checksums. Phones do not need this download: they use the official WireGuard app with a QR code from the server.</p>
     </div>
@@ -707,25 +707,26 @@ thawr version</pre><button class="copy" type="button">Copy</button></div>
 
   function snippet(key, tag) {
     var base = BASE + tag + "/", name = "thawr_" + tag + "_" + key;
+    // Pasted line by line, a failed check must still stop the install: PowerShell keeps the
+    // extraction inside the if, and the shell chains every step with &&.
     if (key.indexOf("windows") === 0) {
       return "Invoke-WebRequest " + base + name + ".zip -OutFile thawr.zip\n" +
         "Invoke-WebRequest " + base + "SHA256SUMS -OutFile SHA256SUMS\n" +
-        "# both hashes must match\n" +
-        "(Get-FileHash thawr.zip -Algorithm SHA256).Hash.ToLower()\n" +
-        "Select-String " + key + " SHA256SUMS\n" +
-        "Expand-Archive thawr.zip .\n" +
-        ".\\" + name + "\\thawr.exe version";
+        "$expected = ((Select-String -SimpleMatch " + name + ".zip SHA256SUMS).Line -split '\\s+')[0]\n" +
+        "$actual = (Get-FileHash thawr.zip -Algorithm SHA256).Hash\n" +
+        "if ($expected -and $actual -eq $expected) { Expand-Archive thawr.zip .; & .\\" + name + "\\thawr.exe version } " +
+        "else { Write-Error 'SHA256 mismatch: do not use thawr.zip' }";
     }
-    var check = key.indexOf("darwin") === 0 ? "grep " + key + " SHA256SUMS | shasum -a 256 -c" : "sha256sum -c SHA256SUMS --ignore-missing";
-    return "curl -LO " + base + name + ".tar.gz\n" +
-      "curl -LO " + base + "SHA256SUMS\n" + check + "\n" +
-      "tar xzf " + name + ".tar.gz\n" +
-      "sudo install -m 0755 " + name + "/thawr /usr/local/bin/thawr\n" +
+    var check = key.indexOf("darwin") === 0 ? "grep " + name + ".tar.gz SHA256SUMS | shasum -a 256 -c" : "sha256sum -c SHA256SUMS --ignore-missing";
+    return "curl -fLO " + base + name + ".tar.gz &&\n" +
+      "curl -fLO " + base + "SHA256SUMS &&\n" + check + " &&\n" +
+      "tar xzf " + name + ".tar.gz &&\n" +
+      "sudo install -m 0755 " + name + "/thawr /usr/local/bin/thawr &&\n" +
       "thawr version";
   }
   function showVerify(key) {
     state.key = key;
-    verify.textContent = snippet(key, state.tag);
+    verify.textContent = key ? snippet(key, state.tag) : "# Choose macOS Apple silicon or macOS Intel above for your Mac's commands.";
     Array.prototype.forEach.call(tabs.children, function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-key") === key)); });
   }
   Array.prototype.forEach.call(tabs.children, function (b) {
@@ -783,31 +784,37 @@ thawr version</pre><button class="copy" type="button">Copy</button></div>
       cta.href = a ? a.href : "#download";
       cta.textContent = a ? "Download for " + os + (key === "darwin_amd64" ? " (Intel)" : key === "darwin_arm64" ? " (Apple silicon)" : "") : "Download for " + os;
     }
-    // An unknown Mac still gets macOS commands; the tabs switch them.
-    showVerify(a ? key : key + "_arm64");
+    // An unknown Mac gets no commands until the visitor picks a tab.
+    showVerify(a ? key : null);
   }
   var os = detectOS();
   applyDetected(os);
   if (os === "darwin") macArch().then(function (key) { if (key) applyDetected(key); }, function () {});
 
   function fmt(n) { return (n / 1e6).toFixed(1) + " MB"; }
+  function findAsset(rel, name) {
+    for (var i = 0; i < rel.assets.length; i++) if (rel.assets[i].name === name) return rel.assets[i];
+    return null;
+  }
+  // The page switches to a release only when it has every archive, SHA256SUMS and the
+  // Homebrew formula, so links, commands and checksums always name one version.
   function applyRelease(rel) {
     if (!rel || !rel.tag_name || !rel.assets) return;
-    var tag = rel.tag_name, seen = 0;
+    var tag = rel.tag_name, cards = document.querySelectorAll(".dl"), found = [];
+    for (var i = 0; i < cards.length; i++) {
+      var key = cards[i].getAttribute("data-key");
+      var ext = key.indexOf("windows") === 0 ? ".zip" : ".tar.gz";
+      var as = findAsset(rel, "thawr_" + tag + "_" + key + ext);
+      if (!as) return;
+      found.push(as);
+    }
+    if (!findAsset(rel, "SHA256SUMS") || !findAsset(rel, "thawr.rb")) return;
     state.tag = tag;
-    Array.prototype.forEach.call(document.querySelectorAll(".dl"), function (a) {
-      var key = a.getAttribute("data-key");
-      for (var i = 0; i < rel.assets.length; i++) {
-        var as = rel.assets[i];
-        if (as.name.indexOf("_" + key + ".") > -1) {
-          a.href = as.browser_download_url;
-          a.querySelector("small").textContent = as.name;
-          a.querySelector("span").textContent = fmt(as.size);
-          seen++;
-        }
-      }
+    Array.prototype.forEach.call(cards, function (a, i) {
+      a.href = found[i].browser_download_url;
+      a.querySelector("small").textContent = found[i].name;
+      a.querySelector("span").textContent = fmt(found[i].size);
     });
-    if (!seen) return;
     Array.prototype.forEach.call(document.querySelectorAll("[data-tag]"), function (n) { n.textContent = tag; });
     // A pre-release names the version it leads to; a stable release drops the note.
     Array.prototype.forEach.call(document.querySelectorAll("[data-pre]"), function (n) { n.hidden = !rel.prerelease; });

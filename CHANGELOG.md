@@ -38,6 +38,10 @@ when one exists, and GitHub's generated notes otherwise.
 
 ### Fixed
 
+- Product page: the install commands stop when the checksum does not match (Windows compares
+  the hashes and only then extracts; Linux and macOS chain every step with `&&`), a Mac whose
+  CPU is unknown gets no preselected architecture, and a newer release replaces the page's
+  links only when it has every archive, `SHA256SUMS` and `thawr.rb`.
 - Windows: saving the client state (an exit-node choice, a rename)
   could fail with "Access is denied" while another process, typically
   a virus scanner, briefly held the previous `state.json` open. The
