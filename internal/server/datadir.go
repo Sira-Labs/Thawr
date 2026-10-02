@@ -1,9 +1,12 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/sira-labs/thawr/internal/flock"
 )
 
 // ensureDataDir creates dir with mode 0700 or verifies an existing one
@@ -54,4 +57,17 @@ func writeSecretFile(path string, data []byte) error {
 		return fmt.Errorf("server: rename %s: %w", path, err)
 	}
 	return nil
+}
+
+// LockDataDir takes the data_dir lock (LockFile) or fails with an error
+// wrapping ErrDataDirInUse when another server or a restore holds it.
+func LockDataDir(dir string) (*flock.Lock, error) {
+	l, err := flock.TryLock(filepath.Join(dir, LockFile))
+	if errors.Is(err, flock.ErrHeld) {
+		return nil, fmt.Errorf("server: another thawr server is using %s: %w", dir, ErrDataDirInUse)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("server: %w", err)
+	}
+	return l, nil
 }
