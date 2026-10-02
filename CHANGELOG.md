@@ -7,6 +7,21 @@ minor versions may change config keys and the admin API. The release
 workflow uses the section for the tagged version as the release notes
 when one exists, and GitHub's generated notes otherwise.
 
+## [Unreleased]
+
+### Added
+
+- `thawr admin backup` and `thawr server restore` (spec 014): one
+  archive with the database (consistent `VACUUM INTO` snapshot), the
+  server's WireGuard key, the pinned TLS certificate, the ACME cache
+  and copies of config and policy, with a manifest of SHA-256 sums;
+  offered on the admin socket only and written 0600. Restore verifies
+  the archive first, refuses a running server, a newer schema and a
+  non-empty `data_dir` (`--force` moves it aside), migrates an older
+  database, and keeps every client's pin valid.
+- The server locks `data_dir` (`thawr.lock`): a second server on the
+  same directory exits before it opens the database.
+
 ## [0.1.0] - unreleased
 
 Ships once the manual checklists for specs 010–013 have passed on real

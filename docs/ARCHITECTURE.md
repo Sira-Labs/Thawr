@@ -144,6 +144,10 @@ starts reuse everything. Spec 001. On Windows, where the mode bits mean
 nothing, every start makes Administrators the owner of `data_dir` and
 limits it, like the admin socket, to SYSTEM, Administrators and the
 owner (`internal/fsperm`).
+A running server holds `data_dir/thawr.lock` (an exclusive `flock`,
+`LockFileEx` on Windows, from `internal/flock`) for its whole life, so a
+second server on the same directory exits before it opens the database;
+`thawr server restore` takes the same lock (spec 014).
 
 ### 4.2 Enrollment
 
@@ -508,7 +512,9 @@ device's lock public key, if it has one, so a signer can add it.
 signer set and the unsigned peers; peer views carry `signed` while the
 lock is on), `GET /peers/{name}/routes` and `PUT
 /peers/{name}/routes/{prefix}` with `{"approved": bool}` (admins; the
-peer detail lists `routes`). JSON bodies. Browser
+peer detail lists `routes`). `GET /backup` streams a backup archive (spec 014)
+and exists on the admin socket only: the HTTPS listener answers 404 for
+every role, because the archive holds `server.key` and the TLS key. JSON bodies. Browser
 sessions are in memory (12 h) behind one `HttpOnly`, `Secure`,
 `SameSite=Strict` cookie; the session's CSRF token is returned by
 `/login` and `/me` and must be sent as `X-CSRF-Token` on mutating calls.
@@ -593,6 +599,25 @@ applied in a transaction with the version recorded in `meta`.
 Indexes: `peers(public_key)` unique, `peers(name)` unique,
 `peers(owner_id)`, `enrollment_tokens(secret_hash)` unique,
 `enrollment_tokens(expires_at)`, `audit_log(at)`.
+
+**Backup and restore** (spec 014). `thawr admin backup` asks the
+running server over the admin socket for an archive: the server copies
+the database with `VACUUM INTO` (consistent while it runs; the single
+connection waits for the copy), then writes a `tar.gz` (`internal/backup`)
+whose first entry `manifest.json` lists every other file with size and
+SHA-256: `thawr.db`, `server.key`, `tls/cert.pem` and `tls/key.pem`, the
+ACME cache when present, and copies of the config and policy files. It
+records `backup.create`, streams the archive and deletes it; the CLI
+writes it 0600 after checking size and checksum. `thawr server restore`
+runs with the server stopped: it verifies the whole archive into a
+temporary directory, refuses a newer schema, a live server and a
+non-empty `data_dir` (`--force` renames that to
+`<data_dir>.pre-restore-<time>`; nothing is deleted), copies the files
+with the server's modes, opens the database once (migrating an older
+one and checking `server.key` against the stored fingerprint), and
+writes the config and policy copies only where no file exists. The
+restored server keeps its WireGuard key and pinned certificate, so
+clients reconnect without re-enrolling.
 
 ## 7. Client state
 

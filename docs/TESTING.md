@@ -340,3 +340,34 @@ exit-node selection in this release.
 8. `thawr client down` on the router restores `ip_forward` to its
    previous value and removes the `inet thawr` table; on the laptop
    `client down` leaves no route, rule or table behind.
+
+## Manual checklist for operations (spec 014)
+
+Needs the VPS server, a second Linux VM (or a fresh VPS) as the new
+host, and an enrolled laptop.
+
+1. On the server: `sudo thawr admin backup --out /root/b.tar.gz`
+   prints the size and sha256; `ls -l /root/b.tar.gz` shows
+   `-rw-------`; `tar tzf /root/b.tar.gz` lists `manifest.json` first,
+   then `thawr.db`, `server.key`, `tls/cert.pem`, `tls/key.pem`,
+   `config/server.yaml`, `config/policy.yaml`; `thawr admin audit
+   --action backup.create` has the row with the same sha256.
+2. From the laptop, `curl -k https://<server>/api/v1/backup` answers
+   404, also from a browser logged in as admin.
+3. Start a second `sudo thawr server --config /etc/thawr/server.yaml`
+   next to the service: it exits at once with `another thawr server is
+   using /var/lib/thawr`, and the service keeps running.
+4. Copy the archive to the new host, install the same `thawr`, and run
+   `sudo thawr server restore b.tar.gz` with no `/etc/thawr` there: it
+   prints the peer count, the TLS fingerprint the laptop pinned, and
+   `config ... written from the backup`. Running it again exits 2 with
+   `is not empty`; `--force` moves `/var/lib/thawr` to
+   `/var/lib/thawr.pre-restore-<time>` and restores again.
+5. Point `public_addr`'s DNS name at the new host and start the service
+   (`sudo thawr server install` or `systemctl start thawr-server`): the
+   laptop's `client status` reads `connected` again within a minute
+   without `client up`, `trust` or re-enrolment; `admin peer list`
+   matches the old server.
+6. Change one byte of a copy of the archive (`printf x | dd of=c.tar.gz
+   bs=1 seek=2000 conv=notrunc`): `server restore` exits 2 with
+   `invalid backup archive` and leaves `data_dir` untouched.

@@ -17,6 +17,7 @@ each spec that touches an item below.
 | A8 Policy file | User's git repo, server memory | Wrong policy grants or denies access |
 | A9 Data-plane traffic | Between peers | Confidentiality and integrity of user data |
 | A10 SQLite database | `data_dir/thawr.db` | All of A3–A8 hashes and metadata |
+| A11 Backup archive | Wherever the operator keeps `thawr admin backup` output (written 0600) | Same as a copy of `data_dir`: A2, A6 and A10 together (T4) |
 
 ## Trust boundaries
 
@@ -94,7 +95,8 @@ Attacker has physical access to an enrolled laptop or phone.
 
 ### T4 Compromised server
 
-Attacker has root on the server host or a copy of `data_dir`.
+Attacker has root on the server host, a copy of `data_dir`, or a backup
+archive (A11), which holds the same keys and database.
 
 | Threat | Mitigation / residual risk |
 |---|---|
@@ -105,6 +107,7 @@ Attacker has root on the server host or a copy of `data_dir`.
 | Steal node secrets | Only SHA-256 hashes are stored; the attacker cannot impersonate existing clients from the DB alone, but as the server they can serve them anything |
 | Steal password hashes | argon2id (64 MiB, 3 iterations, 4 lanes) slows offline cracking; admins are told to use a password manager |
 | Steal enrollment tokens | Hashed; unused tokens can be revoked by deleting `data_dir` and re-issuing |
+| Steal a backup archive | The archive is a copy of `data_dir`: everything in this table applies to whoever holds it. It is written 0600, offered only on the admin socket (never over HTTPS, for any role), and not encrypted by Thawr, which implements no cryptography; operators store it like the server disk (encrypted volume, or encrypted by their backup tool). Restoring it on another host makes that host the server for every enrolled client once `public_addr` points there (spec 014) |
 | Persist after cleanup | All state is in `data_dir`; rebuilding the server from a clean binary and a clean directory invalidates every node secret (clients must re-enrol). Peers' WireGuard keys can be kept |
 
 ### T5 Malicious or careless admin
