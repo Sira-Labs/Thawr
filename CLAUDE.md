@@ -15,6 +15,9 @@ specs; only the one you implement plus any it references.
 3. Run `make test lint` before every commit. Both must be clean.
 4. Commit with a semantic message (see below). One logical change per
    commit; a spec may take several commits.
+   Pull requests auto-merge once the required checks pass and review
+   threads are resolved (`.github/workflows/automerge.yml`), so a green
+   pull request is merged work: push every fix before CI goes green.
 5. Mark the spec done in `TASKS.md` and add one line per non-obvious
    decision under that spec's entry (these are the session notes).
    When a sprint closes, add its line to the progress log in

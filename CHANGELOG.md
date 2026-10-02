@@ -90,6 +90,9 @@ hosts (`docs/roadmap/sprints.md`, sprint 4); the tag replaces
   links, archive sizes and release-candidate note at the newest release
   (the note disappears for a stable one), and CI tests that rewrite
   against the current page.
+- Auto-merge for every pull request (`automerge` workflow): it merges
+  once the checks the branch rule on main requires have passed and its
+  review conversations are resolved.
 
 ### Changed
 
