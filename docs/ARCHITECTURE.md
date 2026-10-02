@@ -149,6 +149,18 @@ A running server holds `data_dir/thawr.lock` (an exclusive `flock`,
 second server on the same directory exits before it opens the database;
 `thawr server restore` takes the same lock (spec 014).
 
+The HTTPS listener picks its certificate per connection by TLS server
+name (spec 014). Clients always send `thawr-pinned.invalid` and get the
+self-signed certificate they pin; so does a connection with no name (a
+client from before 014 dialling an IP literal) and any name other than
+the ACME domain. With `tls.mode: acme` the configured domain (default:
+the host of `public_addr`) is handed to `golang.org/x/crypto/acme/autocert`,
+which answers TLS-ALPN-01 on the HTTPS port (`acme-tls/1`, so no port
+80), caches its account key and certificates in `data_dir/acme`, and
+renews on its own; the server asks for the certificate once at start so
+the first browser does not wait for issuance. A renewal never touches
+the pinned certificate, so no client notices.
+
 ### 4.2 Enrollment
 
 ```mermaid
@@ -651,7 +663,7 @@ long as endpoints have not changed.
 | `modernc.org/sqlite` | SQLite, pure Go | BSD-3-Clause |
 | `google.golang.org/grpc`, `google.golang.org/protobuf` | Control channel | Apache-2.0, BSD-3-Clause |
 | `gopkg.in/yaml.v3` | Config and policy | MIT and Apache-2.0 |
-| `golang.org/x/crypto` | argon2id password hashing | BSD-3-Clause |
+| `golang.org/x/crypto` | argon2id password hashing; ACME client and certificate manager (`acme`, `acme/autocert`) for `tls.mode: acme` | BSD-3-Clause |
 | `golang.org/x/net`, `golang.org/x/sys` | DNS message codec (`dns/dnsmessage`), routing tables, syscalls, Windows service control manager (`windows/svc`) | BSD-3-Clause |
 | `github.com/vishvananda/netlink` | Linux addresses and routes | Apache-2.0 |
 | `github.com/google/nftables` | Linux receiver-side filter | Apache-2.0 |

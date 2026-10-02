@@ -15,9 +15,12 @@ overlay:
   interface: thawr0              # macOS: utun (the kernel picks the number)
 
 tls:
-  mode: self-signed              # self-signed | file
+  mode: self-signed              # self-signed | file | acme
   cert_file: ""                  # with mode: file
   key_file: ""                   # with mode: file
+  email: ""                      # with mode: acme (required): the CA account contact
+  domain: ""                     # with mode: acme: default the host of public_addr; a DNS name
+  acme_directory: ""             # with mode: acme: CA directory URL; empty is Let's Encrypt
 
 policy_file: /etc/thawr/policy.yaml   # YAML ACLs, default deny when absent
 admin_socket: /var/lib/thawr/admin.sock

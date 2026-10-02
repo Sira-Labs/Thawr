@@ -206,13 +206,15 @@ paths are learnt again from the clients, as after any restart.
   - `thawr-pinned.invalid` (sent by every client from this release on)
     and an empty SNI (older clients dialing an IP literal): the
     self-signed, pinned certificate.
-  - Any other name, in `acme` mode: the ACME certificate from
-    `golang.org/x/crypto/acme/autocert`, restricted to the configured
-    domain; challenges are answered over TLS-ALPN-01 on the HTTPS port
-    (`acme-tls/1` is added to the listener's protocols), so no port 80
-    is needed. The cache lives in `data_dir/acme` (0700).
-  - Any other name in `self-signed` or `file` mode: the one
-    certificate, as today.
+  - The ACME domain, in `acme` mode: the ACME certificate from
+    `golang.org/x/crypto/acme/autocert`; challenges are answered over
+    TLS-ALPN-01 on the HTTPS port (`acme-tls/1` is added to the
+    listener's protocols), so no port 80 is needed. The cache lives in
+    `data_dir/acme` (0700). The server requests the certificate once
+    at start, in the background, so the first browser does not wait
+    for issuance inside its handshake.
+  - Any other name: the pinned certificate (in `file` mode, the one
+    certificate, as today).
 - The ACME certificate renews on its own; renewals never touch the
   pinned certificate, so no client is affected. The pinned certificate
   keeps its ten-year lifetime; rotating it stays out of scope.
@@ -224,7 +226,8 @@ paths are learnt again from the clients, as after any restart.
   host name sends that name as SNI and, in `acme` mode, would receive
   the ACME certificate and fail its pin. Startup and `server --check`
   therefore warn when `tls.mode` is `acme` and `min_client_version` is
-  below `0.2`, and the docs say: upgrade the clients, set
+  below `0.2` (and when `listen.https` is not on port 443, where the CA
+  validates), and the docs say: upgrade the clients, set
   `min_client_version: "0.2"`, then switch to `acme`. `self-signed`
   and `file` mode behave exactly as before for every client.
 
@@ -288,8 +291,12 @@ paths are learnt again from the clients, as after any restart.
   stub stands in for autocert).
 - `internal/client`: `TestPinnedDialSendsPinnedSNI` (a server whose
   default certificate differs still verifies through the pinned SNI).
-- `internal/server` (build tag `acme_integration`, not in CI): issue
-  against Pebble or the Let's Encrypt staging directory.
+- `internal/server`: `TestACMEModeKeepsClientsOnPinnedCert` (a server
+  in acme mode whose CA refuses: the pinned name and no name get the
+  pinned certificate, the domain never does), `TestCertSelectorWarm`.
+- Issuance against a real CA is the manual checklist step (Let's
+  Encrypt staging on the VPS), not a test CI would never run; it was
+  checked once against Pebble with TLS-ALPN-01 validation.
 
 ## Out of scope
 
