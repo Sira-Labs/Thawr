@@ -44,9 +44,12 @@ check "pre-release: release-candidate note shown" '[[ $(count "data-pre>") -eq 2
 check "pre-release: note names the final version" 'grep -q "<code data-final>v9.8.0</code>" "$page"'
 check "pre-release: archive size updated" 'grep -q "<span>8.1 MB</span><small>thawr_v9.8.0-rc1_linux_amd64.tar.gz</small>" "$page"'
 
+# From the clean page, so the stable path proves its own data-final update.
+cp "$root/site/index.html" "$page"
 run v9.8.0 false
-check "stable: no pre-release tag left" '[[ $(count v9.8.0-rc1) -eq 0 && $(count "v9.8.0[/_\"<]") -ge $links ]]'
+check "stable: no pre-release tag left" '[[ $(count "$start") -eq 0 && $(count "v9.8.0[/_\"<]") -ge $links ]]'
 check "stable: release-candidate note hidden" '[[ $(count "data-pre hidden>") -eq 2 && $(count "data-pre>") -eq 0 ]]'
+check "stable: note names the final version" 'grep -q "<code data-final>v9.8.0</code>" "$page"'
 cp "$page" "$work/once.html"
 run v9.8.0 false
 check "stable: a second run changes nothing" 'cmp -s "$page" "$work/once.html"'
