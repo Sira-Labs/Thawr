@@ -25,10 +25,19 @@ type Config struct {
 	AdminSocket string `yaml:"admin_socket"`
 	Log         Log    `yaml:"log"`
 	// MinClientVersion is MAJOR.MINOR; empty means the server's own.
-	MinClientVersion string `yaml:"min_client_version"`
-	Relay            Relay  `yaml:"relay"`
-	DNS              DNS    `yaml:"dns"`
-	Audit            Audit  `yaml:"audit"`
+	MinClientVersion string  `yaml:"min_client_version"`
+	Relay            Relay   `yaml:"relay"`
+	DNS              DNS     `yaml:"dns"`
+	Audit            Audit   `yaml:"audit"`
+	Metrics          Metrics `yaml:"metrics"`
+}
+
+// Metrics configures the Prometheus endpoint (spec 014). /metrics is
+// always served on the admin socket; Listen adds a plain-HTTP listener.
+type Metrics struct {
+	// Listen is the host:port of a plain-HTTP listener that serves only
+	// /metrics, without authentication; empty (the default) opens none.
+	Listen string `yaml:"listen"`
 }
 
 // Audit tunes the audit log of control-plane mutations (spec 011).

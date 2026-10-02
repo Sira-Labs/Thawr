@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/argon2"
@@ -41,7 +42,12 @@ type Users struct {
 	// dummyHash keeps the cost of a failed lookup equal to a real check.
 	dummyHash string
 	audit     *Auditor
+	// failures counts failed logins since start, for metrics.
+	failures atomic.Uint64
 }
+
+// LoginFailures is the number of failed logins since the server started.
+func (u *Users) LoginFailures() uint64 { return u.failures.Load() }
 
 // WithAuditor records user creation and logins in the audit log.
 func (u *Users) WithAuditor(a *Auditor) *Users {
@@ -118,6 +124,7 @@ func (u *Users) Authenticate(ctx context.Context, name, password string) (store.
 		return store.User{}, err
 	}
 	if !ok || !found {
+		u.failures.Add(1)
 		u.limit.fail(name)
 		u.log.Warn("login failed", "user", name)
 		if err := u.audit.Record(ctx, u.store, anonymousPrincipal(name), AuditLoginFailed, name, nil); err != nil {

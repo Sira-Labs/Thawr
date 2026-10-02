@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -14,12 +15,25 @@ import (
 // send before the server drops the rest.
 const DefaultRatePerIP = 20
 
+// Counters count what Serve did with each request, for metrics; one
+// value may be shared by several listeners.
+type Counters struct {
+	// OK requests were answered.
+	OK atomic.Uint64
+	// RateLimited requests exceeded the per-IP rate and were dropped.
+	RateLimited atomic.Uint64
+	// Malformed packets were not Thawr binding requests.
+	Malformed atomic.Uint64
+}
+
 // ServerOptions configure Serve.
 type ServerOptions struct {
 	// RatePerIP defaults to DefaultRatePerIP.
 	RatePerIP int
 	Now       func() time.Time
 	Logger    *slog.Logger
+	// Counters, when set, is incremented for every request.
+	Counters *Counters
 }
 
 func (o ServerOptions) withDefaults() ServerOptions {
@@ -31,6 +45,9 @@ func (o ServerOptions) withDefaults() ServerOptions {
 	}
 	if o.Logger == nil {
 		o.Logger = slog.Default()
+	}
+	if o.Counters == nil {
+		o.Counters = &Counters{}
 	}
 	return o
 }
@@ -60,14 +77,17 @@ func Serve(ctx context.Context, conn net.PacketConn, opts ServerOptions) error {
 		from := ua.AddrPort()
 		from = netip.AddrPortFrom(from.Addr().Unmap(), from.Port())
 		if !limit.allow(from.Addr()) {
+			opts.Counters.RateLimited.Add(1)
 			log.Debug("stun request dropped by rate limit", "from", from.Addr())
 			continue
 		}
 		tx, err := ParseBindingRequest(buf[:n])
 		if err != nil {
+			opts.Counters.Malformed.Add(1)
 			log.Debug("stun request ignored", "from", from, "err", err)
 			continue
 		}
+		opts.Counters.OK.Add(1)
 		if _, err := conn.WriteTo(Response(tx, from), addr); err != nil && ctx.Err() == nil {
 			log.Debug("stun response failed", "to", from, "err", err)
 		}

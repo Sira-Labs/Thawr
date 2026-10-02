@@ -52,6 +52,9 @@ type RESTDeps struct {
 	// Backup enables GET /api/v1/backup on the admin socket only; the
 	// archive holds the server's private keys (spec 014).
 	Backup BackupSource
+	// Metrics serves GET /metrics on the admin socket only (spec 014);
+	// the optional TCP metrics listener is separate.
+	Metrics http.Handler
 }
 
 type rest struct {
@@ -121,6 +124,9 @@ func NewREST(deps RESTDeps) (http.Handler, error) {
 			mux.HandleFunc("GET /api/v1/peers/{name}/routes", h.requireAuth(h.handleListRoutes))
 			mux.HandleFunc("PUT /api/v1/peers/{name}/routes/{prefix...}", h.requireAdmin(h.handleSetRoute))
 		}
+	}
+	if deps.Local && deps.Metrics != nil {
+		mux.Handle("/metrics", deps.Metrics)
 	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "unknown endpoint")

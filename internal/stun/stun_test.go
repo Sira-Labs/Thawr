@@ -77,7 +77,8 @@ func TestSTUNServerBinding(t *testing.T) {
 func TestSTUNRateLimit(t *testing.T) {
 	base := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
 	var offset atomic.Int64
-	srv := startServer(t, ServerOptions{RatePerIP: 5, Now: func() time.Time { return base.Add(time.Duration(offset.Load())) }})
+	counters := &Counters{}
+	srv := startServer(t, ServerOptions{RatePerIP: 5, Counters: counters, Now: func() time.Time { return base.Add(time.Duration(offset.Load())) }})
 	ctx := context.Background()
 	tr, err := NewSocketTransport(ctx, 0)
 	if err != nil {
@@ -102,6 +103,9 @@ func TestSTUNRateLimit(t *testing.T) {
 	if got != 5 {
 		t.Fatalf("responses = %d, want 5 (rate limit)", got)
 	}
+	if ok, limited := counters.OK.Load(), counters.RateLimited.Load(); ok != 5 || limited != 3 {
+		t.Errorf("counters ok=%d ratelimited=%d, want 5 and 3", ok, limited)
+	}
 	// A new window admits requests again.
 	offset.Store(int64(time.Second))
 	if err := tr.Send(ctx, srv, Request(NewTxID())); err != nil {
@@ -111,6 +115,24 @@ func TestSTUNRateLimit(t *testing.T) {
 	defer cancel()
 	if _, _, err := tr.Recv(rctx); err != nil {
 		t.Fatalf("after window: %v", err)
+	}
+	// A packet that is not a Thawr binding request is counted, not
+	// answered. Serve handles packets in order, so the answer to the
+	// request sent after it proves it was seen.
+	offset.Store(int64(2 * time.Second))
+	if err := tr.Send(ctx, srv, []byte("not stun")); err != nil {
+		t.Fatal(err)
+	}
+	if err := tr.Send(ctx, srv, Request(NewTxID())); err != nil {
+		t.Fatal(err)
+	}
+	rctx2, cancel2 := context.WithTimeout(ctx, time.Second)
+	defer cancel2()
+	if _, _, err := tr.Recv(rctx2); err != nil {
+		t.Fatalf("after malformed: %v", err)
+	}
+	if n := counters.Malformed.Load(); n != 1 {
+		t.Errorf("malformed = %d, want 1", n)
 	}
 }
 

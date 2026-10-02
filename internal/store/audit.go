@@ -141,3 +141,12 @@ func (a *Audit) Prune(ctx context.Context, before time.Time) (int64, error) {
 	}
 	return n, nil
 }
+
+// Count is the number of rows in the audit log.
+func (a *Audit) Count(ctx context.Context) (int64, error) {
+	var n int64
+	if err := a.q.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("store: count audit rows: %w", err)
+	}
+	return n, nil
+}
