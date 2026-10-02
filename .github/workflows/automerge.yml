@@ -1,0 +1,46 @@
+name: automerge
+
+# Turns on GitHub auto-merge for every pull request when it is opened,
+# marked ready, or pushed to while auto-merge is off (a push by someone
+# without write access turns it off), so it merges by itself (merge
+# commit) once the checks the branch rule on main requires have passed
+# and its review conversations are resolved. It enables auto-merge and
+# nothing else: no code from the pull request is checked out or run,
+# which keeps pull_request_target safe for forks and Dependabot.
+#
+# One-time setup in the repository settings:
+#   1. General -> Pull Requests -> Allow auto-merge.
+#   2. Rules (or Branches) -> a rule for main that requires the ci checks
+#      to pass and conversations to be resolved. Without required checks
+#      GitHub has nothing to wait for and refuses to enable auto-merge,
+#      and this job fails rather than merging untested code.
+#   3. Optional secret AUTOMERGE_TOKEN: a fine-grained token with contents
+#      and pull requests write access. Merges done with the default token
+#      start no other workflows, so without it ci and the pages deploy do
+#      not run for auto-merged commits on main.
+
+on:
+  pull_request_target: # zizmor: ignore[dangerous-triggers] -- checks out and runs nothing from the pull request
+    types: [opened, reopened, ready_for_review, synchronize]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  enable:
+    # Drafts wait for ready_for_review; a pull request with auto-merge
+    # already on needs nothing (the mutation would fail on it).
+    if: ${{ !github.event.pull_request.draft && !github.event.pull_request.auto_merge }}
+    runs-on: ubuntu-latest
+    steps:
+      # The GraphQL mutation, not `gh pr merge --auto`: gh merges at once
+      # when nothing is pending, the mutation only ever queues the merge.
+      - name: enable auto-merge
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN || github.token }}
+          PR_ID: ${{ github.event.pull_request.node_id }}
+        run: |
+          gh api graphql \
+            -f query='mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: MERGE}) { clientMutationId } }' \
+            -f id="$PR_ID"

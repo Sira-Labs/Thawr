@@ -92,3 +92,11 @@ jobs:
         with:
           go-version: stable
       - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  # The pages workflow rewrites site/index.html after every release; this
+  # fails a page edit that would break that rewrite.
+  site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: scripts/site-release-test.sh
