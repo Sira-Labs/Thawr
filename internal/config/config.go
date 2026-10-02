@@ -90,10 +90,19 @@ type Overlay struct {
 
 // TLS selects how the HTTPS certificate is obtained.
 type TLS struct {
-	// Mode is "self-signed" (generated into DataDir) or "file".
+	// Mode is "self-signed" (generated into DataDir), "file", or "acme"
+	// (self-signed for clients, plus an ACME certificate for browsers).
 	Mode     string `yaml:"mode"`
 	CertFile string `yaml:"cert_file"`
 	KeyFile  string `yaml:"key_file"`
+	// Email is the ACME account contact; required in acme mode.
+	Email string `yaml:"email"`
+	// Domain is the name the ACME certificate is issued for; empty means
+	// the host of PublicAddr, which must then be a DNS name.
+	Domain string `yaml:"domain"`
+	// ACMEDirectory is the CA's directory URL; empty is Let's Encrypt
+	// production.
+	ACMEDirectory string `yaml:"acme_directory"`
 }
 
 // Log configures slog output.
@@ -106,7 +115,13 @@ type Log struct {
 const (
 	TLSModeSelfSigned = "self-signed"
 	TLSModeFile       = "file"
+	TLSModeACME       = "acme"
 )
+
+// ACMEMinClientVersion is the first client release that asks for the
+// pinned certificate by name (spec 014); older clients that dial a host
+// name would be handed the ACME certificate and fail their pin.
+const ACMEMinClientVersion = "0.2"
 
 // DefaultDataDir is used when data_dir is not set.
 const DefaultDataDir = "/var/lib/thawr"
@@ -151,6 +166,26 @@ func (c *Config) PublicHost() string {
 		return c.PublicAddr
 	}
 	return host
+}
+
+// ACMEDomain is the name the ACME certificate is issued for: TLS.Domain,
+// or the host of PublicAddr.
+func (c *Config) ACMEDomain() string {
+	if c.TLS.Domain != "" {
+		return c.TLS.Domain
+	}
+	return c.PublicHost()
+}
+
+// Warnings lists settings that are valid but probably not what the
+// operator wants; the server logs them at start and on --check.
+func (c *Config) Warnings() []string {
+	var w []string
+	if c.TLS.Mode == TLSModeACME && versionBelow(c.MinClientVersion, ACMEMinClientVersion) {
+		w = append(w, fmt.Sprintf("tls.mode acme: clients older than %s that dial %s are handed the ACME certificate and fail their pin; "+
+			"upgrade them and set min_client_version: %q", ACMEMinClientVersion, c.ACMEDomain(), ACMEMinClientVersion))
+	}
+	return w
 }
 
 // OverlayPrefix returns the parsed overlay CIDR. It panics only if the
