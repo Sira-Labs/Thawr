@@ -18,7 +18,8 @@ if [[ -z "${tag:-}" || "$tag" == null ]]; then
   echo "site-release: no published release; page left as is" >&2
   exit 0
 fi
-if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+semver='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'
+if [[ ! "$tag" =~ $semver ]]; then
   echo "site-release: unexpected tag $tag" >&2
   exit 1
 fi
@@ -31,11 +32,17 @@ for marker in 'state = { tag: "' 'data-pre' 'data-final'; do
     exit 1
   fi
 done
+if [[ ! "$old" =~ $semver ]]; then
+  echo "site-release: $page holds no valid release tag (state.tag is \"$old\")" >&2
+  exit 1
+fi
 
-# The old tag only where it ends (before / _ " < or a space), so v0.1.0
-# never matches inside v0.1.0-rc7 or v0.1.10.
+# Whole tags only: neither neighbour may be a letter, digit, dot or dash
+# (_ / " < and spaces are fine), so v0.1.0 never matches inside
+# v0.1.0-rc7, v0.1.10 or dev0.1.0. The lookarounds consume nothing, so
+# back-to-back tags are all replaced.
 if [[ "$tag" != "$old" ]]; then
-  sed -i "s/${old//./\\.}\([^0-9A-Za-z.-]\)/$tag\1/g" "$page"
+  OLD=$old NEW=$tag perl -pi -e 's/(?<![0-9A-Za-z.\-])\Q$ENV{OLD}\E(?![0-9A-Za-z.\-])/$ENV{NEW}/g' "$page"
 fi
 if [[ "$pre" == true ]]; then
   sed -i 's/data-pre hidden>/data-pre>/g' "$page"

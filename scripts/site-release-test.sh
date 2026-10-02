@@ -59,6 +59,16 @@ cp "$page" "$work/before.html"
 if FAKE_VIEW_FAIL=1 run v9.8.10-rc1 true; then rc=0; else rc=$?; fi
 check "failed size lookup: exits 0 and keeps the page" '[[ $rc -eq 0 ]] && cmp -s "$page" "$work/before.html"'
 
+printf '<p>de%s v9.8.10-rc1/v9.8.10-rc1</p>\n' "v9.8.10-rc1" >>"$page"
+run v9.9.0 false
+check "whole tags: a longer word keeps its text" 'grep -q "<p>dev9.8.10-rc1 " "$page"'
+check "whole tags: back-to-back tags are both replaced" 'grep -q " v9.9.0/v9.9.0</p>" "$page"'
+
+sed -i 's/state = { tag: "[^"]*"/state = { tag: ""/' "$page"
+if run v9.9.1 false 2>/dev/null; then rc=0; else rc=$?; fi
+check "empty page tag: fails the deploy" '[[ $rc -ne 0 ]]'
+
+cp "$work/before.html" "$page"
 sed -i 's/data-final/data-gone/' "$page"
 if run v9.9.0 false 2>/dev/null; then rc=0; else rc=$?; fi
 check "missing marker: fails the deploy" '[[ $rc -ne 0 ]]'
