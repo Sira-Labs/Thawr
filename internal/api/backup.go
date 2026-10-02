@@ -33,7 +33,7 @@ func (h *rest) handleBackup(w http.ResponseWriter, r *http.Request) {
 	f, err := h.deps.Backup.CreateBackup(r.Context(), p)
 	if err != nil {
 		h.deps.Logger.Error("backup", "err", err)
-		writeError(w, http.StatusInternalServerError, "backup failed: "+err.Error())
+		writeError(w, http.StatusInternalServerError, "backup failed; the server log has the cause")
 		return
 	}
 	defer f.Cleanup()

@@ -202,17 +202,33 @@ func prepareDataDir(dir string, force bool, now time.Time) (lk io.Closer, moved 
 		return nil, "", fmt.Errorf("restore: %s is not empty; pass --force to move it aside (it is kept, not deleted): %w", dir, ErrDataDirNotEmpty)
 	}
 	moved = dir + ".pre-restore-" + now.UTC().Format("20060102T150405Z")
-	// The lock is on a file inside dir; release it so the rename works on
-	// every platform, then lock the fresh directory.
-	if err := l.Close(); err != nil {
-		return nil, "", fmt.Errorf("restore: %w", err)
+	// Rename while still holding the lock, so no server can take the
+	// directory between the check and the move: on Unix a lock survives
+	// the rename of its directory. Windows refuses to rename a directory
+	// with an open handle inside, ours included; there the lock is
+	// released and the rename tried once more, and a server that took
+	// the lock in that moment keeps files open, so the retry fails
+	// instead of moving a live database.
+	err = os.Rename(dir, moved)
+	if err != nil {
+		if cerr := l.Close(); cerr != nil {
+			return nil, "", fmt.Errorf("restore: %w", cerr)
+		}
+		l = nil
+		err = os.Rename(dir, moved)
 	}
-	if err := os.Rename(dir, moved); err != nil {
+	if err != nil {
 		return nil, "", fmt.Errorf("restore: move %s aside: %w", dir, err)
+	}
+	if l != nil {
+		// The lock moved with the old directory; it has done its job.
+		_ = l.Close()
 	}
 	if _, err := ensureDataDir(dir); err != nil {
 		return nil, moved, err
 	}
+	// A server started between the move and this lock owns the new
+	// directory; restore stops here and writes nothing into it.
 	l, err = LockDataDir(dir)
 	if err != nil {
 		return nil, moved, fmt.Errorf("restore: %w", err)

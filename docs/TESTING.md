@@ -368,6 +368,6 @@ host, and an enrolled laptop.
    laptop's `client status` reads `connected` again within a minute
    without `client up`, `trust` or re-enrolment; `admin peer list`
    matches the old server.
-6. Change one byte of a copy of the archive (`printf x | dd of=c.tar.gz
-   bs=1 seek=2000 conv=notrunc`): `server restore` exits 2 with
-   `invalid backup archive` and leaves `data_dir` untouched.
+6. Cut the last byte off a copy of the archive (`cp b.tar.gz c.tar.gz
+   && truncate -s -1 c.tar.gz`): `server restore c.tar.gz` exits 2
+   with `invalid backup archive` and leaves `data_dir` untouched.

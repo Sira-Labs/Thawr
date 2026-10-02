@@ -724,6 +724,11 @@ tree that followed. One commit each, highest severity first.
       Backup and restore, Prometheus metrics, ACME with the pinned
       certificate kept for clients. Three PRs: backup and restore
       (this one), metrics, ACME.
+      - Owner decisions (2026-10-02): the archive is plain `tar.gz`
+        written 0600, not encrypted (no new dependency; Thawr implements
+        no cryptography, operators encrypt with their backup tool);
+        metrics on the admin socket plus an opt-in listener; ACME picks
+        the certificate by SNI so client pins survive renewals.
       - Backup and restore done. The archive is a `tar.gz` with
         `manifest.json` first (size and SHA-256 per file); `Extract`
         verifies while it writes and refuses links, unsafe paths and
@@ -746,7 +751,12 @@ tree that followed. One commit each, highest severity first.
       - The client's instance lock moved to `internal/flock`; the
         server takes `data_dir/thawr.lock` with it, and restore takes
         the same lock, so a restore and a server exclude each other
-        even when the admin socket is gone.
+        even when the admin socket is gone. `--force` renames data_dir
+        while still holding that lock (Unix keeps a lock across a
+        rename; on Windows the rename is retried once after releasing
+        it and fails if a server took it), rather than a lock file next
+        to data_dir: under the systemd unit the server may write only
+        inside data_dir.
 
 ## Phase 2 candidates (scheduled as specs 014–021 in `docs/roadmap/`)
 
