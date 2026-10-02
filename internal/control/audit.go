@@ -27,6 +27,7 @@ const (
 	AuditRouteWithdraw    = "route.withdraw"
 	AuditRouteApprove     = "route.approve"
 	AuditRouteRevoke      = "route.revoke"
+	AuditBackupCreate     = "backup.create"
 )
 
 // Actor roles beyond the user roles.

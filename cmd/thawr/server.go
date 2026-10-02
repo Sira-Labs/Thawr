@@ -70,7 +70,7 @@ func checkServer(configPath string, errOut io.Writer) (*config.Config, *server.S
 		return nil, nil, &exitError{code: exitConfigError, err: err}
 	}
 	logger := server.NewLogger(cfg.Log, errOut)
-	srv, err := server.New(cfg, server.Deps{Logger: logger, Version: version})
+	srv, err := server.New(cfg, server.Deps{Logger: logger, Version: version, ConfigPath: configPath})
 	if err != nil {
 		return nil, nil, &exitError{code: exitConfigError, err: err}
 	}

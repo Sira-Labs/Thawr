@@ -53,6 +53,9 @@ type Deps struct {
 	Logger     *slog.Logger
 	// Version is reported by the status endpoint.
 	Version string
+	// ConfigPath is the file the config was loaded from; a backup
+	// includes a copy of it when it is readable (spec 014).
+	ConfigPath string
 	// UI is the embedded admin UI; defaults to web.Static().
 	UI fs.FS
 	// HubOptions tune presence timing (tests).
@@ -89,6 +92,7 @@ type Server struct {
 	staticSeen map[string]time.Time
 
 	users     *control.Users
+	auditor   *control.Auditor
 	tokens    *control.Tokens
 	enroller  *control.Enroller
 	registry  *control.Registry
@@ -269,7 +273,7 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 	if err != nil {
 		return err
 	}
-	restDeps.Local, restDeps.Sessions = true, nil
+	restDeps.Local, restDeps.Sessions, restDeps.Backup = true, nil, s
 	adminHandler, err := api.NewREST(restDeps)
 	if err != nil {
 		return err
@@ -639,6 +643,7 @@ func (s *Server) buildServices(ctx context.Context) error {
 	}
 	visibility := control.PolicyVisibility{Load: s.policySvc.Load}
 	auditor := control.NewAuditor(s.deps.Now)
+	s.auditor = auditor
 	users.WithAuditor(auditor)
 	s.policySvc.WithAuditor(auditor)
 	s.tokens = control.NewTokens(s.st, s.deps.Now, s.log).WithTagAllowed(s.policySvc.TagAllowed).WithPeerRefs(s.policySvc.PeerRefs).WithAuditor(auditor)

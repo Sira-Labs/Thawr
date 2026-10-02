@@ -49,6 +49,9 @@ type RESTDeps struct {
 	// Local marks the admin-socket handler: every request acts as the
 	// local admin and login is disabled.
 	Local bool
+	// Backup enables GET /api/v1/backup on the admin socket only; the
+	// archive holds the server's private keys (spec 014).
+	Backup BackupSource
 }
 
 type rest struct {
@@ -110,6 +113,9 @@ func NewREST(deps RESTDeps) (http.Handler, error) {
 		}
 		if deps.Lock != nil {
 			mux.HandleFunc("GET /api/v1/lock", h.requireAuth(h.handleShowLock))
+		}
+		if deps.Local && deps.Backup != nil {
+			mux.HandleFunc("GET /api/v1/backup", h.requireAdmin(h.handleBackup))
 		}
 		if deps.Routes != nil {
 			mux.HandleFunc("GET /api/v1/peers/{name}/routes", h.requireAuth(h.handleListRoutes))
