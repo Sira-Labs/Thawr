@@ -714,8 +714,8 @@ thawr version</pre><button class="copy" type="button">Copy</button></div>
     // every step with &&. The checksum line is the one whose file name is exactly the archive.
     if (key.indexOf("windows") === 0) {
       return "try {\n" +
-        "  Invoke-WebRequest " + base + name + ".zip -OutFile thawr.zip -ErrorAction Stop\n" +
-        "  Invoke-WebRequest " + base + "SHA256SUMS -OutFile SHA256SUMS -ErrorAction Stop\n" +
+        "  Invoke-WebRequest " + base + name + ".zip -OutFile thawr.zip -UseBasicParsing -ErrorAction Stop\n" +
+        "  Invoke-WebRequest " + base + "SHA256SUMS -OutFile SHA256SUMS -UseBasicParsing -ErrorAction Stop\n" +
         "  $line = Get-Content SHA256SUMS | Where-Object { ($_ -split '\\s+')[1] -eq '" + name + ".zip' }\n" +
         "  $actual = (Get-FileHash thawr.zip -Algorithm SHA256).Hash\n" +
         "  if (-not $line -or ($line -split '\\s+')[0] -ne $actual) { throw 'SHA256 mismatch: do not use thawr.zip' }\n" +

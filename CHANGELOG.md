@@ -38,6 +38,8 @@ when one exists, and GitHub's generated notes otherwise.
 
 ### Fixed
 
+- Product page: the Windows downloads pass `-UseBasicParsing`, so Windows PowerShell 5.1 with
+  the December 2025 update no longer asks for confirmation.
 - Product page: the install commands stop when a download fails or the checksum does not
   match. They check the `SHA256SUMS` line whose file name is exactly the archive; Windows runs
   in one `try` with `-ErrorAction Stop`, and Linux and macOS chain every step with `&&`. A Mac
