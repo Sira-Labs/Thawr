@@ -100,6 +100,7 @@ code, pre, .mono { font-family: var(--mono); }
 .cta { margin-top: 32px; display: flex; flex-wrap: wrap; gap: 12px; }
 .meta { margin-top: 22px; display: flex; flex-wrap: wrap; gap: 8px 18px; font: 400 0.82rem/1.4 var(--mono); color: var(--muted); }
 .meta b { color: var(--fg); font-weight: 500; }
+[hidden] { display: none !important; }
 .art { justify-self: center; width: 100%; max-width: 540px; aspect-ratio: 1; }
 .art svg { display: block; width: 100%; height: 100%; overflow: visible; }
 @media (max-width: 860px) {
@@ -339,7 +340,7 @@ footer a:hover { color: var(--fg); }
         <a class="btn" id="cta-main" href="#download">Download</a>
         <a class="btn ghost" href="https://github.com/Sira-Labs/Thawr">View on GitHub</a>
       </div>
-      <p class="meta"><span><b data-tag>v0.1.0-rc7</b> release candidate</span><span>Apache-2.0</span><span>Linux · macOS · Windows</span></p>
+      <p class="meta"><span><b data-tag>v0.1.0-rc7</b><span data-pre> release candidate</span></span><span>Apache-2.0</span><span>Linux · macOS · Windows</span></p>
     </div>
     <div class="art" aria-hidden="true">
       <svg id="rosette" viewBox="-260 -260 520 520" focusable="false">
@@ -508,7 +509,7 @@ Filter: 3 rules · 0 dropped (last 5 min)
     <div class="head">
       <p class="eyebrow">Download</p>
       <h2>Get <span data-tag>v0.1.0-rc7</span> for your system.</h2>
-      <p>The <code>thawr</code> binary is the same on every machine. What differs is the subcommand you install: <code>server</code> on the host, <code>client</code> everywhere else. This is a release candidate; <code>v0.1.0</code> follows once the manual checklists have passed on real hosts.</p>
+      <p>The <code>thawr</code> binary is the same on every machine. What differs is the subcommand you install: <code>server</code> on the host, <code>client</code> everywhere else.<span data-pre> This is a release candidate; <code data-final>v0.1.0</code> follows once the manual checklists have passed on real hosts.</span></p>
     </div>
     <div class="dl-grid">
       <div class="os" data-os="darwin">
@@ -808,6 +809,9 @@ thawr version</pre><button class="copy" type="button">Copy</button></div>
     });
     if (!seen) return;
     Array.prototype.forEach.call(document.querySelectorAll("[data-tag]"), function (n) { n.textContent = tag; });
+    // A pre-release names the version it leads to; a stable release drops the note.
+    Array.prototype.forEach.call(document.querySelectorAll("[data-pre]"), function (n) { n.hidden = !rel.prerelease; });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-final]"), function (n) { n.textContent = tag.replace(/-.*/, ""); });
     document.getElementById("l-sums").href = BASE + tag + "/SHA256SUMS";
     document.getElementById("l-brew").href = BASE + tag + "/thawr.rb";
     var hero = document.getElementById("cta-main");

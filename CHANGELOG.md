@@ -85,6 +85,11 @@ hosts (`docs/roadmap/sprints.md`, sprint 4); the tag replaces
 - Documentation: vision, architecture, ADRs 0001–0006, threat model,
   testing guide with manual checklists per platform, one spec per
   feature, roadmap and weekly sprint plan.
+- Product page on GitHub Pages (`site/`), redeployed after every
+  successful release: `scripts/site-release.sh` points its download
+  links, archive sizes and release-candidate note at the newest release
+  (the note disappears for a stable one), and CI tests that rewrite
+  against the current page.
 
 ### Changed
 
