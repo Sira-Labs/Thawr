@@ -148,6 +148,11 @@ message NetPeer {
   // ipv6 is set when both this peer and the receiver handle IPv6; its
   // /128 is then in allowed_ips as well.
   string ipv6 = 15;
+  // wanted marks a peer that is trying to reach the receiver, by
+  // probing its candidates or on the relay: the receiver treats it as
+  // traffic intent and probes back, so both sides punch at once and
+  // meet on the relay when nothing direct works (specs 004, 005).
+  bool wanted = 16;
 }
 
 // EndpointKind classifies a candidate address.

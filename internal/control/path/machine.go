@@ -101,7 +101,9 @@ type Machine struct {
 	wanted      bool // intent was ever expressed
 	freshIntent bool // intent since the last probe round started
 	fromRelay   bool // the current probe is a single-candidate retry
-	retryIdx    int  // next candidate to retry from the relay
+	lag         time.Duration
+	window      time.Duration // length of the current probe window
+	retryIdx    int           // next candidate to retry from the relay
 	windowStart time.Time
 	lastProbe   time.Time
 	lastRound   time.Time
@@ -113,6 +115,20 @@ type Machine struct {
 // New returns a machine in Idle.
 func New(opts Options) *Machine {
 	return &Machine{opts: opts.withDefaults(), state: Idle}
+}
+
+// SetStagger lengthens the first window of every probe round by half a
+// window. Two peers that start probing each other within milliseconds
+// (one woke the other through the hub) would otherwise move to their
+// next candidate on the same tick each time, and a re-add just after
+// the other side's initiation arrived throws the fresh session away.
+// Exactly one side of a pair staggers, so its switches fall between the
+// other's.
+func (m *Machine) SetStagger(on bool) {
+	m.lag = 0
+	if on {
+		m.lag = m.opts.ProbeWindow / 2
+	}
 }
 
 // State reports the current state.
@@ -168,10 +184,10 @@ func (m *Machine) Step(in Input) Output {
 			m.state = Direct
 		case m.dirty && in.Now.Sub(m.lastProbe) >= m.opts.ProbeWindow:
 			out.Action = m.startRound(in.Now)
-		case in.Now.Sub(m.windowStart) >= m.opts.ProbeWindow && m.fromRelay:
+		case in.Now.Sub(m.windowStart) >= m.window && m.fromRelay:
 			// The single retry failed: back to the relay until next time.
 			out.Action = m.useRelay()
-		case in.Now.Sub(m.windowStart) >= m.opts.ProbeWindow:
+		case in.Now.Sub(m.windowStart) >= m.window:
 			m.idx++
 			out.Action = m.probeNext(in.Now)
 		}
@@ -205,7 +221,9 @@ func (m *Machine) startRound(now time.Time) Action {
 	m.dirty, m.freshIntent, m.fromRelay = false, false, false
 	m.lastRound = now
 	m.idx = 0
-	return m.probeNext(now)
+	act := m.probeNext(now)
+	m.window += m.lag
+	return act
 }
 
 // retryFromRelay probes one candidate, the next in turn, keeping the
@@ -214,7 +232,9 @@ func (m *Machine) retryFromRelay(now time.Time) Action {
 	m.lastRound, m.fromRelay = now, true
 	m.idx = m.retryIdx % len(m.candidates)
 	m.retryIdx = m.idx + 1
-	return m.probeNext(now)
+	act := m.probeNext(now)
+	m.window += m.lag
+	return act
 }
 
 // useRelay points the peer at the relay.
@@ -234,7 +254,7 @@ func (m *Machine) probeNext(now time.Time) Action {
 	}
 	m.state = Probing
 	m.endpoint = m.candidates[m.idx]
-	m.windowStart, m.lastProbe = now, now
+	m.windowStart, m.lastProbe, m.window = now, now, m.opts.ProbeWindow
 	m.probes++
 	return ActProbe
 }

@@ -36,6 +36,9 @@ type SyncHub interface {
 	Disconnected(peerID string)
 	Changed()
 	Options() control.HubOptions
+	// Want records that peer from is trying to reach peer to, which
+	// asks to to reach back (specs 004, 005).
+	Want(to, from string)
 }
 
 // PeerOps are the per-peer operations behind the authenticated RPCs.
@@ -274,6 +277,17 @@ func (s *controlServer) ReportPath(ctx context.Context, req *thawrv1.PathReport)
 		paths = append(paths, control.PathState{PeerID: p.GetPeerId(), State: p.GetState(), Endpoint: p.GetEndpoint()})
 	}
 	s.deps.Paths.Set(me.ID, paths)
+	// A peer being probed or relayed to must reach back now: hole
+	// punching needs both sides at once, and a relayed packet needs the
+	// other side on the relay (specs 004, 005). Its netmap only carries
+	// the request when it may see the reporter.
+	if s.deps.Sync != nil {
+		for _, p := range paths {
+			if p.State == "probing" || p.State == "relay" {
+				s.deps.Sync.Want(p.PeerID, me.ID)
+			}
+		}
+	}
 	return &thawrv1.Empty{}, nil
 }
 

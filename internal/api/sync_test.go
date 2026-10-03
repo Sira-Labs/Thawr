@@ -72,7 +72,7 @@ func newSyncEnv(t *testing.T) *syncEnv {
 	endpoints := control.NewEndpointTable(now)
 	hubInfo := control.HubConfig{PublicKey: testHubKey, Endpoint: "vpn:51820", Address: netip.MustParseAddr("100.64.0.1"), Overlay: overlay,
 		Address6: control.IPv6For(overlay6, netip.MustParseAddr("100.64.0.1")), Overlay6: overlay6, STUNAddrs: []string{"vpn:3478", "vpn:3479"}}
-	builder := control.NewNetMapBuilder(st, control.OwnerVisibility{}, endpoints, hub, hubInfo, hub.Generation)
+	builder := control.NewNetMapBuilder(st, control.OwnerVisibility{}, endpoints, hub, hubInfo, hub.Generation).WithWants(hub)
 	srv, err := NewGRPC(GRPCDeps{
 		Enroller: enroller, Hub: HubInfo{PublicKey: testHubKey, Endpoint: "vpn:51820", Overlay: overlay, Overlay6: overlay6}, Logger: quiet,
 		NodeAuth: registry, NetMaps: builder, Sync: hub, Peers: registry, Endpoints: endpoints, Paths: control.NewPathTable(now),

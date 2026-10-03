@@ -53,7 +53,18 @@ type Hub struct {
 	presence map[string]*presenceEntry
 	pending  bool
 	timer    *time.Timer
+	// wants holds reach requests: target peer id -> requesting peer id
+	// -> request (specs 004, 005).
+	wants map[string]map[string]wantReq
 }
+
+// Reach requests ("from is trying to reach to"): a request stays in
+// to's netmaps for wantTTL; a repeated request wakes to again only
+// after wantRepeat.
+const (
+	wantTTL    = 30 * time.Second
+	wantRepeat = 5 * time.Second
+)
 
 type subscriber struct {
 	peerID string
@@ -80,6 +91,7 @@ func NewHub(ctx context.Context, st *store.Store, now func() time.Time, log *slo
 		sequence: gen,
 		subs:     map[*subscriber]struct{}{},
 		presence: map[string]*presenceEntry{},
+		wants:    map[string]map[string]wantReq{},
 	}, nil
 }
 
@@ -180,11 +192,98 @@ func (h *Hub) Online(peerID string) bool {
 	return e != nil && e.online
 }
 
-// Forget drops presence for a deleted peer.
+// Forget drops presence and reach requests for a deleted peer.
 func (h *Hub) Forget(peerID string) {
 	h.mu.Lock()
 	delete(h.presence, peerID)
+	delete(h.wants, peerID)
+	for to, from := range h.wants {
+		delete(from, peerID)
+		if len(from) == 0 {
+			delete(h.wants, to)
+		}
+	}
 	h.mu.Unlock()
+}
+
+// wantReq is one reach request: when it was last made (for wantTTL) and
+// when it last woke the target (for wantRepeat).
+type wantReq struct {
+	at, woke time.Time
+}
+
+// Want records that peer from is trying to reach peer to (it probes
+// to's candidates or waits for it on the relay) and wakes to's Sync
+// streams at once, without a new generation, so to's next netmap asks
+// it to reach from as well. Hole punching needs both sides at once, and
+// a peer with no traffic of its own would otherwise neither punch nor
+// join the relay (specs 004, 005).
+//
+// Only a peer with an open stream is recorded, since nothing else can be
+// woken; with expired requests pruned on the way, the table never holds
+// more than connected peers times their visible peers, whatever ids a
+// client reports.
+func (h *Hub) Want(to, from string) {
+	h.mu.Lock()
+	if e := h.presence[to]; e == nil || e.streams == 0 {
+		h.mu.Unlock()
+		return
+	}
+	now := h.now()
+	reqs := h.wants[to]
+	if reqs == nil {
+		reqs = map[string]wantReq{}
+		h.wants[to] = reqs
+	}
+	for id, r := range reqs {
+		if now.Sub(r.at) >= wantTTL {
+			delete(reqs, id)
+		}
+	}
+	r, seen := reqs[from]
+	// The repeat gate counts from the last wake, not the last request:
+	// a sender repeating faster than wantRepeat still wakes the target
+	// every wantRepeat.
+	wake := !seen || now.Sub(r.woke) >= wantRepeat
+	r.at = now
+	if wake {
+		r.woke = now
+	}
+	reqs[from] = r
+	if wake {
+		for s := range h.subs {
+			if s.peerID != to {
+				continue
+			}
+			select {
+			case s.ch <- struct{}{}:
+			default: // already has a pending wake-up
+			}
+		}
+	}
+	h.mu.Unlock()
+	if wake {
+		h.log.Debug("peer wanted", "peer_id", to, "from", from)
+	}
+}
+
+// Wanted reports whether peer from asked to reach peer to within the
+// last wantTTL.
+func (h *Hub) Wanted(to, from string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	r, ok := h.wants[to][from]
+	if !ok {
+		return false
+	}
+	if h.now().Sub(r.at) < wantTTL {
+		return true
+	}
+	delete(h.wants[to], from)
+	if len(h.wants[to]) == 0 {
+		delete(h.wants, to)
+	}
+	return false
 }
 
 // Sweep marks peers offline whose last stream closed longer than

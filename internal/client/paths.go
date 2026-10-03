@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -29,9 +30,12 @@ type peerPath struct {
 	machine   *path.Machine
 	sink      *sink
 	ping      bool
-	steps     int
-	state     path.State
-	endpoint  netip.AddrPort
+	// wanted is the netmap's last wanted flag for the peer; a new
+	// request counts as traffic intent once (specs 004, 005).
+	wanted   bool
+	steps    int
+	state    path.State
+	endpoint netip.AddrPort
 }
 
 // PathResult is the outcome of a ping.
@@ -71,6 +75,7 @@ func (d *Daemon) syncPaths(ctx context.Context, nm NetMap, cfg wg.Config) error 
 	}
 	d.pmu.Lock()
 	defer d.pmu.Unlock()
+	self := cfg.PrivateKey.PublicKey()
 	seen := map[string]bool{}
 	var errs []error
 	for _, p := range nm.Peers {
@@ -87,6 +92,7 @@ func (d *Daemon) syncPaths(ctx context.Context, nm NetMap, cfg wg.Config) error 
 		}
 		seen[p.ID] = true
 		pp, ok := d.paths[p.ID]
+		reset := !ok || pp.key != key
 		if !ok {
 			s, err := newSink(ctx)
 			if err != nil {
@@ -101,7 +107,19 @@ func (d *Daemon) syncPaths(ctx context.Context, nm NetMap, cfg wg.Config) error 
 			d.relay.Release(relay.Key(pp.key))
 		}
 		pp.name, pp.key, pp.ipv4, pp.peer = p.Name, key, ip, byKey[key]
+		// The larger key staggers its probe windows, so the pair never
+		// re-adds each other in step (both derive the same order).
+		pp.machine.SetStagger(bytes.Compare(self[:], key[:]) > 0)
 		pp.cands, pp.symmetric = p.Candidates(), p.Symmetric
+		// The peer is trying to reach this device: probe back as if it
+		// had traffic for the peer, so both sides punch at once, and the
+		// round ends on the relay when no candidate answers.
+		// A new machine (new peer or key rotation) starts idle, so a
+		// standing request counts again.
+		if p.Wanted && (!pp.wanted || reset) {
+			pp.ping = true
+		}
+		pp.wanted = p.Wanted
 	}
 	for id, pp := range d.paths {
 		if !seen[id] {
@@ -179,14 +197,7 @@ func (d *Daemon) pathTick(ctx context.Context) {
 	if dev == nil {
 		return
 	}
-	stats := map[wg.Key]wg.PeerStats{}
-	if list, err := dev.Stats(ctx); err == nil {
-		for _, s := range list {
-			stats[s.PublicKey] = s
-		}
-	} else if ctx.Err() == nil {
-		d.log.Debug("device stats", "err", err)
-	}
+	stats := d.statsByKey(ctx, dev)
 	now := d.opts.Now()
 	if fd, ok := dev.(wg.Filterable); ok {
 		d.drops.Record(now, fd.FilterStats().Drops)
@@ -194,6 +205,8 @@ func (d *Daemon) pathTick(ctx context.Context) {
 	var report []PathResult
 	d.pmu.Lock()
 	changed := false
+	// Re-read once, when the first step would re-add, not per peer.
+	var fresh map[wg.Key]wg.PeerStats
 	for _, pp := range d.paths {
 		in := path.Input{Now: now, Intent: pp.sink.takeIntent() || pp.ping}
 		pp.ping = false
@@ -205,9 +218,20 @@ func (d *Daemon) pathTick(ctx context.Context) {
 				in.Endpoint = s.Endpoint
 			}
 		}
-		prev := pp.state
 		out := pp.machine.Step(in)
 		pp.steps++
+		if out.Action == path.ActProbe || out.Action == path.ActRelay {
+			if fresh == nil {
+				fresh = d.statsByKey(ctx, dev)
+			}
+			if s, ok := fresh[pp.key]; ok && reachedSince(s, in) {
+				// The peer's own probe got through since stats were read:
+				// the re-add would throw that session away. Keep it; the
+				// next tick sees the handshake and takes the path (spec 004).
+				d.log.Debug("handshake arrived before the re-add; keeping it", "peer", pp.name)
+				out.Action = path.ActNone
+			}
+		}
 		switch out.Action {
 		case path.ActSink:
 			d.setPeerEndpoint(ctx, dev, pp, pp.sink.endpoint(), false)
@@ -233,7 +257,10 @@ func (d *Daemon) pathTick(ctx context.Context) {
 		if out.Changed {
 			pp.state, pp.endpoint = out.State, out.Endpoint
 			changed = true
-			if prev == path.Relay && out.State != path.Relay && out.State != path.Probing {
+			// An upgrade usually passes through probing (a retry from the
+			// relay), so release on any settled non-relay state; it is a
+			// no-op without a proxy.
+			if out.State != path.Relay && out.State != path.Probing {
 				d.relay.Release(relay.Key(pp.key))
 			}
 			d.log.Info("path", "peer", pp.name, "state", out.State, "endpoint", out.Endpoint)
@@ -248,6 +275,34 @@ func (d *Daemon) pathTick(ctx context.Context) {
 	if changed {
 		d.reportPaths(ctx, report)
 	}
+}
+
+// statsByKey reads the device's per-peer stats; empty on error.
+func (d *Daemon) statsByKey(ctx context.Context, dev wg.Device) map[wg.Key]wg.PeerStats {
+	stats := map[wg.Key]wg.PeerStats{}
+	list, err := dev.Stats(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			d.log.Debug("device stats", "err", err)
+		}
+		return stats
+	}
+	for _, s := range list {
+		stats[s.PublicKey] = s
+	}
+	return stats
+}
+
+// reachedSince reports, from stats s read after the tick read in,
+// whether the peer reached the device in between: a later handshake,
+// received bytes (an authenticated initiation counts), or WireGuard
+// moving the endpoint to a real address because an initiation came
+// from there (as responder, WireGuard records the handshake only once
+// the initiator's first data packet arrives). A probe or relay step
+// re-adds the peer, which would discard that session.
+func reachedSince(s wg.PeerStats, in path.Input) bool {
+	roamed := s.Endpoint.IsValid() && !s.Endpoint.Addr().IsLoopback() && s.Endpoint != in.Endpoint
+	return s.LastHandshake.After(in.Handshake) || roamed || s.RxBytes > in.Rx
 }
 
 func (pp *peerPath) result() PathResult {
