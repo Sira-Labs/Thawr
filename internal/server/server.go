@@ -734,7 +734,7 @@ func (s *Server) buildServices(ctx context.Context) error {
 		Overlay6:  s.overlay6(),
 		STUNAddrs: s.cfg.STUNEndpoints(),
 	}, hub.Generation)
-	s.dnsSource = newRegistrySource(s.st, visibility, hub.Generation, s.cfg.HubAddr().Addr())
+	s.dnsSource = newRegistrySource(s.st, visibility, hub.Generation, s.cfg.HubAddr().Addr(), s.hubAddr6())
 	return nil
 }
 

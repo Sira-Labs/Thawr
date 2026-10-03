@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"net/netip"
 	"slices"
 	"testing"
@@ -163,5 +164,35 @@ func TestAdoptSelfIPv6(t *testing.T) {
 	}
 	if _, _, ok := (NetMap{SelfIPv6: "fd00:9::1", Overlay6: testOverlay6}).selfIPv6(); ok {
 		t.Error("an address outside the prefix accepted")
+	}
+}
+
+func TestDNSEntriesIPv6(t *testing.T) {
+	nm := dualStackNetMap(t)
+	d := &Daemon{state: State{Name: "a", IPv6: self6}, selfIP: netip.MustParseAddr("100.64.0.2"), overlay: netip.MustParsePrefix("100.64.0.0/10"), netmap: &nm}
+	src := netmapSource{d}
+	for _, tc := range []struct {
+		name string
+		want []string
+	}{
+		{"a", []string{"100.64.0.2", self6}},
+		{"hub", []string{"100.64.0.1", "fd00:1:2:3::6440:1"}},
+		{"gw", []string{"100.64.0.3", exit6}},
+		{"old", []string{"100.64.0.4"}},
+	} {
+		got, ok := src.Lookup(context.Background(), netip.Addr{}, tc.name)
+		var s []string
+		for _, a := range got {
+			s = append(s, a.String())
+		}
+		if !ok || !slices.Equal(s, tc.want) {
+			t.Errorf("%s: %v %v, want %v", tc.name, s, ok, tc.want)
+		}
+	}
+	if n, ok := src.Reverse(context.Background(), netip.Addr{}, netip.MustParseAddr(exit6)); !ok || n != "gw" {
+		t.Errorf("reverse %s: %q %v", exit6, n, ok)
+	}
+	if !d.dnsServerOptions().Reverse6.Contains(netip.MustParseAddr(exit6)) {
+		t.Error("client resolver does not answer ip6.arpa for the overlay")
 	}
 }
