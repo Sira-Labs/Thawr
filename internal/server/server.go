@@ -728,8 +728,9 @@ func (s *Server) buildServices(ctx context.Context) error {
 		WithOverlay(s.cfg.OverlayPrefix()).WithOverlay6(s.overlay6()).WithTagAllowed(s.policySvc.TagAllowed).WithAuditor(auditor).WithLock(s.lockSvc).WithPeerRefs(s.policySvc.PeerRefs)
 	s.staticSeen = map[string]time.Time{}
 	s.sessions = api.NewSessions(s.deps.Now)
-	s.relay = relay.NewServer(keyVisibility{control.NewKeyVisibility(s.st, visibility, hub.Generation)},
-		relay.ServerOptions{MaxBytesPerSecond: s.cfg.Relay.MaxBytesPerSecond, Now: s.deps.Now, Logger: s.log})
+	keyVis := control.NewKeyVisibility(s.st, visibility, hub.Generation)
+	s.relay = relay.NewServer(keyVisibility{keyVis},
+		relay.ServerOptions{MaxBytesPerSecond: s.cfg.Relay.MaxBytesPerSecond, Absent: s.relayAbsent(keyVis), Now: s.deps.Now, Logger: s.log})
 	s.netmaps = control.NewNetMapBuilder(s.st, visibility, s.endpoints, s, control.HubConfig{
 		PublicKey: s.hubKey.PublicKey().String(),
 		Endpoint:  s.cfg.HubEndpoint(),
@@ -738,12 +739,29 @@ func (s *Server) buildServices(ctx context.Context) error {
 		Address6:  s.hubAddr6(),
 		Overlay6:  s.overlay6(),
 		STUNAddrs: s.cfg.STUNEndpoints(),
-	}, hub.Generation)
+	}, hub.Generation).WithRelayWants(hub)
 	s.dnsSource = newRegistrySource(s.st, visibility, hub.Generation, s.cfg.HubAddr().Addr(), s.hubAddr6())
 	return nil
 }
 
 // keyVisibility adapts control.KeyVisibility to the relay's key type.
+// relayAbsent asks a peer that is not on the relay to join it when a
+// peer it may reach sends to it there (spec 005).
+func (s *Server) relayAbsent(kv *control.KeyVisibility) func(src, dst relay.Key) {
+	return func(src, dst relay.Key) {
+		ctx := context.Background()
+		from, ok, err := kv.PeerID(ctx, wg.Key(src).String())
+		if err != nil || !ok {
+			return
+		}
+		to, ok, err := kv.PeerID(ctx, wg.Key(dst).String())
+		if err != nil || !ok {
+			return
+		}
+		s.hub.WantRelay(to, from)
+	}
+}
+
 type keyVisibility struct {
 	kv *control.KeyVisibility
 }

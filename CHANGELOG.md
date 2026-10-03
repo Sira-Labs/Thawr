@@ -51,6 +51,12 @@ when one exists, and GitHub's generated notes otherwise.
 
 ### Fixed
 
+- Relay: a peer that had no traffic of its own never joined the relay,
+  so two devices behind symmetric NATs could reach each other only when
+  both started talking (spec 005). The server now tells such a peer
+  that someone waits for it on the relay, and the first handshake
+  through a new relay connection is no longer dropped; the first echo
+  arrives within seconds.
 - Product page: the Windows downloads pass `-UseBasicParsing`, so Windows PowerShell 5.1 with
   the December 2025 update no longer asks for confirmation.
 - Product page: the install commands stop when a download fails or the checksum does not

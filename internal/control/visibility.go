@@ -44,6 +44,16 @@ func (v *KeyVisibility) Visible(ctx context.Context, src, dst string) (bool, err
 	return v.visibility.Visible(a, b), nil
 }
 
+// PeerID returns the id of the peer holding public key key.
+func (v *KeyVisibility) PeerID(ctx context.Context, key string) (string, bool, error) {
+	peers, err := v.peers(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	p, ok := peers[key]
+	return p.ID, ok, nil
+}
+
 func (v *KeyVisibility) peers(ctx context.Context) (map[string]store.Peer, error) {
 	gen := v.generation()
 	v.mu.Lock()

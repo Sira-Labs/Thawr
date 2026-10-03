@@ -355,7 +355,13 @@ failed retry costs at most one window of loss; a candidate change (new
 netmap on both sides at once) starts a full simultaneous round, which
 is what upgrades a relayed pair to `direct` after a network change. A
 handshake arriving from a public address while relayed also upgrades
-the path (roaming). Spec 005.
+the path (roaming). A peer with no traffic of its own would never
+join: when a visible peer sends to a key without a session, the relay
+tells the hub, which flags the sender `relay_wanted` in that peer's
+netmaps for 30 s and wakes only its stream; the client takes a newly
+flagged peer as traffic intent, so its own probe round ends on the
+relay too. Datagrams a proxy receives while the relay connection is
+still opening wait in its queue. Spec 005.
 
 ### 4.6 Policy evaluation
 

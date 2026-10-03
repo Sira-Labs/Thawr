@@ -173,6 +173,20 @@ batches).
       - Visibility for the relay is `control.KeyVisibility` (peers by
         public key, cached per netmap generation); the registry-follow
         loop also prunes sessions of deleted peers.
+      - Fix (2026-10-03, found by the new CI integration job): a peer
+        without traffic of its own never joined the relay, so a relayed
+        pair worked only when both sides wanted to talk. The relay now
+        reports a send to a visible peer without a session (`Absent`,
+        once per PEER_GONE window); the hub keeps the request 30 s and
+        wakes only that peer, whose netmap flags the sender
+        `relay_wanted`; the client treats a new flag as traffic intent,
+        so its probe round ends on the relay. A server push was chosen
+        over keeping every symmetric client on the relay, which would
+        hold connections nobody uses.
+      - The relay client queues datagrams while it connects instead of
+        dropping them: the first one is the handshake that opened the
+        relay path, and losing it cost a 5 s WireGuard retry. First
+        echo between two symmetric NATs: about 4 s.
       - `relay.max_bytes_per_second` is a per-session token bucket with a
         one-second burst; queue overflow and violations are counted and
         all counters sit under `relay` in `/api/v1/status`.

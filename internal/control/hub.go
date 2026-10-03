@@ -53,7 +53,18 @@ type Hub struct {
 	presence map[string]*presenceEntry
 	pending  bool
 	timer    *time.Timer
+	// wants holds relay requests: target peer id -> requesting peer id
+	// -> time of the latest request (spec 005).
+	wants map[string]map[string]time.Time
 }
+
+// Relay requests: a request stays in the target's netmaps for
+// relayWantTTL; a repeated request wakes the target again only after
+// relayWantRepeat.
+const (
+	relayWantTTL    = 30 * time.Second
+	relayWantRepeat = 5 * time.Second
+)
 
 type subscriber struct {
 	peerID string
@@ -80,6 +91,7 @@ func NewHub(ctx context.Context, st *store.Store, now func() time.Time, log *slo
 		sequence: gen,
 		subs:     map[*subscriber]struct{}{},
 		presence: map[string]*presenceEntry{},
+		wants:    map[string]map[string]time.Time{},
 	}, nil
 }
 
@@ -180,11 +192,70 @@ func (h *Hub) Online(peerID string) bool {
 	return e != nil && e.online
 }
 
-// Forget drops presence for a deleted peer.
+// Forget drops presence and relay requests for a deleted peer.
 func (h *Hub) Forget(peerID string) {
 	h.mu.Lock()
 	delete(h.presence, peerID)
+	delete(h.wants, peerID)
+	for to, from := range h.wants {
+		delete(from, peerID)
+		if len(from) == 0 {
+			delete(h.wants, to)
+		}
+	}
 	h.mu.Unlock()
+}
+
+// WantRelay records that peer from sends to peer to through the relay
+// while to has no relay session, and wakes to's Sync streams at once,
+// without a new generation, so to's next netmap asks it to reach from
+// (spec 005). Without this, a peer with no traffic of its own never
+// joins the relay and the relayed packets go nowhere.
+func (h *Hub) WantRelay(to, from string) {
+	h.mu.Lock()
+	now := h.now()
+	reqs := h.wants[to]
+	if reqs == nil {
+		reqs = map[string]time.Time{}
+		h.wants[to] = reqs
+	}
+	last, seen := reqs[from]
+	reqs[from] = now
+	wake := !seen || now.Sub(last) >= relayWantRepeat
+	if wake {
+		for s := range h.subs {
+			if s.peerID != to {
+				continue
+			}
+			select {
+			case s.ch <- struct{}{}:
+			default: // already has a pending wake-up
+			}
+		}
+	}
+	h.mu.Unlock()
+	if wake {
+		h.log.Debug("relay wanted", "peer_id", to, "from", from)
+	}
+}
+
+// RelayWanted reports whether peer from asked to reach peer to through
+// the relay within the last relayWantTTL.
+func (h *Hub) RelayWanted(to, from string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	at, ok := h.wants[to][from]
+	if !ok {
+		return false
+	}
+	if h.now().Sub(at) < relayWantTTL {
+		return true
+	}
+	delete(h.wants[to], from)
+	if len(h.wants[to]) == 0 {
+		delete(h.wants, to)
+	}
+	return false
 }
 
 // Sweep marks peers offline whose last stream closed longer than

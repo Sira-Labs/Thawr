@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sira-labs/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/relay"
 	"github.com/sira-labs/thawr/internal/wg"
 	"github.com/sira-labs/thawr/internal/wg/wgtest"
 )
@@ -252,3 +253,39 @@ func TestEndpointReportDedup(t *testing.T) {
 }
 
 func itoa(n int) string { return netip.AddrPortFrom(netip.IPv4Unspecified(), uint16(n)).String()[8:] }
+
+// TestSyncPathsRelayWanted: a peer the netmap newly flags as waiting on
+// the relay becomes traffic intent once, as `client ping` would make it
+// (spec 005); the flag staying set does not repeat it.
+func TestSyncPathsRelayWanted(t *testing.T) {
+	key, err := wg.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := &Daemon{paths: map[string]*peerPath{}, pathWake: make(chan struct{}, 1), relay: relay.NewClient(relay.ClientOptions{})}
+	t.Cleanup(d.closeSinks)
+	peer := Peer{ID: "p1", Name: "gw", PublicKey: key.PublicKey().String(), IPv4: "100.64.0.3"}
+	apply := func(wanted bool) *peerPath {
+		t.Helper()
+		peer.RelayWanted = wanted
+		if err := d.syncPaths(context.Background(), NetMap{Peers: []Peer{peer}}, wg.Config{}); err != nil {
+			t.Fatal(err)
+		}
+		return d.paths["p1"]
+	}
+	if pp := apply(false); pp.ping {
+		t.Fatal("intent without a request")
+	}
+	pp := apply(true)
+	if !pp.ping {
+		t.Fatal("a new relay request did not become intent")
+	}
+	pp.ping = false // the prober consumed it
+	if apply(true).ping {
+		t.Error("an unchanged request became intent again")
+	}
+	apply(false)
+	if !apply(true).ping {
+		t.Error("a request after the previous one expired did not become intent")
+	}
+}
