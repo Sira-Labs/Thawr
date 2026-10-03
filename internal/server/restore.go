@@ -305,6 +305,15 @@ func checkRestored(ctx context.Context, cfg *config.Config, res *RestoreResult) 
 	if _, _, err := loadOrCreateServerKey(ctx, filepath.Join(cfg.DataDir, ServerKeyFile), st.Meta()); err != nil {
 		return fmt.Errorf("restore: %w", err)
 	}
+	// A config whose overlay.ipv6 differs from the backup's would stop
+	// the server at its next start; say so now.
+	stored6, err := recordedOverlayIPv6(ctx, st.Meta())
+	if err != nil {
+		return fmt.Errorf("restore: %w", err)
+	}
+	if err := sameOverlayIPv6(cfg.Overlay.IPv6, stored6); err != nil {
+		return fmt.Errorf("restore: %w", err)
+	}
 	if res.Peers, err = st.Peers().Count(ctx); err != nil {
 		return err
 	}

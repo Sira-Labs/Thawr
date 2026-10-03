@@ -214,10 +214,10 @@ func TestNetMapCarriesRoutes(t *testing.T) {
 	for _, f := range nm.Forward {
 		byDst[f.Dst.String()] = f
 	}
-	if f := byDst["10.1.0.0/24"]; f.SrcIPv4.String() != env.laptop.IPv4 || f.PortLo != 22 || f.PortHi != 22 {
+	if f := byDst["10.1.0.0/24"]; f.Src.String() != env.laptop.IPv4 || f.PortLo != 22 || f.PortHi != 22 {
 		t.Errorf("subnet forward rule: %+v", f)
 	}
-	if f := byDst["0.0.0.0/0"]; f.SrcIPv4.String() != env.box.IPv4 || f.PortLo != 1 || f.PortHi != 65535 {
+	if f := byDst["0.0.0.0/0"]; f.Src.String() != env.box.IPv4 || f.PortLo != 1 || f.PortHi != 65535 {
 		t.Errorf("exit forward rule: %+v", f)
 	}
 	if !nm.SelfAdvertised[0].Approved || !nm.SelfAdvertised[1].Approved {

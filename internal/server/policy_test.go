@@ -70,7 +70,7 @@ func TestPolicyChangesNetmaps(t *testing.T) {
 	}
 	waitUntil(t, "alice sees bob", func() bool { n, _ := peersOf(a.PeerID); return n == 1 })
 	nb, filter := peersOf(b.PeerID)
-	if nb != 1 || len(filter) != 1 || filter[0].SrcIPv4.String() != a.IPv4 || filter[0].Proto != "tcp" || filter[0].PortLo != 22 {
+	if nb != 1 || len(filter) != 1 || filter[0].Src.String() != a.IPv4 || filter[0].Proto != "tcp" || filter[0].PortLo != 22 {
 		t.Fatalf("bob's netmap: peers %d filter %+v", nb, filter)
 	}
 	if _, fa := peersOf(a.PeerID); len(fa) != 0 {

@@ -64,15 +64,17 @@ func newSyncEnv(t *testing.T) *syncEnv {
 		t.Fatal(err)
 	}
 	overlay := netip.MustParsePrefix("100.64.0.0/10")
+	overlay6 := netip.MustParsePrefix(testOverlay6)
 	lockSvc := control.NewLockService(st, now, quiet, testHubKey).WithNotifier(hub)
 	registry := control.NewRegistry(st, quiet).WithNotifier(hub).WithLock(lockSvc)
-	enroller := control.NewEnroller(st, now, quiet, overlay, "").WithNotifier(hub)
+	enroller := control.NewEnroller(st, now, quiet, overlay, "").WithNotifier(hub).WithOverlay6(overlay6)
 	routesSvc := control.NewRoutesService(st, quiet, now, overlay).WithNotifier(hub)
 	endpoints := control.NewEndpointTable(now)
-	hubInfo := control.HubConfig{PublicKey: testHubKey, Endpoint: "vpn:51820", Address: netip.MustParseAddr("100.64.0.1"), Overlay: overlay, STUNAddrs: []string{"vpn:3478", "vpn:3479"}}
+	hubInfo := control.HubConfig{PublicKey: testHubKey, Endpoint: "vpn:51820", Address: netip.MustParseAddr("100.64.0.1"), Overlay: overlay,
+		Address6: control.IPv6For(overlay6, netip.MustParseAddr("100.64.0.1")), Overlay6: overlay6, STUNAddrs: []string{"vpn:3478", "vpn:3479"}}
 	builder := control.NewNetMapBuilder(st, control.OwnerVisibility{}, endpoints, hub, hubInfo, hub.Generation)
 	srv, err := NewGRPC(GRPCDeps{
-		Enroller: enroller, Hub: HubInfo{PublicKey: testHubKey, Endpoint: "vpn:51820", Overlay: overlay}, Logger: quiet,
+		Enroller: enroller, Hub: HubInfo{PublicKey: testHubKey, Endpoint: "vpn:51820", Overlay: overlay, Overlay6: overlay6}, Logger: quiet,
 		NodeAuth: registry, NetMaps: builder, Sync: hub, Peers: registry, Endpoints: endpoints, Paths: control.NewPathTable(now),
 		Lock: lockSvc, Routes: routesSvc,
 	})

@@ -38,6 +38,8 @@ type PolicyService struct {
 	audit    *Auditor
 	// overlay tells a peer-selecting CIDR from a subnet route (spec 013).
 	overlay netip.Prefix
+	// overlay6 bounds IPv6 prefixes in rules (spec 015).
+	overlay6 netip.Prefix
 	// reloadMu serialises Reload end to end: transaction, publication,
 	// notification and report, so two reloads cannot interleave.
 	reloadMu sync.Mutex
@@ -58,6 +60,13 @@ func NewPolicyService(st *store.Store, log *slog.Logger, path string, notifier N
 // WithAuditor records reloads in the audit log.
 func (s *PolicyService) WithAuditor(a *Auditor) *PolicyService {
 	s.audit = a
+	return s
+}
+
+// WithOverlay6 sets the IPv6 overlay prefix: an IPv6 prefix in a rule
+// must lie inside it (spec 015).
+func (s *PolicyService) WithOverlay6(prefix netip.Prefix) *PolicyService {
+	s.overlay6 = prefix
 	return s
 }
 
@@ -247,7 +256,7 @@ func (s *PolicyService) registry(ctx context.Context) ([]policy.Peer, policy.Reg
 		return nil, policy.Registry{}, fmt.Errorf("control: policy: list routes: %w", err)
 	}
 	names := make(map[string]string, len(users))
-	reg := policy.Registry{Overlay: s.overlay}
+	reg := policy.Registry{Overlay: s.overlay, Overlay6: s.overlay6}
 	for _, u := range users {
 		names[u.ID] = u.Name
 		reg.Users = append(reg.Users, u.Name)

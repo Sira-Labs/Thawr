@@ -86,6 +86,11 @@ type Listen struct {
 type Overlay struct {
 	CIDR      string `yaml:"cidr"`
 	Interface string `yaml:"interface"`
+	// IPv6 is the unique local /64 the IPv6 overlay uses (spec 015).
+	// Empty means the server generates one on first start and keeps it
+	// in its database; the server fills this field with the prefix in
+	// effect once it has started.
+	IPv6 string `yaml:"ipv6"`
 }
 
 // TLS selects how the HTTPS certificate is obtained.
@@ -200,6 +205,20 @@ func (c *Config) OverlayPrefix() netip.Prefix {
 		panic(fmt.Sprintf("config: OverlayPrefix on unvalidated config: %v", err))
 	}
 	return p.Masked()
+}
+
+// OverlayPrefix6 returns the IPv6 overlay prefix and true, or false
+// while overlay.ipv6 is empty (before the server has chosen one). It
+// panics only if the config was not validated.
+func (c *Config) OverlayPrefix6() (netip.Prefix, bool) {
+	if c.Overlay.IPv6 == "" {
+		return netip.Prefix{}, false
+	}
+	p, err := netip.ParsePrefix(c.Overlay.IPv6)
+	if err != nil {
+		panic(fmt.Sprintf("config: OverlayPrefix6 on unvalidated config: %v", err))
+	}
+	return p.Masked(), true
 }
 
 // HubAddr is the first usable address of the overlay, assigned to the

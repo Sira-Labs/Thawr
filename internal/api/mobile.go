@@ -53,7 +53,7 @@ func (h *rest) handleCreateMobile(w http.ResponseWriter, r *http.Request) {
 		h.writeControlError(w, err)
 		return
 	}
-	conf := renderWireGuardConf(res.PrivateKey, res.Peer.IPv4, h.deps.Hub)
+	conf := renderWireGuardConf(res.PrivateKey, res.Peer.IPv4, res.Peer.IPv6, h.deps.Hub)
 	res.PrivateKey = wg.Key{}
 	svg, err := qrSVG(conf)
 	if err != nil {
@@ -69,17 +69,23 @@ func (h *rest) handleCreateMobile(w http.ResponseWriter, r *http.Request) {
 }
 
 // renderWireGuardConf renders the phone's config for the official
-// WireGuard app: its own key and address, the hub resolver with the
+// WireGuard app: its own key and addresses, the hub resolver with the
 // zone as search domain when the server runs one, the hub as the only
-// peer.
-func renderWireGuardConf(priv wg.Key, ipv4 string, hub HubInfo) string {
+// peer. ipv6 is empty for a peer without an IPv6 address; with one the
+// IPv6 overlay is routed to the hub as well (spec 015).
+func renderWireGuardConf(priv wg.Key, ipv4, ipv6 string, hub HubInfo) string {
+	addrs, allowed := ipv4+"/32", hub.Overlay.String()
+	if ipv6 != "" && hub.Overlay6.IsValid() {
+		addrs += ", " + ipv6 + "/128"
+		allowed += ", " + hub.Overlay6.String()
+	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "[Interface]\nPrivateKey = %s\nAddress = %s/32\n", priv.String(), ipv4)
+	fmt.Fprintf(&b, "[Interface]\nPrivateKey = %s\nAddress = %s\n", priv.String(), addrs)
 	if hub.DNS.IsValid() {
 		fmt.Fprintf(&b, "DNS = %s, %s\n", hub.DNS, dns.Zone)
 	}
 	b.WriteString("\n")
-	fmt.Fprintf(&b, "[Peer]\nPublicKey = %s\nEndpoint = %s\nAllowedIPs = %s\nPersistentKeepalive = 25\n", hub.PublicKey, hub.Endpoint, hub.Overlay.String())
+	fmt.Fprintf(&b, "[Peer]\nPublicKey = %s\nEndpoint = %s\nAllowedIPs = %s\nPersistentKeepalive = 25\n", hub.PublicKey, hub.Endpoint, allowed)
 	return b.String()
 }
 

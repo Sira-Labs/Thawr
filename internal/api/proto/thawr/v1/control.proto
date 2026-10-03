@@ -47,6 +47,9 @@ message EnrollRequest {
   // name optionally requests a peer name; the token's name or the
   // hostname is used otherwise.
   string name = 7;
+  // ipv6 is true when the client handles an IPv6 overlay address
+  // (spec 015); the server then sends it IPv6 fields.
+  bool ipv6 = 8;
 }
 
 // EnrollResponse is returned once; node_secret is never shown again.
@@ -60,6 +63,9 @@ message EnrollResponse {
   string hub_endpoint = 7;
   string server_version = 8;
   int64 netmap_generation = 9;
+  // ipv6 and overlay_ipv6 are set when the request had ipv6 (spec 015).
+  string ipv6 = 10;
+  string overlay_ipv6 = 11;
 }
 
 // SyncRequest opens the netmap stream. generation is informational: the
@@ -70,6 +76,9 @@ message SyncRequest {
   // lock_key is the caller's lock public key when it has one, so a
   // signer can add this device with lock add-signer.
   string lock_key = 3;
+  // ipv6 is true when the client handles IPv6 overlay addresses (spec
+  // 015); without it the netmap carries IPv4 only.
+  bool ipv6 = 4;
 }
 
 // NetMap is one peer's complete view of the network.
@@ -107,6 +116,9 @@ message SelfInfo {
   // advertised lists the prefixes the receiver advertises as the server
   // knows them, with their approval (spec 013).
   repeated AdvertisedRoute advertised = 8;
+  // ipv6 and overlay_ipv6 are set for clients that asked for IPv6.
+  string ipv6 = 9;
+  string overlay_ipv6 = 10;
 }
 
 // NetPeer is one visible peer.
@@ -133,6 +145,9 @@ message NetPeer {
   // exit_node marks a peer the receiver may route its internet traffic
   // through; the receiver adds 0.0.0.0/0 only when it selects it.
   bool exit_node = 14;
+  // ipv6 is set when both this peer and the receiver handle IPv6; its
+  // /128 is then in allowed_ips as well.
+  string ipv6 = 15;
 }
 
 // EndpointKind classifies a candidate address.
@@ -229,6 +244,9 @@ message FilterRule {
   string proto = 2;
   uint32 port_lo = 3;
   uint32 port_hi = 4;
+  // src_ipv6 is the source's IPv6 address; a rule carries src_ipv4 or
+  // src_ipv6, never both.
+  string src_ipv6 = 5;
 }
 
 // ForwardRule allows src_ipv4 to reach dst_cidr through the receiver on
@@ -239,6 +257,9 @@ message ForwardRule {
   string proto = 3;
   uint32 port_lo = 4;
   uint32 port_hi = 5;
+  // src_ipv6 is the source's IPv6 address; a rule carries src_ipv4 or
+  // src_ipv6, never both.
+  string src_ipv6 = 6;
 }
 
 // AdvertiseRoutesRequest carries the caller's complete advertised set;

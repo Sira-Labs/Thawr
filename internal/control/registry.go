@@ -23,6 +23,7 @@ type Registry struct {
 	notify Notifier
 	// overlay and tagAllowed serve CreateStatic.
 	overlay    netip.Prefix
+	overlay6   netip.Prefix
 	tagAllowed TagAllowed
 	audit      *Auditor
 	lock       *LockService
@@ -291,6 +292,30 @@ func (r *Registry) Touch(ctx context.Context, peerID string) error {
 // SetClientVersion records the version a client reported on sync.
 func (r *Registry) SetClientVersion(ctx context.Context, peerID, version string) error {
 	return r.store.Peers().SetClientVersion(ctx, peerID, version)
+}
+
+// SetIPv6Capable records whether a peer's client handles IPv6 (spec
+// 015). A change alters what every capable peer's netmap carries, so it
+// bumps the generation and wakes the syncing peers.
+func (r *Registry) SetIPv6Capable(ctx context.Context, peerID string, capable bool) (bool, error) {
+	var changed bool
+	err := r.store.InTx(ctx, func(tx *store.Store) error {
+		var err error
+		changed, err = tx.Peers().SetIPv6Capable(ctx, peerID, capable)
+		if err != nil || !changed {
+			return err
+		}
+		_, err = tx.Meta().IncrementGeneration(ctx)
+		return err
+	})
+	if err != nil {
+		return false, err
+	}
+	if changed {
+		r.changed()
+		r.log.Info("peer ipv6 capability changed", "peer_id", peerID, "ipv6", capable)
+	}
+	return changed, nil
 }
 
 // Generation returns the current netmap generation.

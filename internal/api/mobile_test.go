@@ -23,16 +23,28 @@ func TestMobileConfigRender(t *testing.T) {
 		t.Fatal(err)
 	}
 	hub := HubInfo{PublicKey: "HUBPUBKEY=", Endpoint: "vpn.example.com:51820", Overlay: netip.MustParsePrefix("100.64.0.0/10")}
-	got := renderWireGuardConf(key, "100.64.0.21", hub)
+	got := renderWireGuardConf(key, "100.64.0.21", "", hub)
 	want := "[Interface]\nPrivateKey = " + key.String() + "\nAddress = 100.64.0.21/32\n\n" +
 		"[Peer]\nPublicKey = HUBPUBKEY=\nEndpoint = vpn.example.com:51820\nAllowedIPs = 100.64.0.0/10\nPersistentKeepalive = 25\n"
 	if got != want {
 		t.Errorf("config:\n%s\nwant:\n%s", got, want)
 	}
 	hub.DNS = netip.MustParseAddr("100.64.0.1")
-	got = renderWireGuardConf(key, "100.64.0.21", hub)
+	got = renderWireGuardConf(key, "100.64.0.21", "", hub)
 	if !strings.Contains(got, "\nAddress = 100.64.0.21/32\nDNS = 100.64.0.1, thawr\n\n[Peer]") {
 		t.Errorf("config with dns:\n%s", got)
+	}
+	// With an IPv6 address the phone gets both families (spec 015).
+	hub.Overlay6 = netip.MustParsePrefix("fd3a:9c1e:44b0::/64")
+	got = renderWireGuardConf(key, "100.64.0.21", "fd3a:9c1e:44b0::6440:15", hub)
+	if !strings.Contains(got, "\nAddress = 100.64.0.21/32, fd3a:9c1e:44b0::6440:15/128\n") ||
+		!strings.Contains(got, "\nAllowedIPs = 100.64.0.0/10, fd3a:9c1e:44b0::/64\n") {
+		t.Errorf("dual-stack config:\n%s", got)
+	}
+	// Without the prefix (a server that has none yet) it stays IPv4.
+	hub.Overlay6 = netip.Prefix{}
+	if got := renderWireGuardConf(key, "100.64.0.21", "fd3a:9c1e:44b0::6440:15", hub); strings.Contains(got, "fd3a") {
+		t.Errorf("IPv6 without a prefix:\n%s", got)
 	}
 }
 
@@ -107,7 +119,7 @@ func TestQRRoundTrip(t *testing.T) {
 		raw[i] = byte(i*7 + 3)
 	}
 	key := wg.Key(raw)
-	conf := renderWireGuardConf(key, "100.64.0.21", HubInfo{PublicKey: key.PublicKey().String(), Endpoint: "vpn.example.com:51820",
+	conf := renderWireGuardConf(key, "100.64.0.21", "", HubInfo{PublicKey: key.PublicKey().String(), Endpoint: "vpn.example.com:51820",
 		Overlay: netip.MustParsePrefix("100.64.0.0/10"), DNS: netip.MustParseAddr("100.64.0.1")})
 	q, err := qrcode.New(conf, qrcode.Medium)
 	if err != nil {

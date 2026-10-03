@@ -35,6 +35,14 @@ func (r *Registry) WithOverlay(overlay netip.Prefix) *Registry {
 	return r
 }
 
+// WithOverlay6 sets the IPv6 overlay prefix; static peers created with
+// one get an IPv6 address and count as IPv6-capable, since their
+// configuration carries both families (spec 015).
+func (r *Registry) WithOverlay6(prefix netip.Prefix) *Registry {
+	r.overlay6 = prefix
+	return r
+}
+
 // WithTagAllowed sets the tagOwners check applied to members' requests.
 func (r *Registry) WithTagAllowed(fn TagAllowed) *Registry {
 	r.tagAllowed = fn
@@ -116,11 +124,14 @@ func (r *Registry) CreateStatic(ctx context.Context, by Principal, req StaticReq
 			ID: peerID, Name: req.Name, Kind: kind, Mode: store.ModeStatic, OwnerID: owner.ID, Tags: tags,
 			PublicKey: key.PublicKey().String(), IPv4: ip.String(), CreatedAt: r.now(), OS: "wireguard-app",
 		}
+		if v6 := IPv6For(r.overlay6, ip); v6.IsValid() {
+			res.Peer.IPv6, res.Peer.IPv6Capable = v6.String(), true
+		}
 		if err := tx.Peers().Create(ctx, res.Peer); err != nil {
 			return err
 		}
 		if err := r.audit.Record(ctx, tx, by, AuditPeerCreateStatic, peerID,
-			map[string]string{"name": req.Name, "kind": kind, "owner": owner.Name, "tags": tagsDetail(tags), "ipv4": ip.String(), "key": wg.Fingerprint(key.PublicKey())}); err != nil {
+			map[string]string{"name": req.Name, "kind": kind, "owner": owner.Name, "tags": tagsDetail(tags), "ipv4": ip.String(), "ipv6": res.Peer.IPv6, "key": wg.Fingerprint(key.PublicKey())}); err != nil {
 			return err
 		}
 		res.Generation, err = tx.Meta().IncrementGeneration(ctx)
@@ -131,6 +142,6 @@ func (r *Registry) CreateStatic(ctx context.Context, by Principal, req StaticReq
 	}
 	r.changed()
 	r.log.Info("static peer created", "peer", res.Peer.Name, "peer_id", res.Peer.ID, "owner", owner.Name,
-		"ipv4", res.Peer.IPv4, "key", wg.Fingerprint(key.PublicKey()), "by", by.Name, "generation", res.Generation)
+		"ipv4", res.Peer.IPv4, "ipv6", res.Peer.IPv6, "key", wg.Fingerprint(key.PublicKey()), "by", by.Name, "generation", res.Generation)
 	return res, nil
 }

@@ -21,14 +21,19 @@ const (
 
 // Peer is one registered identity.
 type Peer struct {
-	ID             string
-	Name           string
-	Kind           string
-	Mode           string
-	OwnerID        string
-	Tags           []string
-	PublicKey      string
-	IPv4           string
+	ID        string
+	Name      string
+	Kind      string
+	Mode      string
+	OwnerID   string
+	Tags      []string
+	PublicKey string
+	IPv4      string
+	// IPv6 is the IPv6 overlay address (spec 015); empty until the
+	// server has derived it.
+	IPv6 string
+	// IPv6Capable is true once the peer's client asked for IPv6.
+	IPv6Capable    bool
 	NodeSecretHash string
 	CreatedAt      time.Time
 	LastSeenAt     *time.Time
@@ -43,21 +48,23 @@ type Peers struct {
 	q querier
 }
 
-const peerColumns = `id, name, kind, mode, owner_id, tags, public_key, ipv4, node_secret_hash, created_at, last_seen_at, client_version, os`
+const peerColumns = `id, name, kind, mode, owner_id, tags, public_key, ipv4, ipv6, ipv6_capable, node_secret_hash, created_at, last_seen_at, client_version, os`
 
 func scanPeer(row interface{ Scan(...any) error }) (Peer, error) {
 	var (
 		p                       Peer
 		tags, created           string
 		owner, secret, lastSeen sql.NullString
+		ipv6                    sql.NullString
 	)
-	if err := row.Scan(&p.ID, &p.Name, &p.Kind, &p.Mode, &owner, &tags, &p.PublicKey, &p.IPv4, &secret, &created, &lastSeen, &p.ClientVersion, &p.OS); err != nil {
+	if err := row.Scan(&p.ID, &p.Name, &p.Kind, &p.Mode, &owner, &tags, &p.PublicKey, &p.IPv4, &ipv6, &p.IPv6Capable, &secret, &created, &lastSeen, &p.ClientVersion, &p.OS); err != nil {
 		return Peer{}, err
 	}
 	if err := json.Unmarshal([]byte(tags), &p.Tags); err != nil {
 		return Peer{}, fmt.Errorf("peer %s tags: %w", p.ID, err)
 	}
 	p.OwnerID = owner.String
+	p.IPv6 = ipv6.String
 	p.NodeSecretHash = secret.String
 	p.CreatedAt = parseTime(created)
 	p.LastSeenAt = parseTimePtr(lastSeen)
@@ -71,9 +78,9 @@ func (s *Peers) Create(ctx context.Context, p Peer) error {
 		return fmt.Errorf("store: encode tags: %w", err)
 	}
 	_, err = s.q.ExecContext(ctx,
-		`INSERT INTO peers (`+peerColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO peers (`+peerColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ID, p.Name, p.Kind, p.Mode, nullString(p.OwnerID), string(tags), p.PublicKey, p.IPv4,
-		nullString(p.NodeSecretHash), formatTime(p.CreatedAt), formatTimePtr(p.LastSeenAt), p.ClientVersion, p.OS)
+		nullString(p.IPv6), p.IPv6Capable, nullString(p.NodeSecretHash), formatTime(p.CreatedAt), formatTimePtr(p.LastSeenAt), p.ClientVersion, p.OS)
 	if isUniqueViolation(err) {
 		return fmt.Errorf("peer %q: %w", p.Name, ErrConflict)
 	}
@@ -207,6 +214,70 @@ func (s *Peers) AllocatedIPv4s(ctx context.Context) ([]string, error) {
 		out = append(out, ip)
 	}
 	return out, rows.Err()
+}
+
+// BackfillIPv6 sets the IPv6 address of every peer that has none to
+// derive(ipv4) and returns how many it set. A peer whose IPv4 address
+// derive cannot map (it returns "") keeps no IPv6 address.
+func (s *Peers) BackfillIPv6(ctx context.Context, derive func(ipv4 string) string) (int, error) {
+	rows, err := s.q.QueryContext(ctx, `SELECT id, ipv4 FROM peers WHERE ipv6 IS NULL OR ipv6 = ''`)
+	if err != nil {
+		return 0, fmt.Errorf("store: list peers without ipv6: %w", err)
+	}
+	type pending struct{ id, ipv4 string }
+	var todo []pending
+	for rows.Next() {
+		var p pending
+		if err := rows.Scan(&p.id, &p.ipv4); err != nil {
+			_ = rows.Close()
+			return 0, fmt.Errorf("store: scan peer without ipv6: %w", err)
+		}
+		todo = append(todo, p)
+	}
+	if err := rows.Close(); err != nil {
+		return 0, fmt.Errorf("store: list peers without ipv6: %w", err)
+	}
+	n := 0
+	for _, p := range todo {
+		v6 := derive(p.ipv4)
+		if v6 == "" {
+			continue
+		}
+		if _, err := s.q.ExecContext(ctx, `UPDATE peers SET ipv6 = ? WHERE id = ?`, v6, p.id); err != nil {
+			if isUniqueViolation(err) {
+				return n, fmt.Errorf("peer %s ipv6 %s: %w", p.id, v6, ErrConflict)
+			}
+			return n, fmt.Errorf("store: set ipv6 of peer %s: %w", p.id, err)
+		}
+		n++
+	}
+	return n, nil
+}
+
+// SetIPv6Capable records whether the peer's client asked for IPv6. It
+// reports whether the stored value changed; ErrNotFound for an unknown
+// peer.
+func (s *Peers) SetIPv6Capable(ctx context.Context, id string, capable bool) (bool, error) {
+	res, err := s.q.ExecContext(ctx, `UPDATE peers SET ipv6_capable = ? WHERE id = ? AND ipv6_capable != ?`, capable, id, capable)
+	if err != nil {
+		return false, fmt.Errorf("store: set ipv6_capable of peer %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("store: set ipv6_capable of peer %s: %w", id, err)
+	}
+	if n > 0 {
+		return true, nil
+	}
+	var exists int
+	err = s.q.QueryRowContext(ctx, `SELECT 1 FROM peers WHERE id = ?`, id).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, fmt.Errorf("peer %s: %w", id, ErrNotFound)
+	}
+	if err != nil {
+		return false, fmt.Errorf("store: find peer %s: %w", id, err)
+	}
+	return false, nil
 }
 
 // NamesWithPrefix returns peer names equal to prefix or starting with

@@ -42,7 +42,7 @@ func (v PolicyVisibility) Routing(self store.Peer) Routing {
 	}
 	r.ExitNodes = c.ExitNodesFor(self.ID)
 	for _, f := range c.ForwardFor(self.ID) {
-		r.Forward = append(r.Forward, ForwardRule{SrcIPv4: f.Src, Dst: f.Dst, Proto: f.Proto, PortLo: f.Lo, PortHi: f.Hi})
+		r.Forward = append(r.Forward, ForwardRule{Src: f.Src, Dst: f.Dst, Proto: f.Proto, PortLo: f.Lo, PortHi: f.Hi})
 	}
 	return r
 }
@@ -58,7 +58,7 @@ func (v PolicyVisibility) Snapshot() Visibility {
 func filterRules(rules []policy.FilterRule) []FilterRule {
 	out := make([]FilterRule, 0, len(rules))
 	for _, r := range rules {
-		out = append(out, FilterRule{SrcIPv4: r.Src, Proto: r.Proto, PortLo: r.Lo, PortHi: r.Hi})
+		out = append(out, FilterRule{Src: r.Src, Proto: r.Proto, PortLo: r.Lo, PortHi: r.Hi})
 	}
 	return out
 }
@@ -72,6 +72,9 @@ func PolicyPeers(peers []store.Peer, names map[string]string, routes map[string]
 		pp := policy.Peer{ID: p.ID, Name: p.Name, Owner: names[p.OwnerID], Tags: p.Tags, Routes: routes[p.ID]}
 		if a, err := netip.ParseAddr(p.IPv4); err == nil {
 			pp.IPv4 = a
+		}
+		if a, err := netip.ParseAddr(p.IPv6); err == nil && a.Is6() {
+			pp.IPv6 = a
 		}
 		out = append(out, pp)
 	}

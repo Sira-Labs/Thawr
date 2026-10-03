@@ -19,7 +19,7 @@ const (
 	SelTag                              // "tag:name"
 	SelPeer                             // "peer:name"
 	SelSelf                             // "self" (dst only): same owner as the source
-	SelCIDR                             // IPv4 address or prefix: peers inside the overlay, a subnet route outside it
+	SelCIDR                             // address or prefix: peers inside the overlay; an IPv4 one outside it is a subnet route
 	SelInternet                         // "internet" (dst only): any approved exit node (spec 013)
 )
 
@@ -73,6 +73,19 @@ func ParseSelector(raw string, dst bool) (Selector, error) {
 		}
 		return Selector{Kind: SelInternet}, nil
 	}
+	// Addresses first: an IPv6 address contains colons too.
+	if p, err := netip.ParsePrefix(s); err == nil {
+		if p.Addr().Is4In6() {
+			return Selector{}, fmt.Errorf("%q: write an IPv4-mapped prefix as IPv4", s)
+		}
+		return Selector{Kind: SelCIDR, Prefix: p.Masked()}, nil
+	}
+	if a, err := netip.ParseAddr(s); err == nil {
+		if a.Is4In6() || a.Zone() != "" {
+			return Selector{}, fmt.Errorf("%q: not a plain IPv4 or IPv6 address", s)
+		}
+		return Selector{Kind: SelCIDR, Prefix: netip.PrefixFrom(a, a.BitLen())}, nil
+	}
 	if kind, name, ok := strings.Cut(s, ":"); ok {
 		if !validLabel(name) {
 			return Selector{}, fmt.Errorf("%q: name must be a lowercase label", s)
@@ -88,18 +101,6 @@ func ParseSelector(raw string, dst bool) (Selector, error) {
 			return Selector{Kind: SelPeer, Name: name}, nil
 		}
 		return Selector{}, fmt.Errorf("%q: unknown selector kind %q (user, group, tag, peer)", s, kind)
-	}
-	if p, err := netip.ParsePrefix(s); err == nil {
-		if !p.Addr().Is4() {
-			return Selector{}, fmt.Errorf("%q: only IPv4 prefixes are supported", s)
-		}
-		return Selector{Kind: SelCIDR, Prefix: p.Masked()}, nil
-	}
-	if a, err := netip.ParseAddr(s); err == nil {
-		if !a.Is4() {
-			return Selector{}, fmt.Errorf("%q: only IPv4 addresses are supported", s)
-		}
-		return Selector{Kind: SelCIDR, Prefix: netip.PrefixFrom(a, 32)}, nil
 	}
 	if validLabel(s) {
 		return Selector{Kind: SelUser, Name: s}, nil
@@ -197,14 +198,20 @@ type Dst struct {
 	Ports []PortRange
 }
 
-// ParseDst parses "host:ports" where host is a dst selector.
+// ParseDst parses "host:ports" where host is a dst selector; an IPv6
+// host may be written in brackets.
 func ParseDst(raw string) (Dst, error) {
 	s := strings.TrimSpace(raw)
 	i := strings.LastIndex(s, ":")
 	if i < 0 {
 		return Dst{}, fmt.Errorf("%q must be host:ports", s)
 	}
-	host, err := ParseSelector(s[:i], true)
+	h := s[:i]
+	// [fd00::7]:22 is accepted as well as fd00::7:22.
+	if strings.HasPrefix(h, "[") && strings.HasSuffix(h, "]") {
+		h = h[1 : len(h)-1]
+	}
+	host, err := ParseSelector(h, true)
 	if err != nil {
 		return Dst{}, err
 	}

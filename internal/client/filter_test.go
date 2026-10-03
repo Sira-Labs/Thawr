@@ -15,7 +15,7 @@ import (
 type ruleVisibility struct{ control.OwnerVisibility }
 
 func (ruleVisibility) FilterFor(store.Peer) []control.FilterRule {
-	return []control.FilterRule{{SrcIPv4: netip.MustParseAddr("100.64.0.99"), Proto: "tcp", PortLo: 22, PortHi: 22}}
+	return []control.FilterRule{{Src: netip.MustParseAddr("100.64.0.99"), Proto: "tcp", PortLo: 22, PortHi: 22}}
 }
 
 func TestDaemonInstallsFilter(t *testing.T) {

@@ -787,6 +787,40 @@ tree that followed. One commit each, highest severity first.
         itself is the manual staging step 8, kept instead of a
         build-tagged test that CI would never run.
 
+## Sprint 7 — IPv6 overlay
+
+- [~] **015 IPv6 overlay** — `docs/specs/015-ipv6-overlay.md`
+      Every peer gets an IPv6 address next to its IPv4 one. Three PRs:
+      control plane, data plane (`internal/wg` and the hub), client with
+      names, status and integration tests.
+      - Owner decisions (2026-10-03): the IPv6 address is derived, not
+        allocated (the IPv4 address in the last 32 bits of the ULA /64);
+        exit nodes carry `::/0` with NAT66, so native IPv6 no longer
+        leaks around them; a capability flag (`ipv6` in Enroll and Sync)
+        rather than a forced upgrade, so clients from before 015 keep
+        an unchanged IPv4 netmap.
+      - The prefix is chosen once and kept in meta `overlay_ipv6`, like
+        the server key fingerprint: a configured prefix is recorded, an
+        empty one generated (RFC 4193), and a changed one refuses to
+        start, since every peer's address would move. Restore checks the
+        same before writing.
+      - `ipv6_capable` is per peer and set from every Sync; a change bumps
+        the generation, because other capable peers' maps gain or lose
+        that peer's address. A capable receiver sees another peer's IPv6
+        only when that peer is capable too: an address no device
+        configured would blackhole traffic.
+      - Filter and forward rules carry one source of either family
+        (`Src`, was `SrcIPv4`); the policy emits a second rule per
+        source with an IPv6 address, and `internet` adds `::/0` for it.
+        An IPv6 CIDR selector selects peers (whole peers, both
+        families); IPv6 subnet routes stay out of scope, so Validate
+        rejects IPv6 prefixes outside the IPv6 overlay.
+      - Selectors try addresses before `kind:name`, since an IPv6 address
+        has colons; a dst may bracket it (`[fd..::7]:22`).
+      - Control plane done (PR 1). Phones created from now on get both
+        addresses in their config; until the hub has IPv6 (PR 2) that
+        traffic has nowhere to go, which no release ships.
+
 ## Phase 2 candidates (scheduled as specs 014–021 in `docs/roadmap/`)
 
 - OIDC identity provider plugin (ADR 0006).

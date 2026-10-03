@@ -87,7 +87,10 @@ type EnrollRequest struct {
 	ClientVersion string `protobuf:"bytes,6,opt,name=client_version,json=clientVersion,proto3" json:"client_version,omitempty"`
 	// name optionally requests a peer name; the token's name or the
 	// hostname is used otherwise.
-	Name          string `protobuf:"bytes,7,opt,name=name,proto3" json:"name,omitempty"`
+	Name string `protobuf:"bytes,7,opt,name=name,proto3" json:"name,omitempty"`
+	// ipv6 is true when the client handles an IPv6 overlay address
+	// (spec 015); the server then sends it IPv6 fields.
+	Ipv6          bool `protobuf:"varint,8,opt,name=ipv6,proto3" json:"ipv6,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -171,6 +174,13 @@ func (x *EnrollRequest) GetName() string {
 	return ""
 }
 
+func (x *EnrollRequest) GetIpv6() bool {
+	if x != nil {
+		return x.Ipv6
+	}
+	return false
+}
+
 // EnrollResponse is returned once; node_secret is never shown again.
 type EnrollResponse struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
@@ -183,8 +193,11 @@ type EnrollResponse struct {
 	HubEndpoint      string                 `protobuf:"bytes,7,opt,name=hub_endpoint,json=hubEndpoint,proto3" json:"hub_endpoint,omitempty"`
 	ServerVersion    string                 `protobuf:"bytes,8,opt,name=server_version,json=serverVersion,proto3" json:"server_version,omitempty"`
 	NetmapGeneration int64                  `protobuf:"varint,9,opt,name=netmap_generation,json=netmapGeneration,proto3" json:"netmap_generation,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// ipv6 and overlay_ipv6 are set when the request had ipv6 (spec 015).
+	Ipv6          string `protobuf:"bytes,10,opt,name=ipv6,proto3" json:"ipv6,omitempty"`
+	OverlayIpv6   string `protobuf:"bytes,11,opt,name=overlay_ipv6,json=overlayIpv6,proto3" json:"overlay_ipv6,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *EnrollResponse) Reset() {
@@ -280,6 +293,20 @@ func (x *EnrollResponse) GetNetmapGeneration() int64 {
 	return 0
 }
 
+func (x *EnrollResponse) GetIpv6() string {
+	if x != nil {
+		return x.Ipv6
+	}
+	return ""
+}
+
+func (x *EnrollResponse) GetOverlayIpv6() string {
+	if x != nil {
+		return x.OverlayIpv6
+	}
+	return ""
+}
+
 // SyncRequest opens the netmap stream. generation is informational: the
 // server always sends a full map first.
 type SyncRequest struct {
@@ -288,7 +315,10 @@ type SyncRequest struct {
 	ClientVersion string                 `protobuf:"bytes,2,opt,name=client_version,json=clientVersion,proto3" json:"client_version,omitempty"`
 	// lock_key is the caller's lock public key when it has one, so a
 	// signer can add this device with lock add-signer.
-	LockKey       string `protobuf:"bytes,3,opt,name=lock_key,json=lockKey,proto3" json:"lock_key,omitempty"`
+	LockKey string `protobuf:"bytes,3,opt,name=lock_key,json=lockKey,proto3" json:"lock_key,omitempty"`
+	// ipv6 is true when the client handles IPv6 overlay addresses (spec
+	// 015); without it the netmap carries IPv4 only.
+	Ipv6          bool `protobuf:"varint,4,opt,name=ipv6,proto3" json:"ipv6,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -342,6 +372,13 @@ func (x *SyncRequest) GetLockKey() string {
 		return x.LockKey
 	}
 	return ""
+}
+
+func (x *SyncRequest) GetIpv6() bool {
+	if x != nil {
+		return x.Ipv6
+	}
+	return false
 }
 
 // NetMap is one peer's complete view of the network.
@@ -475,7 +512,10 @@ type SelfInfo struct {
 	Signatures []*PeerSignature `protobuf:"bytes,7,rep,name=signatures,proto3" json:"signatures,omitempty"`
 	// advertised lists the prefixes the receiver advertises as the server
 	// knows them, with their approval (spec 013).
-	Advertised    []*AdvertisedRoute `protobuf:"bytes,8,rep,name=advertised,proto3" json:"advertised,omitempty"`
+	Advertised []*AdvertisedRoute `protobuf:"bytes,8,rep,name=advertised,proto3" json:"advertised,omitempty"`
+	// ipv6 and overlay_ipv6 are set for clients that asked for IPv6.
+	Ipv6          string `protobuf:"bytes,9,opt,name=ipv6,proto3" json:"ipv6,omitempty"`
+	OverlayIpv6   string `protobuf:"bytes,10,opt,name=overlay_ipv6,json=overlayIpv6,proto3" json:"overlay_ipv6,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -566,6 +606,20 @@ func (x *SelfInfo) GetAdvertised() []*AdvertisedRoute {
 	return nil
 }
 
+func (x *SelfInfo) GetIpv6() string {
+	if x != nil {
+		return x.Ipv6
+	}
+	return ""
+}
+
+func (x *SelfInfo) GetOverlayIpv6() string {
+	if x != nil {
+		return x.OverlayIpv6
+	}
+	return ""
+}
+
 // NetPeer is one visible peer.
 type NetPeer struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
@@ -590,7 +644,10 @@ type NetPeer struct {
 	Signatures []*PeerSignature `protobuf:"bytes,13,rep,name=signatures,proto3" json:"signatures,omitempty"`
 	// exit_node marks a peer the receiver may route its internet traffic
 	// through; the receiver adds 0.0.0.0/0 only when it selects it.
-	ExitNode      bool `protobuf:"varint,14,opt,name=exit_node,json=exitNode,proto3" json:"exit_node,omitempty"`
+	ExitNode bool `protobuf:"varint,14,opt,name=exit_node,json=exitNode,proto3" json:"exit_node,omitempty"`
+	// ipv6 is set when both this peer and the receiver handle IPv6; its
+	// /128 is then in allowed_ips as well.
+	Ipv6          string `protobuf:"bytes,15,opt,name=ipv6,proto3" json:"ipv6,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -721,6 +778,13 @@ func (x *NetPeer) GetExitNode() bool {
 		return x.ExitNode
 	}
 	return false
+}
+
+func (x *NetPeer) GetIpv6() string {
+	if x != nil {
+		return x.Ipv6
+	}
+	return ""
 }
 
 // Endpoint is one ip:port candidate.
@@ -1338,11 +1402,14 @@ func (x *LockPeer) GetKind() string {
 // FilterRule allows src_ipv4 to reach the receiver on a port range.
 // Empty filter means allow everything from visible peers (until spec 006).
 type FilterRule struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SrcIpv4       string                 `protobuf:"bytes,1,opt,name=src_ipv4,json=srcIpv4,proto3" json:"src_ipv4,omitempty"`
-	Proto         string                 `protobuf:"bytes,2,opt,name=proto,proto3" json:"proto,omitempty"`
-	PortLo        uint32                 `protobuf:"varint,3,opt,name=port_lo,json=portLo,proto3" json:"port_lo,omitempty"`
-	PortHi        uint32                 `protobuf:"varint,4,opt,name=port_hi,json=portHi,proto3" json:"port_hi,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	SrcIpv4 string                 `protobuf:"bytes,1,opt,name=src_ipv4,json=srcIpv4,proto3" json:"src_ipv4,omitempty"`
+	Proto   string                 `protobuf:"bytes,2,opt,name=proto,proto3" json:"proto,omitempty"`
+	PortLo  uint32                 `protobuf:"varint,3,opt,name=port_lo,json=portLo,proto3" json:"port_lo,omitempty"`
+	PortHi  uint32                 `protobuf:"varint,4,opt,name=port_hi,json=portHi,proto3" json:"port_hi,omitempty"`
+	// src_ipv6 is the source's IPv6 address; a rule carries src_ipv4 or
+	// src_ipv6, never both.
+	SrcIpv6       string `protobuf:"bytes,5,opt,name=src_ipv6,json=srcIpv6,proto3" json:"src_ipv6,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1405,15 +1472,25 @@ func (x *FilterRule) GetPortHi() uint32 {
 	return 0
 }
 
+func (x *FilterRule) GetSrcIpv6() string {
+	if x != nil {
+		return x.SrcIpv6
+	}
+	return ""
+}
+
 // ForwardRule allows src_ipv4 to reach dst_cidr through the receiver on
 // a port range (spec 013).
 type ForwardRule struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SrcIpv4       string                 `protobuf:"bytes,1,opt,name=src_ipv4,json=srcIpv4,proto3" json:"src_ipv4,omitempty"`
-	DstCidr       string                 `protobuf:"bytes,2,opt,name=dst_cidr,json=dstCidr,proto3" json:"dst_cidr,omitempty"`
-	Proto         string                 `protobuf:"bytes,3,opt,name=proto,proto3" json:"proto,omitempty"`
-	PortLo        uint32                 `protobuf:"varint,4,opt,name=port_lo,json=portLo,proto3" json:"port_lo,omitempty"`
-	PortHi        uint32                 `protobuf:"varint,5,opt,name=port_hi,json=portHi,proto3" json:"port_hi,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	SrcIpv4 string                 `protobuf:"bytes,1,opt,name=src_ipv4,json=srcIpv4,proto3" json:"src_ipv4,omitempty"`
+	DstCidr string                 `protobuf:"bytes,2,opt,name=dst_cidr,json=dstCidr,proto3" json:"dst_cidr,omitempty"`
+	Proto   string                 `protobuf:"bytes,3,opt,name=proto,proto3" json:"proto,omitempty"`
+	PortLo  uint32                 `protobuf:"varint,4,opt,name=port_lo,json=portLo,proto3" json:"port_lo,omitempty"`
+	PortHi  uint32                 `protobuf:"varint,5,opt,name=port_hi,json=portHi,proto3" json:"port_hi,omitempty"`
+	// src_ipv6 is the source's IPv6 address; a rule carries src_ipv4 or
+	// src_ipv6, never both.
+	SrcIpv6       string `protobuf:"bytes,6,opt,name=src_ipv6,json=srcIpv6,proto3" json:"src_ipv6,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1481,6 +1558,13 @@ func (x *ForwardRule) GetPortHi() uint32 {
 		return x.PortHi
 	}
 	return 0
+}
+
+func (x *ForwardRule) GetSrcIpv6() string {
+	if x != nil {
+		return x.SrcIpv6
+	}
+	return ""
 }
 
 // AdvertiseRoutesRequest carries the caller's complete advertised set;
@@ -1946,7 +2030,7 @@ var File_thawr_v1_control_proto protoreflect.FileDescriptor
 
 const file_thawr_v1_control_proto_rawDesc = "" +
 	"\n" +
-	"\x16thawr/v1/control.proto\x12\bthawr.v1\"\xbf\x01\n" +
+	"\x16thawr/v1/control.proto\x12\bthawr.v1\"\xd3\x01\n" +
 	"\rEnrollRequest\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12\x1d\n" +
 	"\n" +
@@ -1955,7 +2039,8 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"\x02os\x18\x04 \x01(\tR\x02os\x12\x12\n" +
 	"\x04arch\x18\x05 \x01(\tR\x04arch\x12%\n" +
 	"\x0eclient_version\x18\x06 \x01(\tR\rclientVersion\x12\x12\n" +
-	"\x04name\x18\a \x01(\tR\x04name\"\xb2\x02\n" +
+	"\x04name\x18\a \x01(\tR\x04name\x12\x12\n" +
+	"\x04ipv6\x18\b \x01(\bR\x04ipv6\"\xe9\x02\n" +
 	"\x0eEnrollResponse\x12\x17\n" +
 	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -1966,13 +2051,17 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"\x0ehub_public_key\x18\x06 \x01(\tR\fhubPublicKey\x12!\n" +
 	"\fhub_endpoint\x18\a \x01(\tR\vhubEndpoint\x12%\n" +
 	"\x0eserver_version\x18\b \x01(\tR\rserverVersion\x12+\n" +
-	"\x11netmap_generation\x18\t \x01(\x03R\x10netmapGeneration\"o\n" +
+	"\x11netmap_generation\x18\t \x01(\x03R\x10netmapGeneration\x12\x12\n" +
+	"\x04ipv6\x18\n" +
+	" \x01(\tR\x04ipv6\x12!\n" +
+	"\foverlay_ipv6\x18\v \x01(\tR\voverlayIpv6\"\x83\x01\n" +
 	"\vSyncRequest\x12\x1e\n" +
 	"\n" +
 	"generation\x18\x01 \x01(\x03R\n" +
 	"generation\x12%\n" +
 	"\x0eclient_version\x18\x02 \x01(\tR\rclientVersion\x12\x19\n" +
-	"\block_key\x18\x03 \x01(\tR\alockKey\"\xf2\x02\n" +
+	"\block_key\x18\x03 \x01(\tR\alockKey\x12\x12\n" +
+	"\x04ipv6\x18\x04 \x01(\bR\x04ipv6\"\xf2\x02\n" +
 	"\x06NetMap\x12\x1e\n" +
 	"\n" +
 	"generation\x18\x01 \x01(\x03R\n" +
@@ -1984,7 +2073,7 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"\tkeepalive\x18\x06 \x01(\bR\tkeepalive\x12%\n" +
 	"\x0eserver_version\x18\a \x01(\tR\rserverVersion\x12.\n" +
 	"\x04lock\x18\b \x01(\v2\x1a.thawr.v1.SignedLockRecordR\x04lock\x12/\n" +
-	"\aforward\x18\t \x03(\v2\x15.thawr.v1.ForwardRuleR\aforward\"\x8c\x02\n" +
+	"\aforward\x18\t \x03(\v2\x15.thawr.v1.ForwardRuleR\aforward\"\xc3\x02\n" +
 	"\bSelfInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -1998,7 +2087,10 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"signatures\x129\n" +
 	"\n" +
 	"advertised\x18\b \x03(\v2\x19.thawr.v1.AdvertisedRouteR\n" +
-	"advertised\"\xa0\x03\n" +
+	"advertised\x12\x12\n" +
+	"\x04ipv6\x18\t \x01(\tR\x04ipv6\x12!\n" +
+	"\foverlay_ipv6\x18\n" +
+	" \x01(\tR\voverlayIpv6\"\xb4\x03\n" +
 	"\aNetPeer\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -2018,7 +2110,8 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"\n" +
 	"signatures\x18\r \x03(\v2\x17.thawr.v1.PeerSignatureR\n" +
 	"signatures\x12\x1b\n" +
-	"\texit_node\x18\x0e \x01(\bR\bexitNode\"J\n" +
+	"\texit_node\x18\x0e \x01(\bR\bexitNode\x12\x12\n" +
+	"\x04ipv6\x18\x0f \x01(\tR\x04ipv6\"J\n" +
 	"\bEndpoint\x12\x12\n" +
 	"\x04addr\x18\x01 \x01(\tR\x04addr\x12*\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x16.thawr.v1.EndpointKindR\x04kind\"\x9e\x01\n" +
@@ -2071,19 +2164,21 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"public_key\x18\x03 \x01(\tR\tpublicKey\x12\x16\n" +
 	"\x06signed\x18\x04 \x01(\bR\x06signed\x12\x19\n" +
 	"\block_key\x18\x05 \x01(\tR\alockKey\x12\x12\n" +
-	"\x04kind\x18\x06 \x01(\tR\x04kind\"o\n" +
+	"\x04kind\x18\x06 \x01(\tR\x04kind\"\x8a\x01\n" +
 	"\n" +
 	"FilterRule\x12\x19\n" +
 	"\bsrc_ipv4\x18\x01 \x01(\tR\asrcIpv4\x12\x14\n" +
 	"\x05proto\x18\x02 \x01(\tR\x05proto\x12\x17\n" +
 	"\aport_lo\x18\x03 \x01(\rR\x06portLo\x12\x17\n" +
-	"\aport_hi\x18\x04 \x01(\rR\x06portHi\"\x8b\x01\n" +
+	"\aport_hi\x18\x04 \x01(\rR\x06portHi\x12\x19\n" +
+	"\bsrc_ipv6\x18\x05 \x01(\tR\asrcIpv6\"\xa6\x01\n" +
 	"\vForwardRule\x12\x19\n" +
 	"\bsrc_ipv4\x18\x01 \x01(\tR\asrcIpv4\x12\x19\n" +
 	"\bdst_cidr\x18\x02 \x01(\tR\adstCidr\x12\x14\n" +
 	"\x05proto\x18\x03 \x01(\tR\x05proto\x12\x17\n" +
 	"\aport_lo\x18\x04 \x01(\rR\x06portLo\x12\x17\n" +
-	"\aport_hi\x18\x05 \x01(\rR\x06portHi\"4\n" +
+	"\aport_hi\x18\x05 \x01(\rR\x06portHi\x12\x19\n" +
+	"\bsrc_ipv6\x18\x06 \x01(\tR\asrcIpv6\"4\n" +
 	"\x16AdvertiseRoutesRequest\x12\x1a\n" +
 	"\bprefixes\x18\x01 \x03(\tR\bprefixes\"E\n" +
 	"\x10AdvertisedRoutes\x121\n" +
