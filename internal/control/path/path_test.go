@@ -137,6 +137,21 @@ func TestPathStateMachine(t *testing.T) {
 		}
 	})
 
+	t.Run("hold restarts the probe window", func(t *testing.T) {
+		m := New(Options{})
+		m.SetCandidates([]netip.AddrPort{c1, c2})
+		m.Hold(t0) // no-op while idle
+		m.Step(Input{Now: t0})
+		m.Step(Input{Now: t0, Intent: true})
+		m.Hold(at(1900 * time.Millisecond))
+		if out := m.Step(Input{Now: at(2500 * time.Millisecond)}); out.Action != ActNone || out.Endpoint != c1 {
+			t.Fatalf("window not restarted: %+v", out)
+		}
+		if out := m.Step(Input{Now: at(3900 * time.Millisecond)}); out.Action != ActProbe || out.Endpoint != c2 {
+			t.Fatalf("held window never ended: %+v", out)
+		}
+	})
+
 	t.Run("exhaustion and retry", func(t *testing.T) {
 		m := New(Options{})
 		m.SetCandidates([]netip.AddrPort{c1, c2})
