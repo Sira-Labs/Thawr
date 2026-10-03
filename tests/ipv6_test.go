@@ -5,6 +5,7 @@ package tests
 import (
 	"context"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +32,9 @@ func requireIPv6(t *testing.T) {
 // over IPv6 as over IPv4. Spec 015 acceptance 3 and 7.
 func TestIPv6OverlayEndToEnd(t *testing.T) {
 	requireIPv6(t)
+	if _, err := exec.LookPath("nc"); err != nil {
+		t.Skip("nc not found")
+	}
 	m := newStarMesh(t, "version: 1\nacls:\n"+
 		"  - action: accept\n    src: [alice]\n    dst: ['bob:8080']\n    proto: tcp\n"+
 		"  - action: accept\n    src: [alice]\n    dst: ['bob:*']\n    proto: icmp\n", false)
@@ -88,7 +92,16 @@ func TestIPv6OverlayEndToEnd(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = l.Process.Kill(); _ = l.Wait() })
 	}
-	time.Sleep(500 * time.Millisecond)
+	// Both listeners must be up, or a missing 9090 would pass as denied.
+	for _, port := range []string{"8080", "9090"} {
+		deadline := time.Now().Add(5 * time.Second)
+		for m.clients[1].cmd(ctx, "nc", "-6", "-z", "-w", "1", "::1", port).Run() != nil {
+			if time.Now().After(deadline) {
+				t.Fatalf("listener on bob's port %s never came up", port)
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
 	connect := func(port string) bool {
 		out, err := m.clients[0].cmd(ctx, "nc", "-6", "-z", "-w", "2", bob.Self.IPv6, port).CombinedOutput()
 		t.Logf("nc [%s]:%s: err=%v %s", bob.Self.IPv6, port, err, out)
@@ -97,8 +110,18 @@ func TestIPv6OverlayEndToEnd(t *testing.T) {
 	if !connect("8080") {
 		t.Fatal("allowed port 8080 unreachable over IPv6")
 	}
+	drops := func() uint64 {
+		if st := m.status(1); st.Filter != nil {
+			return st.Filter.Drops
+		}
+		return 0
+	}
+	before := drops()
 	if connect("9090") {
 		t.Fatal("denied port 9090 reachable over IPv6")
+	}
+	if after := drops(); after <= before {
+		t.Errorf("bob's filter counted no drop for the denied IPv6 probe (%d → %d)", before, after)
 	}
 	// bob may not reach alice at all.
 	if out, err := m.clients[1].cmd(ctx, "ping", "-6", "-c", "1", "-W", "2", alice.Self.IPv6).CombinedOutput(); err == nil {
