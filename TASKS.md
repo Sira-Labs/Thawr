@@ -175,14 +175,17 @@ batches).
         loop also prunes sessions of deleted peers.
       - Fix (2026-10-03, found by the new CI integration job): a peer
         without traffic of its own never joined the relay, so a relayed
-        pair worked only when both sides wanted to talk. The relay now
-        reports a send to a visible peer without a session (`Absent`,
-        once per PEER_GONE window); the hub keeps the request 30 s and
-        wakes only that peer, whose netmap flags the sender
-        `relay_wanted`; the client treats a new flag as traffic intent,
-        so its probe round ends on the relay. A server push was chosen
-        over keeping every symmetric client on the relay, which would
-        hold connections nobody uses.
+        pair worked only when both sides wanted to talk; nor did it
+        punch back, so "both sides punch at once" (spec 004) happened
+        only by chance. The server now records "A wants B" in the hub
+        when A reports `probing` or `relay` toward B, or when the relay
+        gets a send for B without a session (`Absent`, once per
+        PEER_GONE window); the hub keeps it 30 s, only for peers with a
+        stream (client-reported ids cannot grow the table), and wakes
+        only B, whose netmap flags A `wanted`. B takes a new flag as
+        traffic intent. A server push was chosen over keeping every
+        symmetric client on the relay, which would hold connections
+        nobody uses.
       - The relay client queues datagrams while it connects instead of
         dropping them: the first one is the handshake that opened the
         relay path, and losing it cost a 5 s WireGuard retry. First

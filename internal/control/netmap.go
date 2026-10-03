@@ -66,9 +66,9 @@ type NetPeer struct {
 	// through (spec 013); the receiver adds 0.0.0.0/0 when it selects it,
 	// and ::/0 as well when the peer has IPv6 (spec 015).
 	ExitNode bool
-	// RelayWanted marks a peer sending to the receiver through the
-	// relay while the receiver has no relay session (spec 005).
-	RelayWanted bool
+	// Wanted marks a peer that is trying to reach the receiver, by
+	// probing or on the relay (specs 004, 005).
+	Wanted bool
 }
 
 // HubPeer is the server's own WireGuard interface as seen by a peer.
@@ -201,10 +201,10 @@ type Presence interface {
 	Online(peerID string) bool
 }
 
-// RelayWants tells whether peer from recently asked to reach peer to
-// through the relay; control.Hub implements it.
-type RelayWants interface {
-	RelayWanted(to, from string) bool
+// Wants tells whether peer from recently tried to reach peer to;
+// control.Hub implements it.
+type Wants interface {
+	Wanted(to, from string) bool
 }
 
 // NetMapBuilder computes per-peer netmaps from the store and the
@@ -216,7 +216,7 @@ type NetMapBuilder struct {
 	presence   Presence
 	hub        HubConfig
 	generation func() int64
-	relayWants RelayWants
+	wants      Wants
 }
 
 // NewNetMapBuilder builds the netmap builder. generation supplies the
@@ -225,10 +225,10 @@ func NewNetMapBuilder(st *store.Store, vis Visibility, ep *EndpointTable, pr Pre
 	return &NetMapBuilder{store: st, visibility: vis, endpoints: ep, presence: pr, hub: hub, generation: generation}
 }
 
-// WithRelayWants makes netmaps flag the peers that are waiting for the
-// receiver on the relay.
-func (b *NetMapBuilder) WithRelayWants(rw RelayWants) *NetMapBuilder {
-	b.relayWants = rw
+// WithWants makes netmaps flag the peers that are trying to reach the
+// receiver.
+func (b *NetMapBuilder) WithWants(rw Wants) *NetMapBuilder {
+	b.wants = rw
 	return b
 }
 
@@ -366,20 +366,20 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 			allowed = append(allowed, netip.PrefixFrom(ip6, 128))
 		}
 		nm.Peers = append(nm.Peers, NetPeer{
-			ID:          p.ID,
-			Name:        p.Name,
-			Kind:        p.Kind,
-			Owner:       owners[p.OwnerID],
-			PublicKey:   p.PublicKey,
-			IPv4:        ip,
-			IPv6:        ip6,
-			Online:      online,
-			Endpoints:   eps,
-			Symmetric:   symmetric,
-			AllowedIPs:  append(allowed, viaRoutes[p.ID]...),
-			Signatures:  sigs[p.ID+"\x00"+p.PublicKey],
-			ExitNode:    exitNodes[p.ID],
-			RelayWanted: b.relayWants != nil && b.relayWants.RelayWanted(peerID, p.ID),
+			ID:         p.ID,
+			Name:       p.Name,
+			Kind:       p.Kind,
+			Owner:      owners[p.OwnerID],
+			PublicKey:  p.PublicKey,
+			IPv4:       ip,
+			IPv6:       ip6,
+			Online:     online,
+			Endpoints:  eps,
+			Symmetric:  symmetric,
+			AllowedIPs: append(allowed, viaRoutes[p.ID]...),
+			Signatures: sigs[p.ID+"\x00"+p.PublicKey],
+			ExitNode:   exitNodes[p.ID],
+			Wanted:     b.wants != nil && b.wants.Wanted(peerID, p.ID),
 		})
 	}
 	return nm, nil

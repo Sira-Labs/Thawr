@@ -53,17 +53,17 @@ type Hub struct {
 	presence map[string]*presenceEntry
 	pending  bool
 	timer    *time.Timer
-	// wants holds relay requests: target peer id -> requesting peer id
-	// -> time of the latest request (spec 005).
+	// wants holds reach requests: target peer id -> requesting peer id
+	// -> time of the latest request (specs 004, 005).
 	wants map[string]map[string]time.Time
 }
 
-// Relay requests: a request stays in the target's netmaps for
-// relayWantTTL; a repeated request wakes the target again only after
-// relayWantRepeat.
+// Reach requests ("from is trying to reach to"): a request stays in
+// to's netmaps for wantTTL; a repeated request wakes to again only
+// after wantRepeat.
 const (
-	relayWantTTL    = 30 * time.Second
-	relayWantRepeat = 5 * time.Second
+	wantTTL    = 30 * time.Second
+	wantRepeat = 5 * time.Second
 )
 
 type subscriber struct {
@@ -192,7 +192,7 @@ func (h *Hub) Online(peerID string) bool {
 	return e != nil && e.online
 }
 
-// Forget drops presence and relay requests for a deleted peer.
+// Forget drops presence and reach requests for a deleted peer.
 func (h *Hub) Forget(peerID string) {
 	h.mu.Lock()
 	delete(h.presence, peerID)
@@ -206,22 +206,37 @@ func (h *Hub) Forget(peerID string) {
 	h.mu.Unlock()
 }
 
-// WantRelay records that peer from sends to peer to through the relay
-// while to has no relay session, and wakes to's Sync streams at once,
-// without a new generation, so to's next netmap asks it to reach from
-// (spec 005). Without this, a peer with no traffic of its own never
-// joins the relay and the relayed packets go nowhere.
-func (h *Hub) WantRelay(to, from string) {
+// Want records that peer from is trying to reach peer to (it probes
+// to's candidates or waits for it on the relay) and wakes to's Sync
+// streams at once, without a new generation, so to's next netmap asks
+// it to reach from as well. Hole punching needs both sides at once, and
+// a peer with no traffic of its own would otherwise neither punch nor
+// join the relay (specs 004, 005).
+//
+// Only a peer with an open stream is recorded, since nothing else can be
+// woken; with expired requests pruned on the way, the table never holds
+// more than connected peers times their visible peers, whatever ids a
+// client reports.
+func (h *Hub) Want(to, from string) {
 	h.mu.Lock()
+	if e := h.presence[to]; e == nil || e.streams == 0 {
+		h.mu.Unlock()
+		return
+	}
 	now := h.now()
 	reqs := h.wants[to]
 	if reqs == nil {
 		reqs = map[string]time.Time{}
 		h.wants[to] = reqs
 	}
+	for id, at := range reqs {
+		if now.Sub(at) >= wantTTL {
+			delete(reqs, id)
+		}
+	}
 	last, seen := reqs[from]
 	reqs[from] = now
-	wake := !seen || now.Sub(last) >= relayWantRepeat
+	wake := !seen || now.Sub(last) >= wantRepeat
 	if wake {
 		for s := range h.subs {
 			if s.peerID != to {
@@ -235,20 +250,20 @@ func (h *Hub) WantRelay(to, from string) {
 	}
 	h.mu.Unlock()
 	if wake {
-		h.log.Debug("relay wanted", "peer_id", to, "from", from)
+		h.log.Debug("peer wanted", "peer_id", to, "from", from)
 	}
 }
 
-// RelayWanted reports whether peer from asked to reach peer to through
-// the relay within the last relayWantTTL.
-func (h *Hub) RelayWanted(to, from string) bool {
+// Wanted reports whether peer from asked to reach peer to within the
+// last wantTTL.
+func (h *Hub) Wanted(to, from string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	at, ok := h.wants[to][from]
 	if !ok {
 		return false
 	}
-	if h.now().Sub(at) < relayWantTTL {
+	if h.now().Sub(at) < wantTTL {
 		return true
 	}
 	delete(h.wants[to], from)

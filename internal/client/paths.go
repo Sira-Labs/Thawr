@@ -29,12 +29,12 @@ type peerPath struct {
 	machine   *path.Machine
 	sink      *sink
 	ping      bool
-	// relayWanted is the netmap's last relay_wanted flag for the peer;
-	// a new request counts as traffic intent once (spec 005).
-	relayWanted bool
-	steps       int
-	state       path.State
-	endpoint    netip.AddrPort
+	// wanted is the netmap's last wanted flag for the peer; a new
+	// request counts as traffic intent once (specs 004, 005).
+	wanted   bool
+	steps    int
+	state    path.State
+	endpoint netip.AddrPort
 }
 
 // PathResult is the outcome of a ping.
@@ -105,13 +105,13 @@ func (d *Daemon) syncPaths(ctx context.Context, nm NetMap, cfg wg.Config) error 
 		}
 		pp.name, pp.key, pp.ipv4, pp.peer = p.Name, key, ip, byKey[key]
 		pp.cands, pp.symmetric = p.Candidates(), p.Symmetric
-		// The peer waits for this device on the relay: probe as if it
-		// had traffic for the peer, which ends on the relay when no
-		// direct candidate answers.
-		if p.RelayWanted && !pp.relayWanted {
+		// The peer is trying to reach this device: probe back as if it
+		// had traffic for the peer, so both sides punch at once, and the
+		// round ends on the relay when no candidate answers.
+		if p.Wanted && !pp.wanted {
 			pp.ping = true
 		}
-		pp.relayWanted = p.RelayWanted
+		pp.wanted = p.Wanted
 	}
 	for id, pp := range d.paths {
 		if !seen[id] {

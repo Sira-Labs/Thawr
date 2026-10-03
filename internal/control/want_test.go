@@ -9,16 +9,27 @@ import (
 	"github.com/sira-labs/thawr/internal/store"
 )
 
-func TestHubRelayWanted(t *testing.T) {
+func TestHubWanted(t *testing.T) {
 	clk := newClock()
 	h := newHub(t, openStore(t), clk)
 	chB, unsubB := h.Subscribe("b")
 	defer unsubB()
 	chC, unsubC := h.Subscribe("c")
 	defer unsubC()
+	h.Connected("b")
+	h.Connected("c")
+	waitWake(t, chB) // the coalesced wake-up of the presence change
+	waitWake(t, chC)
 	gen := h.Generation()
 
-	h.WantRelay("b", "a")
+	// A peer without a stream cannot be woken and is not recorded, so
+	// reported ids cannot grow the table.
+	h.Want("nobody", "a")
+	if h.Wanted("nobody", "a") {
+		t.Error("request recorded for a peer without a stream")
+	}
+
+	h.Want("b", "a")
 	waitWake(t, chB)
 	select {
 	case <-chC:
@@ -28,50 +39,60 @@ func TestHubRelayWanted(t *testing.T) {
 	if h.Generation() != gen {
 		t.Errorf("a relay request bumped the generation to %d", h.Generation())
 	}
-	if !h.RelayWanted("b", "a") || h.RelayWanted("a", "b") || h.RelayWanted("b", "x") {
-		t.Error("RelayWanted does not match the request")
+	if !h.Wanted("b", "a") || h.Wanted("a", "b") || h.Wanted("b", "x") {
+		t.Error("Wanted does not match the request")
 	}
+	// A second sender, never looked up again, to be pruned later.
+	h.Want("b", "y")
+	waitWake(t, chB)
 
-	// A repeat inside relayWantRepeat refreshes without waking again.
+	// A repeat inside wantRepeat refreshes without waking again.
 	clk.Advance(time.Second)
-	h.WantRelay("b", "a")
+	h.Want("b", "a")
 	select {
 	case <-chB:
 		t.Error("repeated request woke the peer again")
 	case <-time.After(30 * time.Millisecond):
 	}
-	clk.Advance(relayWantRepeat)
-	h.WantRelay("b", "a")
+	clk.Advance(wantRepeat)
+	h.Want("b", "a")
 	waitWake(t, chB)
 
-	// The request expires after relayWantTTL.
-	clk.Advance(relayWantTTL - time.Second)
-	if !h.RelayWanted("b", "a") {
+	// The request expires after wantTTL.
+	clk.Advance(wantTTL - time.Second)
+	if !h.Wanted("b", "a") {
 		t.Error("request expired early")
 	}
 	clk.Advance(time.Second)
-	if h.RelayWanted("b", "a") {
-		t.Error("request outlived relayWantTTL")
+	if h.Wanted("b", "a") {
+		t.Error("request outlived wantTTL")
+	}
+
+	// Expired requests are pruned when the next one arrives: y expired
+	// with a and was never looked up.
+	h.Want("b", "x")
+	if _, kept := h.wants["b"]["y"]; kept || len(h.wants["b"]) != 1 {
+		t.Errorf("requests kept for b: %v, want x only", h.wants["b"])
 	}
 
 	// Forgetting either side drops the request.
-	h.WantRelay("b", "a")
+	h.Want("b", "a")
 	h.Forget("a")
-	if h.RelayWanted("b", "a") {
+	if h.Wanted("b", "a") {
 		t.Error("request survived forgetting its sender")
 	}
-	h.WantRelay("b", "a")
+	h.Want("b", "a")
 	h.Forget("b")
-	if h.RelayWanted("b", "a") {
+	if h.Wanted("b", "a") {
 		t.Error("request survived forgetting its target")
 	}
 }
 
-type fakeRelayWants map[[2]string]bool
+type fakeWants map[[2]string]bool
 
-func (f fakeRelayWants) RelayWanted(to, from string) bool { return f[[2]string{to, from}] }
+func (f fakeWants) Wanted(to, from string) bool { return f[[2]string{to, from}] }
 
-func TestNetMapRelayWanted(t *testing.T) {
+func TestNetMapWanted(t *testing.T) {
 	env := newEnrollEnv(t, "100.64.0.0/10")
 	ctx := context.Background()
 	mustUser(t, env.users, "alice", store.RoleMember)
@@ -85,20 +106,20 @@ func TestNetMapRelayWanted(t *testing.T) {
 	}
 	hub := HubConfig{PublicKey: "HUBKEY", Address: netip.MustParseAddr("100.64.0.1"), Overlay: netip.MustParsePrefix("100.64.0.0/10")}
 	b := NewNetMapBuilder(env.st, OwnerVisibility{}, nil, nil, hub, func() int64 { return 1 }).
-		WithRelayWants(fakeRelayWants{{a1.Peer.ID, a2.Peer.ID}: true})
+		WithWants(fakeWants{{a1.Peer.ID, a2.Peer.ID}: true})
 
 	nm, err := b.Build(ctx, a1.Peer.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(nm.Peers) != 1 || !nm.Peers[0].RelayWanted {
+	if len(nm.Peers) != 1 || !nm.Peers[0].Wanted {
 		t.Errorf("a1's map does not ask it to reach a2: %+v", nm.Peers)
 	}
 	nm, err = b.Build(ctx, a2.Peer.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(nm.Peers) != 1 || nm.Peers[0].RelayWanted {
+	if len(nm.Peers) != 1 || nm.Peers[0].Wanted {
 		t.Errorf("a2's map carries a request nobody made: %+v", nm.Peers)
 	}
 }
