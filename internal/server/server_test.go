@@ -181,8 +181,9 @@ func TestBootstrapCreatesFiles(t *testing.T) {
 	if !ok {
 		t.Fatal("hub device never configured")
 	}
-	if want := netip.MustParsePrefix("100.64.0.1/10"); len(last.Addresses) != 1 || last.Addresses[0] != want {
-		t.Errorf("hub addresses %v, want [%s]", last.Addresses, want)
+	// The second address is the generated IPv6 overlay's (spec 015).
+	if want := netip.MustParsePrefix("100.64.0.1/10"); len(last.Addresses) != 2 || last.Addresses[0] != want || !last.Addresses[1].Addr().Is6() {
+		t.Errorf("hub addresses %v, want [%s <ipv6>/64]", last.Addresses, want)
 	}
 	if len(last.Peers) != 0 {
 		t.Errorf("hub should start without peers, got %d", len(last.Peers))

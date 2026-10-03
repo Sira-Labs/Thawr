@@ -108,54 +108,36 @@ func buildRuleset(c *nftables.Conn, set FilterSet) (string, int) {
 
 	// Traffic not crossing the WireGuard interface is none of our business.
 	add(&expr.Meta{Key: ifKey, Register: 1}, &expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: ifname(set.Interface)}, accept)
-	if set.Hook == HookForward && set.Local.IsValid() {
-		add(append(ipv4(), daddr(), &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: set.Local.AsSlice()}, accept)...)
+	if set.Hook == HookForward {
+		for _, local := range set.locals() {
+			add(append(family(local), daddr(local), &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: local.AsSlice()}, accept)...)
+		}
 	}
 	// Replies to accepted flows.
-	add(&expr.Ct{Register: 1, Key: expr.CtKeySTATE},
-		&expr.Bitwise{SourceRegister: 1, DestRegister: 1, Len: 4, Mask: binaryutil.NativeEndian.PutUint32(expr.CtStateBitESTABLISHED | expr.CtStateBitRELATED), Xor: binaryutil.NativeEndian.PutUint32(0)},
-		&expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: binaryutil.NativeEndian.PutUint32(0)}, accept)
-	// ICMP echo from visible peers.
-	if len(set.Visible) > 0 {
-		visible := &nftables.Set{Table: table, Anonymous: true, Constant: true, KeyType: nftables.TypeIPAddr}
-		elems := make([]nftables.SetElement, 0, len(set.Visible))
-		for _, a := range set.Visible {
-			if a.Is4() {
-				elems = append(elems, nftables.SetElement{Key: a.AsSlice()})
-			}
-		}
-		if len(elems) > 0 {
-			if err := c.AddSet(visible, elems); err == nil {
-				add(append(ipv4(), saddr(), &expr.Lookup{SourceRegister: 1, SetName: visible.Name, SetID: visible.ID},
-					&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{unix.IPPROTO_ICMP}},
-					&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 0, Len: 1}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{8}},
-					accept)...)
-			}
-		}
+	add(established()...)
+	// ICMPv6 errors and neighbour discovery, without which path MTU
+	// discovery breaks (spec 015).
+	for _, types := range [][2]byte{{icmp6Unreachable, icmp6ParamProb}, {icmp6RouterSolicit, icmp6Redirect}} {
+		add(append(family(netip.IPv6Unspecified()),
+			&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{unix.IPPROTO_ICMPV6}},
+			&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 0, Len: 1},
+			&expr.Range{Op: expr.CmpOpEq, Register: 1, FromData: []byte{types[0]}, ToData: []byte{types[1]}},
+			accept)...)
 	}
+	// ICMP echo from visible peers.
+	addVisible(c, table, set.Visible, add)
 	count := 0
 	for _, r := range set.Rules {
-		for _, proto := range protocolsOf(r) {
-			exprs := append(ipv4(), saddr())
-			if r.Src.Bits() == 32 {
-				exprs = append(exprs, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: r.Src.Addr().AsSlice()})
-			} else {
-				mask := netip.PrefixFrom(r.Src.Addr(), r.Src.Bits())
-				exprs = append(exprs, &expr.Bitwise{SourceRegister: 1, DestRegister: 1, Len: 4, Mask: prefixMask(mask.Bits()), Xor: []byte{0, 0, 0, 0}},
-					&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: r.Src.Masked().Addr().AsSlice()})
-			}
+		if !r.Src.IsValid() || (r.Dst.IsValid() && r.Dst.Is6() != r.Src.Addr().Is6()) {
+			continue
+		}
+		for _, proto := range protocolsOf(r, r.Src.Addr().Is6()) {
+			exprs := append(family(r.Src.Addr()), saddr(r.Src.Addr()))
+			exprs = append(exprs, prefixMatch(r.Src)...)
 			if r.Dst.IsValid() {
-				exprs = append(exprs, daddr(), &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: r.Dst.AsSlice()})
+				exprs = append(exprs, daddr(r.Dst), &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: r.Dst.AsSlice()})
 			}
-			exprs = append(exprs, &expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{proto}})
-			if proto != unix.IPPROTO_ICMP {
-				exprs = append(exprs, &expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2})
-				if r.Lo == r.Hi {
-					exprs = append(exprs, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: binaryutil.BigEndian.PutUint16(r.Lo)})
-				} else {
-					exprs = append(exprs, &expr.Range{Op: expr.CmpOpEq, Register: 1, FromData: binaryutil.BigEndian.PutUint16(r.Lo), ToData: binaryutil.BigEndian.PutUint16(r.Hi)})
-				}
-			}
+			exprs = append(exprs, protoPorts(proto, r.Lo, r.Hi)...)
 			add(append(exprs, accept)...)
 			count++
 		}
@@ -166,6 +148,60 @@ func buildRuleset(c *nftables.Conn, set FilterSet) (string, int) {
 		count += buildRouterChains(c, table, set)
 	}
 	return name, count
+}
+
+// addVisible adds the rules accepting ICMP and ICMPv6 echo requests
+// from the visible addresses, one anonymous set per family.
+func addVisible(c *nftables.Conn, table *nftables.Table, visible []netip.Addr, add func(...expr.Any)) {
+	for _, fam := range []struct {
+		zero    netip.Addr
+		keyType nftables.SetDatatype
+		proto   byte
+		echo    byte
+	}{
+		{netip.IPv4Unspecified(), nftables.TypeIPAddr, unix.IPPROTO_ICMP, icmpEchoRequest},
+		{netip.IPv6Unspecified(), nftables.TypeIP6Addr, unix.IPPROTO_ICMPV6, icmp6EchoRequest},
+	} {
+		var elems []nftables.SetElement
+		for _, a := range visible {
+			if a.Is4() == fam.zero.Is4() && !a.Is4In6() {
+				elems = append(elems, nftables.SetElement{Key: a.AsSlice()})
+			}
+		}
+		if len(elems) == 0 {
+			continue
+		}
+		set := &nftables.Set{Table: table, Anonymous: true, Constant: true, KeyType: fam.keyType}
+		if err := c.AddSet(set, elems); err != nil {
+			continue
+		}
+		add(append(family(fam.zero), saddr(fam.zero), &expr.Lookup{SourceRegister: 1, SetName: set.Name, SetID: set.ID},
+			&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{fam.proto}},
+			&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 0, Len: 1}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{fam.echo}},
+			&expr.Verdict{Kind: expr.VerdictAccept})...)
+	}
+}
+
+// established matches packets of flows conntrack already accepted.
+func established() []expr.Any {
+	return []expr.Any{&expr.Ct{Register: 1, Key: expr.CtKeySTATE},
+		&expr.Bitwise{SourceRegister: 1, DestRegister: 1, Len: 4, Mask: binaryutil.NativeEndian.PutUint32(expr.CtStateBitESTABLISHED | expr.CtStateBitRELATED), Xor: binaryutil.NativeEndian.PutUint32(0)},
+		&expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: binaryutil.NativeEndian.PutUint32(0)},
+		&expr.Verdict{Kind: expr.VerdictAccept}}
+}
+
+// protoPorts matches the transport protocol and, unless it is ICMP or
+// ICMPv6, the destination port range.
+func protoPorts(proto byte, lo, hi uint16) []expr.Any {
+	exprs := []expr.Any{&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{proto}}}
+	if proto == unix.IPPROTO_ICMP || proto == unix.IPPROTO_ICMPV6 {
+		return exprs
+	}
+	exprs = append(exprs, &expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2})
+	if lo == hi {
+		return append(exprs, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: binaryutil.BigEndian.PutUint16(lo)})
+	}
+	return append(exprs, &expr.Range{Op: expr.CmpOpEq, Register: 1, FromData: binaryutil.BigEndian.PutUint16(lo), ToData: binaryutil.BigEndian.PutUint16(hi)})
 }
 
 // buildRouterChains adds what a subnet router or exit node needs next
@@ -184,29 +220,22 @@ func buildRouterChains(c *nftables.Conn, table *nftables.Table, set FilterSet) i
 	// Neither in nor out over the tunnel: none of our business.
 	add(&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1}, &expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: iface},
 		&expr.Meta{Key: expr.MetaKeyOIFNAME, Register: 1}, &expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: iface}, accept)
-	add(&expr.Ct{Register: 1, Key: expr.CtKeySTATE},
-		&expr.Bitwise{SourceRegister: 1, DestRegister: 1, Len: 4, Mask: binaryutil.NativeEndian.PutUint32(expr.CtStateBitESTABLISHED | expr.CtStateBitRELATED), Xor: binaryutil.NativeEndian.PutUint32(0)},
-		&expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: binaryutil.NativeEndian.PutUint32(0)}, accept)
+	add(established()...)
 	count := 0
 	for _, r := range set.Forward {
-		for _, proto := range protocolsOf(FilterRule{Proto: r.Proto, Lo: r.Lo, Hi: r.Hi}) {
+		if !r.Src.IsValid() || !r.Dst.IsValid() || r.Dst.Addr().Is6() != r.Src.Addr().Is6() {
+			continue
+		}
+		for _, proto := range protocolsOf(FilterRule{Proto: r.Proto, Lo: r.Lo, Hi: r.Hi}, r.Src.Addr().Is6()) {
 			exprs := []expr.Any{&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: iface}}
-			exprs = append(exprs, ipv4()...)
-			exprs = append(exprs, saddr())
+			exprs = append(exprs, family(r.Src.Addr())...)
+			exprs = append(exprs, saddr(r.Src.Addr()))
 			exprs = append(exprs, prefixMatch(r.Src)...)
 			if r.Dst.Bits() > 0 {
-				exprs = append(exprs, daddr())
+				exprs = append(exprs, daddr(r.Dst.Addr()))
 				exprs = append(exprs, prefixMatch(r.Dst)...)
 			}
-			exprs = append(exprs, &expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{proto}})
-			if proto != unix.IPPROTO_ICMP {
-				exprs = append(exprs, &expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2})
-				if r.Lo == r.Hi {
-					exprs = append(exprs, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: binaryutil.BigEndian.PutUint16(r.Lo)})
-				} else {
-					exprs = append(exprs, &expr.Range{Op: expr.CmpOpEq, Register: 1, FromData: binaryutil.BigEndian.PutUint16(r.Lo), ToData: binaryutil.BigEndian.PutUint16(r.Hi)})
-				}
-			}
+			exprs = append(exprs, protoPorts(proto, r.Lo, r.Hi)...)
 			add(append(exprs, accept)...)
 			count++
 		}
@@ -217,14 +246,24 @@ func buildRouterChains(c *nftables.Conn, table *nftables.Table, set FilterSet) i
 	}
 	nat := c.AddChain(&nftables.Chain{Name: "postrouting", Table: table, Type: nftables.ChainTypeNAT, Hooknum: nftables.ChainHookPostrouting, Priority: nftables.ChainPriorityNATSource})
 	for _, dst := range set.Masquerade {
+		from := set.MasqueradeFrom
+		if dst.Addr().Is6() {
+			// NAT66 for an exit node (spec 015). Without the overlay's
+			// IPv6 prefix every IPv6 packet leaving the host would be
+			// rewritten, so there is no rule at all.
+			from = set.MasqueradeFrom6
+			if !from.IsValid() {
+				continue
+			}
+		}
 		exprs := []expr.Any{&expr.Meta{Key: expr.MetaKeyOIFNAME, Register: 1}, &expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: iface}}
-		exprs = append(exprs, ipv4()...)
-		if set.MasqueradeFrom.IsValid() {
-			exprs = append(exprs, saddr())
-			exprs = append(exprs, prefixMatch(set.MasqueradeFrom)...)
+		exprs = append(exprs, family(dst.Addr())...)
+		if from.IsValid() && from.Addr().Is6() == dst.Addr().Is6() {
+			exprs = append(exprs, saddr(from.Addr()))
+			exprs = append(exprs, prefixMatch(from)...)
 		}
 		if dst.Bits() > 0 {
-			exprs = append(exprs, daddr())
+			exprs = append(exprs, daddr(dst.Addr()))
 			exprs = append(exprs, prefixMatch(dst)...)
 		}
 		c.AddRule(&nftables.Rule{Table: table, Chain: nat, Exprs: append(exprs, &expr.Masq{})})
@@ -232,44 +271,66 @@ func buildRouterChains(c *nftables.Conn, table *nftables.Table, set FilterSet) i
 	return count
 }
 
-// prefixMatch compares the address in register 1 with p.
+// prefixMatch compares the address in register 1 with p, of either
+// family.
 func prefixMatch(p netip.Prefix) []expr.Any {
-	if p.Bits() == 32 {
+	if p.Bits() == p.Addr().BitLen() {
 		return []expr.Any{&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: p.Addr().AsSlice()}}
 	}
-	return []expr.Any{&expr.Bitwise{SourceRegister: 1, DestRegister: 1, Len: 4, Mask: prefixMask(p.Bits()), Xor: []byte{0, 0, 0, 0}},
+	n := uint32(4)
+	if p.Addr().Is6() {
+		n = 16
+	}
+	return []expr.Any{&expr.Bitwise{SourceRegister: 1, DestRegister: 1, Len: n, Mask: prefixMask(p.Bits(), p.Addr().BitLen()), Xor: make([]byte, n)},
 		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: p.Masked().Addr().AsSlice()}}
 }
 
-// protocolsOf expands a rule's protocol into IP protocol numbers.
-func protocolsOf(r FilterRule) []byte {
+// protocolsOf expands a rule's protocol into IP protocol numbers; an
+// ICMP rule means ICMPv6 for an IPv6 source.
+func protocolsOf(r FilterRule, v6 bool) []byte {
+	icmp := byte(unix.IPPROTO_ICMP)
+	if v6 {
+		icmp = unix.IPPROTO_ICMPV6
+	}
 	switch r.Proto {
 	case ProtoTCP:
 		return []byte{unix.IPPROTO_TCP}
 	case ProtoUDP:
 		return []byte{unix.IPPROTO_UDP}
 	case ProtoICMP:
-		return []byte{unix.IPPROTO_ICMP}
+		return []byte{icmp}
 	default:
 		out := []byte{unix.IPPROTO_TCP, unix.IPPROTO_UDP}
 		if r.Lo <= 1 && r.Hi == 65535 {
-			out = append(out, unix.IPPROTO_ICMP)
+			out = append(out, icmp)
 		}
 		return out
 	}
 }
 
-// ipv4 matches IPv4 packets, which the inet table also sees for IPv6.
-func ipv4() []expr.Any {
-	return []expr.Any{&expr.Meta{Key: expr.MetaKeyNFPROTO, Register: 1}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{unix.NFPROTO_IPV4}}}
+// family matches packets of a's family, which the inet table sees both
+// of.
+func family(a netip.Addr) []expr.Any {
+	proto := byte(unix.NFPROTO_IPV4)
+	if a.Is6() {
+		proto = unix.NFPROTO_IPV6
+	}
+	return []expr.Any{&expr.Meta{Key: expr.MetaKeyNFPROTO, Register: 1}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{proto}}}
 }
 
-// saddr loads the IPv4 source address into register 1.
-func saddr() expr.Any {
+// saddr loads the source address of a's family into register 1.
+func saddr(a netip.Addr) expr.Any {
+	if a.Is6() {
+		return &expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: 8, Len: 16}
+	}
 	return &expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: 12, Len: 4}
 }
 
-func daddr() expr.Any {
+// daddr loads the destination address of a's family into register 1.
+func daddr(a netip.Addr) expr.Any {
+	if a.Is6() {
+		return &expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: 24, Len: 16}
+	}
 	return &expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: 16, Len: 4}
 }
 
@@ -281,7 +342,19 @@ func ifname(n string) []byte {
 	return b
 }
 
-func prefixMask(bits int) []byte {
-	m := ^uint32(0) << (32 - uint(bits))
-	return binaryutil.BigEndian.PutUint32(m)
+// prefixMask is the network mask of a prefix length in an address of
+// bitLen bits, big endian.
+func prefixMask(bits, bitLen int) []byte {
+	m := make([]byte, bitLen/8)
+	for i := range m {
+		switch {
+		case bits >= 8:
+			m[i] = 0xff
+			bits -= 8
+		case bits > 0:
+			m[i] = ^byte(0) << (8 - bits)
+			bits = 0
+		}
+	}
+	return m
 }

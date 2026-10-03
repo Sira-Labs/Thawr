@@ -25,7 +25,8 @@ func (r *routerNAT) set(ctx context.Context, set FilterSet) error {
 	}
 	set.Rules, set.Visible = nil, nil
 	set.Hook = HookInput
-	return r.nft.SetFilter(ctx, FilterSet{Interface: set.Interface, Hook: HookInput, Local: set.Local, Forward: set.Forward, Masquerade: set.Masquerade, MasqueradeFrom: set.MasqueradeFrom, routerOnly: true})
+	return r.nft.SetFilter(ctx, FilterSet{Interface: set.Interface, Hook: HookInput, Local: set.Local, Local6: set.Local6, Forward: set.Forward,
+		Masquerade: set.Masquerade, MasqueradeFrom: set.MasqueradeFrom, MasqueradeFrom6: set.MasqueradeFrom6, routerOnly: true})
 }
 
 func (r *routerNAT) remove() error { return r.nft.remove() }
@@ -88,7 +89,8 @@ func AllowForward(iface string) (chains int, undo func() error, err error) {
 }
 
 // dropForwardChains lists base chains on the forward hook with a drop
-// policy in IPv4 or inet tables other than Thawr's.
+// policy in IPv4, IPv6 or inet tables other than Thawr's; Docker with
+// ip6tables enabled drops IPv6 forwarding the same way.
 func dropForwardChains(c *nftables.Conn) ([]*nftables.Chain, error) {
 	chains, err := c.ListChains()
 	if err != nil {
@@ -99,7 +101,9 @@ func dropForwardChains(c *nftables.Conn) ([]*nftables.Chain, error) {
 		if ch.Table == nil || ch.Table.Name == nftTable || ch.Hooknum == nil || ch.Policy == nil {
 			continue
 		}
-		if ch.Table.Family != nftables.TableFamilyIPv4 && ch.Table.Family != nftables.TableFamilyINet {
+		switch ch.Table.Family {
+		case nftables.TableFamilyIPv4, nftables.TableFamilyIPv6, nftables.TableFamilyINet:
+		default:
 			continue
 		}
 		if *ch.Hooknum != *nftables.ChainHookForward || *ch.Policy != nftables.ChainPolicyDrop {

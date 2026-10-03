@@ -112,3 +112,36 @@ func (s *Server) overlay6() netip.Prefix {
 func (s *Server) hubAddr6() netip.Addr {
 	return control.IPv6For(s.overlay6(), s.cfg.HubAddr().Addr())
 }
+
+// hubAddresses are the hub interface's addresses: the IPv4 one with the
+// overlay's prefix length and, with the IPv6 overlay, the IPv6 one with
+// the /64.
+func (s *Server) hubAddresses() []netip.Prefix {
+	out := []netip.Prefix{s.cfg.HubAddr()}
+	if a := s.hubAddr6(); a.IsValid() {
+		out = append(out, netip.PrefixFrom(a, s.overlay6().Bits()))
+	}
+	return out
+}
+
+// peerIPv6 is p's IPv6 overlay address when p is IPv6 capable, and zero
+// otherwise: the hub routes and filters IPv6 only for peers that have
+// configured the address (spec 015).
+func (s *Server) peerIPv6(p store.Peer) netip.Addr {
+	if !p.IPv6Capable || p.IPv6 == "" {
+		return netip.Addr{}
+	}
+	a, err := netip.ParseAddr(p.IPv6)
+	if err != nil || !s.overlay6().Contains(a) {
+		return netip.Addr{}
+	}
+	return a
+}
+
+// addrOrEmpty prints a, or nothing for the zero address.
+func addrOrEmpty(a netip.Addr) string {
+	if !a.IsValid() {
+		return ""
+	}
+	return a.String()
+}

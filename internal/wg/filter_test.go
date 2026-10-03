@@ -65,7 +65,7 @@ func TestUserspaceFilter(t *testing.T) {
 		{"echo request from invisible", mkPacket(protoICMP, peerB, self, icmpEchoRequest, 7, 0), false},
 		{"unsolicited echo reply", mkPacket(protoICMP, peerA, self, icmpEchoReply, 7, 0), false},
 		{"unreachable from visible", mkPacket(protoICMP, peerA, self, icmpUnreachable, 0, 0), true},
-		{"not ipv4", []byte{0x60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, false},
+		{"malformed ipv6", []byte{0x60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, false},
 		{"truncated", mkPacket(protoTCP, peerA, self, 1, 22, syn)[:25], false},
 	}
 	for _, tc := range cases {

@@ -404,18 +404,21 @@ func (s *Server) startHub(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if s.overlay6().IsValid() && !wg.IPv6Available() {
+		s.log.Warn("the kernel runs without IPv6; the hub has no IPv6 overlay address", "overlay_ipv6", s.overlay6().String())
+	}
 	hubCfg := wg.Config{
 		PrivateKey: s.hubKey,
 		ListenPort: port,
-		Addresses:  []netip.Prefix{s.cfg.HubAddr()},
+		Addresses:  s.hubAddresses(),
 	}
 	if err := s.device.Configure(ctx, hubCfg); err != nil {
 		_ = s.device.Close()
 		return err
 	}
 	s.log.Info("wireguard hub ready", "backend", s.device.Backend(), "interface", s.device.Name(),
-		"address", s.cfg.HubAddr().String(), "listen", s.cfg.Listen.WireGuard)
-	s.undoForwarding = enableForwarding(s.device.Name(), s.log)
+		"address", s.cfg.HubAddr().String(), "address6", addrOrEmpty(s.hubAddr6()), "listen", s.cfg.Listen.WireGuard)
+	s.undoForwarding = enableForwarding(s.device.Name(), s.hubAddr6().IsValid(), s.log)
 	return nil
 }
 
@@ -777,7 +780,8 @@ func (s *Server) pruneRelay(ctx context.Context) {
 }
 
 // configureHub applies the full hub configuration: every registered
-// peer is a WireGuard peer with its /32 and no endpoint (peers initiate).
+// peer is a WireGuard peer with its /32, plus its /128 when it is IPv6
+// capable (spec 015), and no endpoint (peers initiate).
 func (s *Server) configureHub(ctx context.Context) error {
 	peers, err := s.st.Peers().List(ctx)
 	if err != nil {
@@ -787,7 +791,7 @@ func (s *Server) configureHub(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	cfg := wg.Config{PrivateKey: s.hubKey, ListenPort: port, Addresses: []netip.Prefix{s.cfg.HubAddr()}}
+	cfg := wg.Config{PrivateKey: s.hubKey, ListenPort: port, Addresses: s.hubAddresses()}
 	for _, p := range peers {
 		key, err := wg.ParseKey(p.PublicKey)
 		if err != nil {
@@ -798,7 +802,11 @@ func (s *Server) configureHub(ctx context.Context) error {
 		if err != nil {
 			continue
 		}
-		cfg.Peers = append(cfg.Peers, wg.Peer{PublicKey: key, AllowedIPs: []netip.Prefix{netip.PrefixFrom(ip, 32)}})
+		allowed := []netip.Prefix{netip.PrefixFrom(ip, 32)}
+		if ip6 := s.peerIPv6(p); ip6.IsValid() {
+			allowed = append(allowed, netip.PrefixFrom(ip6, 128))
+		}
+		cfg.Peers = append(cfg.Peers, wg.Peer{PublicKey: key, AllowedIPs: allowed})
 	}
 	if err := s.device.Configure(ctx, cfg); err != nil {
 		return err
@@ -816,14 +824,17 @@ func (s *Server) installHubFilter(ctx context.Context, peers []store.Peer) {
 	if !ok {
 		return
 	}
-	set := wg.FilterSet{Interface: s.device.Name(), Hook: wg.HookForward, Local: s.cfg.HubAddr().Addr()}
+	set := wg.FilterSet{Interface: s.device.Name(), Hook: wg.HookForward, Local: s.cfg.HubAddr().Addr(), Local6: s.hubAddr6()}
 	compiled := s.policySvc.Compiled(ctx)
 	// The hub forwards only traffic that starts or ends at a static
 	// peer: agent peers reach each other directly. The forward hook
 	// therefore carries, for every destination, the policy's rules
 	// whose source is static, plus every rule toward a static peer.
+	// IPv6 rules apply only to destinations that are IPv6 capable,
+	// the only ones the hub routes a /128 to.
 	static := map[netip.Addr]bool{}
 	addrs := map[string]netip.Addr{}
+	addrs6 := map[string]netip.Addr{}
 	for _, p := range peers {
 		ip, err := netip.ParseAddr(p.IPv4)
 		if err != nil {
@@ -831,8 +842,16 @@ func (s *Server) installHubFilter(ctx context.Context, peers []store.Peer) {
 		}
 		addrs[p.ID] = ip
 		set.Visible = append(set.Visible, ip)
+		ip6 := s.peerIPv6(p)
+		if ip6.IsValid() {
+			addrs6[p.ID] = ip6
+			set.Visible = append(set.Visible, ip6)
+		}
 		if p.Mode == store.ModeStatic {
 			static[ip] = true
+			if ip6.IsValid() {
+				static[ip6] = true
+			}
 		}
 	}
 	for _, p := range peers {
@@ -844,7 +863,13 @@ func (s *Server) installHubFilter(ctx context.Context, peers []store.Peer) {
 			if p.Mode != store.ModeStatic && !static[r.Src] {
 				continue
 			}
-			set.Rules = append(set.Rules, wg.FilterRule{Src: netip.PrefixFrom(r.Src, 32), Dst: ip, Proto: r.Proto, Lo: r.Lo, Hi: r.Hi})
+			dst := ip
+			if r.Src.Is6() {
+				if dst, ok = addrs6[p.ID]; !ok {
+					continue
+				}
+			}
+			set.Rules = append(set.Rules, wg.FilterRule{Src: netip.PrefixFrom(r.Src, r.Src.BitLen()), Dst: dst, Proto: r.Proto, Lo: r.Lo, Hi: r.Hi})
 		}
 	}
 	if err := fd.SetFilter(ctx, set); err != nil {
