@@ -6,7 +6,7 @@
 |---|---|---|
 | `make test` | Unit tests with the race detector, fake WireGuard device, in-process gRPC/TLS | Every OS, CI matrix |
 | `make lint` | gofmt, go vet, golangci-lint | Linux, CI |
-| `make integration` | Network-namespace tests in `tests/`: server boot, two-client enrollment, encrypted ping, NAT traversal (restricted/restricted, full-cone/symmetric, symmetric/symmetric, same LAN; needs `nft`), relay over symmetric NATs, relay-to-direct upgrade (needs `conntrack`), relay throughput (needs `iperf3`), policy enforcement end to end (needs `nc`), a phone joining via `wg-quick` through the hub and the policy it is subject to (needs `wg-quick`, `nc`), the nftables ruleset listing (`internal/wg`, needs `nft`), server and client installed as systemd services with the real binary (skips unless systemd is PID 1 and no thawr service exists), `<name>.thawr` resolution through each client's resolver and through the hub from the phone (needs `wg-quick`; clients run with `--dns serve` so the host's resolver files are never touched), a rotated key held on the other client until `client trust` and the rotation in `admin audit`, the network lock end to end (`lock init` on one client, a third client held as `unsigned` on both until `lock sign`, an unsigned rotation held and a signed one applied without `trust`, `admin lock`, the SIGNED column, `lock.set` and `peer.sign` in the audit log, `lock disable`) | Linux, root, iproute2, nftables |
+| `make integration` | Network-namespace tests in `tests/`: server boot, two-client enrollment, encrypted ping, NAT traversal (restricted/restricted, full-cone/symmetric, symmetric/symmetric, same LAN; needs `nft`), relay over symmetric NATs, relay-to-direct upgrade (needs `conntrack`), relay throughput (needs `iperf3`), policy enforcement end to end (needs `nc`), a phone joining via `wg-quick` through the hub and the policy it is subject to (needs `wg-quick`, `nc`), the nftables ruleset listing (`internal/wg`, needs `nft`), server and client installed as systemd services with the real binary (skips unless systemd is PID 1 and no thawr service exists), `<name>.thawr` resolution through each client's resolver and through the hub from the phone (needs `wg-quick`; clients run with `--dns serve` so the host's resolver files are never touched), a rotated key held on the other client until `client trust` and the rotation in `admin audit`, the network lock end to end (`lock init` on one client, a third client held as `unsigned` on both until `lock sign`, an unsigned rotation held and a signed one applied without `trust`, `admin lock`, the SIGNED column, `lock.set` and `peer.sign` in the audit log, `lock disable`) | Linux, root, iproute2, nftables; CI job `integration` |
 | `make release-verify` | Builds two targets twice and compares the archives; CI runs it on every push and before every release | Linux |
 
 The integration tests use the real binary and the WireGuard adapter that
@@ -16,6 +16,10 @@ The integration tests use the real binary and the WireGuard adapter that
 ```
 sudo make integration
 ```
+
+CI runs them with the nftables tests of `internal/wg` in the
+`integration` job on GitHub's Ubuntu runner, which has the WireGuard
+module, IPv6 and systemd; the job's log lists any test that skipped.
 
 ## Manual checklist for the WireGuard adapters
 
