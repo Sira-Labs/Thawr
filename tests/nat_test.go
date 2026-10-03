@@ -125,7 +125,14 @@ func applyNAT(t *testing.T, nat *netns, kind natKind, wanIface, lanClient string
 	if kind == natSymmetric {
 		masq = "masquerade fully-random"
 	}
-	rules := fmt.Sprintf(`table ip nat {
+	// Re-applying replaces the tables: nft -f appends rules to an
+	// existing chain, and the old masquerade would keep matching first.
+	rules := `table ip nat
+delete table ip nat
+table ip filter
+delete table ip filter
+`
+	rules += fmt.Sprintf(`table ip nat {
   chain postrouting { type nat hook postrouting priority srcnat; oifname %q %s; }
 `, wanIface, masq)
 	if kind == natFullCone {
@@ -133,6 +140,16 @@ func applyNAT(t *testing.T, nat *netns, kind natKind, wanIface, lanClient string
 `, wanIface, lanClient)
 	}
 	rules += "}\n"
+	// Like a real router, the NAT drops unsolicited packets to itself on
+	// its WAN side. Without this, a hole-punching packet that arrives a
+	// moment before the local client's own leaves a confirmed conntrack
+	// entry behind, the client's packet clashes with it, and masquerade
+	// moves it to another port: the punch fails for an artefact of the
+	// simulation.
+	rules += fmt.Sprintf(`table ip filter {
+  chain input { type filter hook input priority filter; policy accept; iifname %q ct state new drop; }
+}
+`, wanIface)
 	cmd := nat.cmd(context.Background(), "nft", "-f", "-")
 	cmd.Stdin = strings.NewReader(rules)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -277,7 +294,11 @@ func natMesh(t *testing.T, kinds []natKind, sameLAN bool) (status func(int) clie
 	return status, pingPath, sites
 }
 
-// TestNATTraversal covers the spec 004 acceptance topologies.
+// TestNATTraversal covers the spec 004 acceptance topologies, with
+// spec 005's relay where no direct path exists: `client ping` returns
+// with the first usable path, which may be the relay while the other
+// side is still punching back, so the test waits for the state the
+// topology must settle on, within 10 s of the ping.
 func TestNATTraversal(t *testing.T) {
 	requireNAT(t)
 	cases := []struct {
@@ -289,43 +310,53 @@ func TestNATTraversal(t *testing.T) {
 	}{
 		{"restricted cone both sides", []natKind{natRestricted, natRestricted}, false, "direct", func(s []natSite) string { return s[1].wanIP + ":" }},
 		{"full cone and symmetric", []natKind{natFullCone, natSymmetric}, false, "direct", func(s []natSite) string { return s[1].wanIP + ":" }},
-		{"symmetric both sides", []natKind{natSymmetric, natSymmetric}, false, "unreachable", nil},
+		{"symmetric both sides", []natKind{natSymmetric, natSymmetric}, false, "relay", nil},
 		{"same LAN", []natKind{natRestricted, natRestricted}, true, "direct", func(s []natSite) string { return s[1].lanIP + ":" }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			status, pingPath, sites := natMesh(t, tc.kinds, tc.sameLAN)
 			start := time.Now()
-			state, endpoint, err := pingPath(0)
-			took := time.Since(start)
-			if tc.wantState == "direct" && err != nil {
+			if state, _, err := pingPath(0); err != nil {
 				t.Fatalf("client ping: %v (state %s)", err, state)
 			}
-			if state != tc.wantState {
-				t.Fatalf("path = %s via %s, want %s", state, endpoint, tc.wantState)
+			var st clientStatus
+			for {
+				st = status(0)
+				if len(st.Peers) == 1 && st.Peers[0].Path == tc.wantState {
+					break
+				}
+				if time.Since(start) > 10*time.Second {
+					t.Fatalf("path = %+v after %s, want %s", st.Peers, time.Since(start).Round(time.Second), tc.wantState)
+				}
+				time.Sleep(250 * time.Millisecond)
 			}
-			if took > 10*time.Second {
-				t.Errorf("path settled after %s, want <= 10 s", took)
-			}
+			endpoint := st.Peers[0].PathEndpoint
 			if tc.wantAddr != nil && !strings.HasPrefix(endpoint, tc.wantAddr(sites)) {
 				t.Errorf("path endpoint %s, want prefix %s", endpoint, tc.wantAddr(sites))
 			}
-			st := status(0)
-			if tc.wantState == "unreachable" {
+			if tc.wantState == "relay" {
 				// No probe storm: at most one probe per 2 s window.
+				took := time.Since(start)
 				if st.Peers[0].Probes > int(took/(2*time.Second))+1 {
 					t.Errorf("%d probes in %s", st.Peers[0].Probes, took)
 				}
 				if st.NAT.Type != "symmetric" {
 					t.Errorf("client did not detect its symmetric NAT: %+v", st)
 				}
-				return
 			}
 			peerIP := st.Peers[0].IPv4
-			if out, err := sites[0].client.cmd(context.Background(), "ping", "-c", "3", "-W", "2", peerIP).CombinedOutput(); err != nil {
-				t.Fatalf("ping %s over the direct path: %v\n%s", peerIP, err, out)
+			// Over the relay, client-2 answers once it has joined it.
+			deadline := time.Now().Add(20 * time.Second)
+			for sites[0].client.cmd(context.Background(), "ping", "-c", "1", "-W", "1", peerIP).Run() != nil {
+				if time.Now().After(deadline) {
+					t.Fatalf("no echo from %s over the %s path within 20 s", peerIP, tc.wantState)
+				}
 			}
-			if other := status(1); len(other.Peers) != 1 || other.Peers[0].Path != "direct" || other.Peers[0].RxBytes == 0 {
+			if out, err := sites[0].client.cmd(context.Background(), "ping", "-c", "3", "-W", "2", peerIP).CombinedOutput(); err != nil {
+				t.Fatalf("ping %s over the %s path: %v\n%s", peerIP, tc.wantState, err, out)
+			}
+			if other := status(1); len(other.Peers) != 1 || other.Peers[0].Path != tc.wantState || other.Peers[0].RxBytes == 0 {
 				t.Errorf("client-2 side: %+v", other)
 			}
 		})

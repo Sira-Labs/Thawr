@@ -78,8 +78,13 @@ func TestRelayToDirectUpgrade(t *testing.T) {
 	if out, err := sites[0].client.cmd(context.Background(), "ping", "-c", "3", "-W", "2", peerIP).CombinedOutput(); err != nil {
 		t.Fatalf("ping after upgrade: %v\n%s", err, out)
 	}
-	if st := status(0); st.Relay.Peers != 0 {
-		t.Errorf("relay proxy still held after the upgrade: %+v", st.Relay)
+	// The proxy closes after the client's 10 s release delay.
+	deadline = time.Now().Add(15 * time.Second)
+	for status(0).Relay.Peers != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("relay proxy still held after the upgrade: %+v", status(0).Relay)
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
 }
 
