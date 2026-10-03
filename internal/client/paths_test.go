@@ -422,6 +422,58 @@ func TestPathTickKeepsSessionThatArrived(t *testing.T) {
 	}
 }
 
+// TestPathTickHoldsProbeWindowOnTraffic: a probe window runs out just as
+// the peer's initiation arrives (bytes, no handshake yet). The tick
+// cancels the switch to the next candidate and gives the current one a
+// fresh window, so the next tick on the same stats does not re-add the
+// peer either; only a window without a handshake moves on.
+func TestPathTickHoldsProbeWindowOnTraffic(t *testing.T) {
+	key, err := wg.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer := key.PublicKey()
+	t0 := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
+	now := t0
+	m := path.New(path.Options{})
+	m.SetCandidates([]netip.AddrPort{candLAN1, candRefl})
+	m.Step(path.Input{Now: t0})
+	if out := m.Step(path.Input{Now: t0, Intent: true}); out.Action != path.ActProbe {
+		t.Fatalf("setup: %+v", out)
+	}
+	s, err := newSink(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.close)
+	pp := &peerPath{id: "p1", name: "gw", key: peer, machine: m, sink: s, state: path.Probing, endpoint: candLAN1}
+	quiet := wg.PeerStats{PublicKey: peer, Endpoint: candLAN1, TxBytes: 148}
+	initiated := quiet
+	initiated.RxBytes = 148
+	dev := &statsSeq{Fake: wgtest.New("thawr0"), reads: [][]wg.PeerStats{{quiet}, {initiated}}}
+	removed := 0
+	d := &Daemon{
+		dev: removeCounter{dev, &removed}, paths: map[string]*peerPath{"p1": pp}, pathWake: make(chan struct{}, 1),
+		relay: relay.NewClient(relay.ClientOptions{}), log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		opts: DaemonOptions{Now: func() time.Time { return now }, Trigger: func(context.Context, string, netip.Addr, netip.Addr) error { return nil }},
+	}
+	now = t0.Add(2100 * time.Millisecond)
+	d.pathTick(context.Background())
+	if removed != 0 || pp.machine.Endpoint() != candLAN1 {
+		t.Fatalf("switched to the next candidate as the initiation arrived: removed=%d endpoint=%s", removed, pp.machine.Endpoint())
+	}
+	now = now.Add(250 * time.Millisecond)
+	d.pathTick(context.Background())
+	if removed != 0 {
+		t.Fatal("re-added on the next tick with unchanged stats")
+	}
+	now = now.Add(2 * time.Second)
+	d.pathTick(context.Background())
+	if removed != 1 || pp.machine.Endpoint() != candRefl {
+		t.Fatalf("held window never ended: removed=%d endpoint=%s", removed, pp.machine.Endpoint())
+	}
+}
+
 // removeCounter counts RemovePeer calls (a re-add) on a device.
 type removeCounter struct {
 	wg.Device

@@ -228,11 +228,12 @@ func (d *Daemon) pathTick(ctx context.Context) {
 			if s, ok := fresh[pp.key]; ok && reachedSince(s, in) {
 				// The peer got through since stats were read: the re-add
 				// would throw that session away. Take the step back, so
-				// the machine does not sit in a round it never started;
-				// the next tick decides again on stats that show the
-				// handshake or the traffic (spec 004).
+				// the machine does not sit in a round it never started; a
+				// probe window that ran out starts over, so the handshake
+				// has time to complete (spec 004).
 				d.log.Debug("peer reached the device before the re-add; keeping its session", "peer", pp.name)
 				pp.machine = before
+				pp.machine.Hold(now)
 				pp.ping = pp.ping || in.Intent
 				out = path.Output{State: before.State(), Endpoint: before.Endpoint(), Action: path.ActNone}
 			}
