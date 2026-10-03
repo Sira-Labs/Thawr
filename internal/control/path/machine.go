@@ -131,6 +131,23 @@ func (m *Machine) SetStagger(on bool) {
 	}
 }
 
+// Clone returns a copy of the machine, for a caller that may have to
+// take back a step whose action it could not perform.
+func (m *Machine) Clone() *Machine {
+	c := *m
+	return &c
+}
+
+// Hold restarts the current probe window at now, without a new probe:
+// the peer was seen sending while its candidate's window ran out, so the
+// handshake gets a full window to complete before the next re-add. A
+// no-op outside Probing.
+func (m *Machine) Hold(now time.Time) {
+	if m.state == Probing {
+		m.windowStart = now
+	}
+}
+
 // State reports the current state.
 func (m *Machine) State() State { return m.state }
 

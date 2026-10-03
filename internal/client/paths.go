@@ -218,6 +218,7 @@ func (d *Daemon) pathTick(ctx context.Context) {
 				in.Endpoint = s.Endpoint
 			}
 		}
+		before := pp.machine.Clone()
 		out := pp.machine.Step(in)
 		pp.steps++
 		if out.Action == path.ActProbe || out.Action == path.ActRelay {
@@ -225,11 +226,16 @@ func (d *Daemon) pathTick(ctx context.Context) {
 				fresh = d.statsByKey(ctx, dev)
 			}
 			if s, ok := fresh[pp.key]; ok && reachedSince(s, in) {
-				// The peer's own probe got through since stats were read:
-				// the re-add would throw that session away. Keep it; the
-				// next tick sees the handshake and takes the path (spec 004).
-				d.log.Debug("handshake arrived before the re-add; keeping it", "peer", pp.name)
-				out.Action = path.ActNone
+				// The peer got through since stats were read: the re-add
+				// would throw that session away. Take the step back, so
+				// the machine does not sit in a round it never started; a
+				// probe window that ran out starts over, so the handshake
+				// has time to complete (spec 004).
+				d.log.Debug("peer reached the device before the re-add; keeping its session", "peer", pp.name)
+				pp.machine = before
+				pp.machine.Hold(now)
+				pp.ping = pp.ping || in.Intent
+				out = path.Output{State: before.State(), Endpoint: before.Endpoint(), Action: path.ActNone}
 			}
 		}
 		switch out.Action {
