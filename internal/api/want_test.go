@@ -46,6 +46,9 @@ func TestReportPathWantsPeer(t *testing.T) {
 			break
 		}
 	}
+	if nm.GetPeers()[0].GetWantSeq() == 0 {
+		t.Error("the request reached b without its number")
+	}
 	// A report about an unknown peer id records nothing.
 	if _, err := env.client.ReportPath(authCtx(aSecret), &thawrv1.PathReport{Paths: []*thawrv1.PathState{{PeerId: "no-such-peer", State: "relay"}}}); err != nil {
 		t.Fatal(err)

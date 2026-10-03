@@ -70,6 +70,12 @@ type Input struct {
 	// Intent is true when traffic toward the peer was seen (a packet at
 	// its sink or an explicit ping).
 	Intent bool
+	// Reach is true when the peer just started probing toward this
+	// device (a new reach request from the server). It counts as intent,
+	// and it also starts a full round from the relay or from
+	// unreachable, and widens a single retry from the relay into one:
+	// hole punching needs both sides at once (specs 004, 005).
+	Reach bool
 	// Handshake, Endpoint, Rx and Tx come from the device's stats.
 	Handshake time.Time
 	Endpoint  netip.AddrPort
@@ -176,9 +182,13 @@ func (m *Machine) Step(in Input) Output {
 		m.started = true
 		out.Action = ActSink
 	}
-	if in.Intent {
+	if in.Intent || in.Reach {
 		m.wanted, m.freshIntent = true, true
 	}
+	// A reach joins the peer's round, but not more than one round per
+	// half RetryAfter: two relayed peers whose rounds end on the relay
+	// would otherwise keep starting each other's next one.
+	reach := in.Reach && (m.lastRound.IsZero() || in.Now.Sub(m.lastRound) >= m.opts.RetryAfter/2)
 	advanced := in.Handshake.After(m.handshake)
 	if advanced {
 		m.handshake = in.Handshake
@@ -190,7 +200,7 @@ func (m *Machine) Step(in Input) Output {
 		case advanced && in.Endpoint.IsValid():
 			// The peer reached us first; WireGuard learned its address.
 			m.state, m.endpoint = Direct, in.Endpoint
-		case m.wanted && (m.state == Idle || m.dirty || (m.freshIntent && in.Now.Sub(m.lastRound) >= m.opts.RetryAfter)):
+		case m.wanted && (m.state == Idle || m.dirty || reach || (m.freshIntent && in.Now.Sub(m.lastRound) >= m.opts.RetryAfter)):
 			out.Action = m.startRound(in.Now)
 		}
 	case Probing:
@@ -199,6 +209,10 @@ func (m *Machine) Step(in Input) Output {
 			m.state, m.endpoint = Direct, in.Endpoint
 		case advanced && !m.fromRelay:
 			m.state = Direct
+		case in.Reach && m.fromRelay:
+			// The peer started a round while this side retried one
+			// candidate: run the whole round alongside it.
+			out.Action = m.startRound(in.Now)
 		case m.dirty && in.Now.Sub(m.lastProbe) >= m.opts.ProbeWindow:
 			out.Action = m.startRound(in.Now)
 		case in.Now.Sub(m.windowStart) >= m.window && m.fromRelay:
@@ -222,6 +236,8 @@ func (m *Machine) Step(in Input) Output {
 			// The peer reached us directly (its own probe): take the path.
 			m.state, m.endpoint = Direct, in.Endpoint
 		case m.dirty && in.Now.Sub(m.lastProbe) >= m.opts.ProbeWindow:
+			out.Action = m.startRound(in.Now)
+		case reach && len(m.candidates) > 0:
 			out.Action = m.startRound(in.Now)
 		case len(m.candidates) > 0 && in.Now.Sub(m.lastRound) >= m.opts.RetryAfter:
 			out.Action = m.retryFromRelay(in.Now)

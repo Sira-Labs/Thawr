@@ -69,6 +69,9 @@ type NetPeer struct {
 	// Wanted marks a peer that is trying to reach the receiver, by
 	// probing or on the relay (specs 004, 005).
 	Wanted bool
+	// WantSeq numbers the latest request behind Wanted; a new number is
+	// a new request the receiver acts on once.
+	WantSeq uint64
 }
 
 // HubPeer is the server's own WireGuard interface as seen by a peer.
@@ -201,10 +204,11 @@ type Presence interface {
 	Online(peerID string) bool
 }
 
-// Wants tells whether peer from recently tried to reach peer to;
-// control.Hub implements it.
+// Wants tells whether peer from recently tried to reach peer to, as
+// the sequence number of the latest request (0 for none); control.Hub
+// implements it.
 type Wants interface {
-	Wanted(to, from string) bool
+	WantSeq(to, from string) uint64
 }
 
 // NetMapBuilder computes per-peer netmaps from the store and the
@@ -365,6 +369,10 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 		if ip6.IsValid() {
 			allowed = append(allowed, netip.PrefixFrom(ip6, 128))
 		}
+		var wantSeq uint64
+		if b.wants != nil {
+			wantSeq = b.wants.WantSeq(peerID, p.ID)
+		}
 		nm.Peers = append(nm.Peers, NetPeer{
 			ID:         p.ID,
 			Name:       p.Name,
@@ -379,7 +387,8 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 			AllowedIPs: append(allowed, viaRoutes[p.ID]...),
 			Signatures: sigs[p.ID+"\x00"+p.PublicKey],
 			ExitNode:   exitNodes[p.ID],
-			Wanted:     b.wants != nil && b.wants.Wanted(peerID, p.ID),
+			Wanted:     wantSeq != 0,
+			WantSeq:    wantSeq,
 		})
 	}
 	return nm, nil

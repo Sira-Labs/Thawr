@@ -288,6 +288,71 @@ func TestPathRelayUpgrade(t *testing.T) {
 		}
 	})
 
+	t.Run("a reach joins the peer's round from the relay, once per half RetryAfter", func(t *testing.T) {
+		m := New(Options{Relay: true})
+		m.SetCandidates([]netip.AddrPort{c1, c2})
+		m.Step(Input{Now: t0})
+		m.Step(Input{Now: t0, Intent: true})
+		m.Step(Input{Now: at(2 * time.Second)})
+		if out := m.Step(Input{Now: at(4 * time.Second)}); out.State != Relay {
+			t.Fatalf("relay: %+v", out)
+		}
+		// Traffic intent alone keeps the relay.
+		if out := m.Step(Input{Now: at(40 * time.Second), Intent: true}); out.Action != ActNone {
+			t.Fatalf("intent left the relay: %+v", out)
+		}
+		out := m.Step(Input{Now: at(41 * time.Second), Reach: true})
+		if out.Action != ActProbe || out.Endpoint != c1 || out.State != Probing {
+			t.Fatalf("reach did not start a full round: %+v", out)
+		}
+		m.Step(Input{Now: at(43 * time.Second)})
+		if out := m.Step(Input{Now: at(45 * time.Second)}); out.State != Relay {
+			t.Fatalf("round did not end on the relay: %+v", out)
+		}
+		// The peer's own round ends on the relay too and reaches back:
+		// no second round so soon.
+		if out := m.Step(Input{Now: at(46 * time.Second), Reach: true}); out.Action != ActNone || out.State != Relay {
+			t.Fatalf("reach inside half RetryAfter started a round: %+v", out)
+		}
+		if out := m.Step(Input{Now: at(72 * time.Second), Reach: true}); out.Action != ActProbe || out.Endpoint != c1 {
+			t.Fatalf("reach after half RetryAfter: %+v", out)
+		}
+	})
+
+	t.Run("a reach widens a single retry into a full round", func(t *testing.T) {
+		m := New(Options{Relay: true})
+		m.SetCandidates([]netip.AddrPort{c1, c2})
+		m.Step(Input{Now: t0})
+		m.Step(Input{Now: t0, Intent: true})
+		m.Step(Input{Now: at(2 * time.Second)})
+		m.Step(Input{Now: at(4 * time.Second)})
+		if out := m.Step(Input{Now: at(65 * time.Second)}); out.Action != ActProbe || out.Endpoint != c1 {
+			t.Fatalf("retry: %+v", out)
+		}
+		out := m.Step(Input{Now: at(65*time.Second + 300*time.Millisecond), Reach: true})
+		if out.Action != ActProbe || out.Endpoint != c1 {
+			t.Fatalf("reach during the retry: %+v", out)
+		}
+		// A full round moves on to the next candidate instead of back to
+		// the relay.
+		if out := m.Step(Input{Now: at(67*time.Second + 400*time.Millisecond)}); out.Action != ActProbe || out.Endpoint != c2 {
+			t.Fatalf("round after the widened retry: %+v", out)
+		}
+	})
+
+	t.Run("a reach re-probes an unreachable peer before RetryAfter", func(t *testing.T) {
+		m := New(Options{})
+		m.SetCandidates([]netip.AddrPort{c1})
+		m.Step(Input{Now: t0})
+		m.Step(Input{Now: t0, Intent: true})
+		if out := m.Step(Input{Now: at(2 * time.Second)}); out.State != Unreachable {
+			t.Fatalf("unreachable: %+v", out)
+		}
+		if out := m.Step(Input{Now: at(35 * time.Second), Reach: true}); out.Action != ActProbe || out.Endpoint != c1 {
+			t.Fatalf("reach: %+v", out)
+		}
+	})
+
 	t.Run("peer reaches us while relayed", func(t *testing.T) {
 		m := New(Options{Relay: true})
 		m.SetCandidates(nil)
