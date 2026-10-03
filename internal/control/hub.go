@@ -57,7 +57,10 @@ type Hub struct {
 	// -> request (specs 004, 005).
 	wants map[string]map[string]wantReq
 	// wantSeq numbers the wakes for reach requests, so a receiver can
-	// tell a new request from one it already acted on.
+	// tell a new request from one it already acted on. It starts at the
+	// hub's creation time in nanoseconds: a client keeps the last number
+	// it saw across reconnects, and a restarted server must not hand out
+	// that number again for a new request.
 	wantSeq uint64
 }
 
@@ -95,6 +98,7 @@ func NewHub(ctx context.Context, st *store.Store, now func() time.Time, log *slo
 		subs:     map[*subscriber]struct{}{},
 		presence: map[string]*presenceEntry{},
 		wants:    map[string]map[string]wantReq{},
+		wantSeq:  uint64(max(now().UnixNano(), 0)),
 	}, nil
 }
 

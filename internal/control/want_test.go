@@ -118,6 +118,28 @@ type fakeWants map[[2]string]uint64
 
 func (f fakeWants) WantSeq(to, from string) uint64 { return f[[2]string{to, from}] }
 
+// TestHubWantSeqAcrossRestarts: a client keeps the last request number
+// it saw across reconnects, so a restarted server must not number a new
+// request the way the old one did.
+func TestHubWantSeqAcrossRestarts(t *testing.T) {
+	st := openStore(t)
+	clk := newClock()
+	seqAfterRestart := func() uint64 {
+		t.Helper()
+		h := newHub(t, st, clk)
+		_, unsub := h.Subscribe("b")
+		defer unsub()
+		h.Connected("b")
+		h.Want("b", "a")
+		return h.WantSeq("b", "a")
+	}
+	first := seqAfterRestart()
+	clk.Advance(time.Second)
+	if second := seqAfterRestart(); second == first || second == 0 {
+		t.Errorf("request numbers across a restart: %d then %d, want distinct", first, second)
+	}
+}
+
 func TestNetMapWanted(t *testing.T) {
 	env := newEnrollEnv(t, "100.64.0.0/10")
 	ctx := context.Background()
