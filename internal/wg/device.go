@@ -97,9 +97,9 @@ type Device interface {
 
 // Routable is implemented by devices that install OS routes through
 // the interface for prefixes reached via peers (spec 013). The default
-// route 0.0.0.0/0 is the exit node: on Linux it goes into a policy
-// routing table keyed by the interface's fwmark, elsewhere it is
-// refused.
+// routes 0.0.0.0/0 and ::/0 are the exit node: on Linux each goes into
+// a policy routing table keyed by the interface's fwmark, elsewhere
+// they are refused.
 type Routable interface {
 	SetRoutes(ctx context.Context, prefixes []netip.Prefix) error
 }

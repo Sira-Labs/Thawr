@@ -49,28 +49,46 @@ const (
 )
 
 // FilterSet is the complete receiver-side filter: replies to accepted
-// flows pass, ICMP echo from Visible passes, Rules open ports,
-// everything else is dropped.
+// flows pass, ICMP and ICMPv6 echo from Visible passes, ICMPv6 errors
+// and neighbour discovery pass, Rules open ports, everything else is
+// dropped. Rules, forward rules and visible addresses may be of either
+// family; a rule matches packets of its source's family.
 type FilterSet struct {
 	// Interface is the WireGuard interface the filter binds to.
 	Interface string
 	Hook      FilterHook
-	// Local is this host's overlay address; on the forward hook packets
-	// for it are not filtered.
+	// Local and Local6 are this host's overlay addresses (Local6 is zero
+	// without the IPv6 overlay); on the forward hook packets for them
+	// are not filtered.
 	Local   netip.Addr
+	Local6  netip.Addr
 	Visible []netip.Addr
 	Rules   []FilterRule
 	// Forward opens the forwarding path for a router (spec 013): packets
 	// arriving over the interface for an address that is not Local pass
 	// only when a forward rule matches. Masquerade lists the destination
 	// prefixes whose forwarded packets get this host's address on the
-	// way out, for sources inside MasqueradeFrom (the overlay).
-	Forward        []ForwardRule
-	Masquerade     []netip.Prefix
-	MasqueradeFrom netip.Prefix
+	// way out, for sources inside MasqueradeFrom (the overlay), or
+	// MasqueradeFrom6 for an IPv6 destination (NAT66, spec 015); an
+	// IPv6 destination without MasqueradeFrom6 is not masqueraded.
+	Forward         []ForwardRule
+	Masquerade      []netip.Prefix
+	MasqueradeFrom  netip.Prefix
+	MasqueradeFrom6 netip.Prefix
 	// routerOnly skips the input chain (the userspace filter handles
 	// it) and installs only the router chains.
 	routerOnly bool
+}
+
+// locals lists the valid local addresses.
+func (s FilterSet) locals() []netip.Addr {
+	var out []netip.Addr
+	for _, a := range []netip.Addr{s.Local, s.Local6} {
+		if a.IsValid() {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // FilterStats are the counters shown in status.
@@ -97,14 +115,16 @@ const (
 
 // IP protocol numbers.
 const (
-	protoICMP = 1
-	protoTCP  = 6
-	protoUDP  = 17
+	protoICMP   = 1
+	protoTCP    = 6
+	protoUDP    = 17
+	protoICMPv6 = 58
 )
 
 // packetFilter is the userspace filter between wireguard-go and the
 // TUN: outbound packets record flows, inbound packets must match a
-// flow, an ICMP diagnostic from a visible peer or a rule.
+// flow, an ICMP diagnostic from a visible peer, an ICMPv6 error or
+// neighbour discovery message, or a rule.
 type packetFilter struct {
 	now func() time.Time
 
@@ -120,6 +140,7 @@ type packetFilter struct {
 type compiledFilter struct {
 	hook    FilterHook
 	local   netip.Addr
+	local6  netip.Addr
 	visible map[netip.Addr]bool
 	rules   []FilterRule
 	forward []ForwardRule
@@ -140,7 +161,7 @@ func newPacketFilter(now func() time.Time) *packetFilter {
 
 // Set installs a filter set atomically for subsequent packets.
 func (f *packetFilter) Set(set FilterSet) {
-	c := &compiledFilter{hook: set.Hook, local: set.Local, visible: make(map[netip.Addr]bool, len(set.Visible)), rules: append([]FilterRule(nil), set.Rules...), forward: append([]ForwardRule(nil), set.Forward...)}
+	c := &compiledFilter{hook: set.Hook, local: set.Local, local6: set.Local6, visible: make(map[netip.Addr]bool, len(set.Visible)), rules: append([]FilterRule(nil), set.Rules...), forward: append([]ForwardRule(nil), set.Forward...)}
 	for _, a := range set.Visible {
 		c.visible[a] = true
 	}
@@ -159,13 +180,33 @@ func (f *packetFilter) Stats() FilterStats {
 	return st
 }
 
-// packet is the decoded part of an IPv4 packet the filter looks at.
+// packet is the decoded part of an IP packet the filter looks at.
 type packet struct {
 	proto    uint8
 	src, dst netip.Addr
-	sport    uint16 // ICMP: type
-	dport    uint16 // ICMP: identifier
+	sport    uint16 // ICMP, ICMPv6: type
+	dport    uint16 // ICMP, ICMPv6: echo identifier
 	tcpFlags uint8
+}
+
+// isICMP reports whether p is ICMP or ICMPv6, which have no ports.
+func (p packet) isICMP() bool {
+	return p.proto == protoICMP || p.proto == protoICMPv6
+}
+
+// parsePacket decodes an IPv4 or IPv6 packet; ok is false for anything
+// malformed.
+func parsePacket(b []byte) (packet, bool) {
+	if len(b) == 0 {
+		return packet{}, false
+	}
+	switch b[0] >> 4 {
+	case 4:
+		return parseIPv4(b)
+	case 6:
+		return parseIPv6(b)
+	}
+	return packet{}, false
 }
 
 // parseIPv4 decodes the headers; ok is false for anything that is not
@@ -183,7 +224,61 @@ func parseIPv4(b []byte) (packet, bool) {
 	if binary.BigEndian.Uint16(b[6:8])&0x1fff != 0 {
 		return p, true
 	}
-	t := b[ihl:]
+	return parseTransport(p, b[ihl:])
+}
+
+// IPv6 extension headers the filter walks past to the transport header.
+const (
+	ext6HopByHop = 0
+	ext6Routing  = 43
+	ext6Fragment = 44
+	ext6DestOpts = 60
+	// ext6Max bounds the walk; a real packet carries a handful at most.
+	ext6Max = 8
+)
+
+// parseIPv6 decodes the fixed header, walks the hop-by-hop, routing,
+// destination options and fragment headers, and decodes the transport
+// header behind them. A fragment other than the first carries no
+// transport header and is returned without ports, like an IPv4 one.
+func parseIPv6(b []byte) (packet, bool) {
+	if len(b) < 40 || b[0]>>4 != 6 {
+		return packet{}, false
+	}
+	p := packet{src: netip.AddrFrom16([16]byte(b[8:24])), dst: netip.AddrFrom16([16]byte(b[24:40]))}
+	next, off := b[6], 40
+	for range ext6Max {
+		switch next {
+		case ext6HopByHop, ext6Routing, ext6DestOpts:
+			if len(b) < off+2 {
+				return packet{}, false
+			}
+			next, off = b[off], off+(int(b[off+1])+1)*8
+			continue
+		case ext6Fragment:
+			if len(b) < off+8 {
+				return packet{}, false
+			}
+			fragOff := binary.BigEndian.Uint16(b[off+2:off+4]) >> 3
+			next, off = b[off], off+8
+			if fragOff != 0 {
+				p.proto = next
+				return p, true
+			}
+			continue
+		}
+		if len(b) < off {
+			return packet{}, false
+		}
+		p.proto = next
+		return parseTransport(p, b[off:])
+	}
+	return packet{}, false
+}
+
+// parseTransport fills p's ports, TCP flags or ICMP type and echo
+// identifier from the transport header t.
+func parseTransport(p packet, t []byte) (packet, bool) {
 	switch p.proto {
 	case protoTCP:
 		if len(t) < 14 {
@@ -195,7 +290,7 @@ func parseIPv4(b []byte) (packet, bool) {
 			return packet{}, false
 		}
 		p.sport, p.dport = binary.BigEndian.Uint16(t[0:2]), binary.BigEndian.Uint16(t[2:4])
-	case protoICMP:
+	case protoICMP, protoICMPv6:
 		if len(t) < 8 {
 			return packet{}, false
 		}
@@ -212,11 +307,44 @@ const (
 	icmpEchoRequest = 8
 	icmpTimeExceed  = 11
 	icmpParamProb   = 12
+
+	// ICMPv6: errors 1 to 4 (unreachable, packet too big, time
+	// exceeded, parameter problem), echo, and neighbour discovery 133
+	// to 137 (router and neighbour solicitation and advertisement,
+	// redirect).
+	icmp6Unreachable   = 1
+	icmp6ParamProb     = 4
+	icmp6EchoRequest   = 128
+	icmp6EchoReply     = 129
+	icmp6RouterSolicit = 133
+	icmp6Redirect      = 137
 )
+
+// echoRequest and echoReply are the echo types of p's ICMP family.
+func (p packet) echoRequest() uint16 {
+	if p.proto == protoICMPv6 {
+		return icmp6EchoRequest
+	}
+	return icmpEchoRequest
+}
+
+func (p packet) echoReply() uint16 {
+	if p.proto == protoICMPv6 {
+		return icmp6EchoReply
+	}
+	return icmpEchoReply
+}
+
+// icmp6Always reports whether p is an ICMPv6 error or neighbour
+// discovery message, which pass without a rule (spec 015).
+func (p packet) icmp6Always() bool {
+	return p.proto == protoICMPv6 && (p.sport >= icmp6Unreachable && p.sport <= icmp6ParamProb ||
+		p.sport >= icmp6RouterSolicit && p.sport <= icmp6Redirect)
+}
 
 // Outbound records the flow of a packet this host sends.
 func (f *packetFilter) Outbound(b []byte) {
-	p, ok := parseIPv4(b)
+	p, ok := parsePacket(b)
 	if !ok {
 		return
 	}
@@ -232,8 +360,8 @@ func (f *packetFilter) Outbound(b []byte) {
 	case protoUDP:
 		ttl = flowUDP
 		key.localPort, key.remotePort = p.sport, p.dport
-	case protoICMP:
-		if p.sport != icmpEchoRequest {
+	case protoICMP, protoICMPv6:
+		if p.sport != p.echoRequest() {
 			return
 		}
 		ttl = flowICMP
@@ -257,7 +385,7 @@ func (f *packetFilter) Inbound(b []byte) bool {
 }
 
 func (f *packetFilter) allow(b []byte) bool {
-	p, ok := parseIPv4(b)
+	p, ok := parsePacket(b)
 	if !ok {
 		return false
 	}
@@ -265,20 +393,24 @@ func (f *packetFilter) allow(b []byte) bool {
 	if c == nil {
 		return f.reply(p)
 	}
-	if c.hook == HookForward && p.dst == c.local {
+	if c.hook == HookForward && c.isLocal(p.dst) {
 		return true
 	}
 	if f.reply(p) {
 		return true
 	}
-	if c.hook == HookInput && c.local.IsValid() && p.dst != c.local {
+	if c.hook == HookInput && c.local.IsValid() && !c.isLocal(p.dst) {
 		// Not for this host: the kernel forwards it, so only a forward
 		// rule may let it in (spec 013).
 		return c.forwardAllows(p)
 	}
-	if p.proto == protoICMP && c.visible[p.src] {
-		switch p.sport {
-		case icmpEchoRequest, icmpUnreachable, icmpTimeExceed, icmpParamProb:
+	if p.icmp6Always() {
+		return true
+	}
+	if c.visible[p.src] {
+		switch {
+		case p.proto == protoICMP && (p.sport == icmpEchoRequest || p.sport == icmpUnreachable || p.sport == icmpTimeExceed || p.sport == icmpParamProb),
+			p.proto == protoICMPv6 && p.sport == icmp6EchoRequest:
 			return true
 		}
 	}
@@ -290,21 +422,16 @@ func (f *packetFilter) allow(b []byte) bool {
 		if r.Dst.IsValid() && r.Dst != p.dst {
 			continue
 		}
-		switch {
-		case p.proto == protoICMP:
-			// ICMP has no ports: an icmp rule or an any-proto rule that
-			// opens every port lets it through.
-			if r.Proto == ProtoICMP || (r.Proto == ProtoAny && r.Lo <= 1 && r.Hi == 65535) {
-				return true
-			}
-		case p.proto == protoTCP && (r.Proto == ProtoTCP || r.Proto == ProtoAny),
-			p.proto == protoUDP && (r.Proto == ProtoUDP || r.Proto == ProtoAny):
-			if p.dport >= r.Lo && p.dport <= r.Hi {
-				return true
-			}
+		if portsAllow(p, r.Proto, r.Lo, r.Hi) {
+			return true
 		}
 	}
 	return false
+}
+
+// isLocal reports whether a is one of this host's overlay addresses.
+func (c *compiledFilter) isLocal(a netip.Addr) bool {
+	return a == c.local || (c.local6.IsValid() && a == c.local6)
 }
 
 // forwardAllows reports whether a forward rule lets p through this
@@ -322,10 +449,12 @@ func (c *compiledFilter) forwardAllows(p packet) bool {
 	return false
 }
 
-// portsAllow applies a rule's protocol and port range to p.
+// portsAllow applies a rule's protocol and port range to p. ICMP has
+// no ports: an icmp rule, or an any-proto rule that opens every port,
+// lets ICMP and ICMPv6 through.
 func portsAllow(p packet, proto string, lo, hi uint16) bool {
 	switch {
-	case p.proto == protoICMP:
+	case p.isICMP():
 		return proto == ProtoICMP || (proto == ProtoAny && lo <= 1 && hi == 65535)
 	case p.proto == protoTCP && (proto == ProtoTCP || proto == ProtoAny),
 		p.proto == protoUDP && (proto == ProtoUDP || proto == ProtoAny):
@@ -349,8 +478,8 @@ func (f *packetFilter) reply(p packet) bool {
 	case protoUDP:
 		key.localPort, key.remotePort = p.dport, p.sport
 		ttl = flowUDP
-	case protoICMP:
-		if p.sport != icmpEchoReply {
+	case protoICMP, protoICMPv6:
+		if p.sport != p.echoReply() {
 			return false
 		}
 		key.localPort = p.dport
