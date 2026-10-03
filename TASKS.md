@@ -201,6 +201,16 @@ batches).
         direct; the proxy was released only on a direct relay -> X
         step, so upgraded peers kept it (and the relay connection)
         forever. It is now released on any settled non-relay state.
+      - Reach-back acted only on the wanted flag's rising edge, but the
+        server never pushes a request's expiry (keepalive netmaps are not
+        applied), so a peer that had been wanted once ignored every
+        later request; and a relayed peer took a request as plain
+        intent, which the relay state ignores. After a network change
+        on one side the two rounds ran a minute apart and a
+        restricted-cone pair stayed relayed (CI, kernel WireGuard). The
+        hub now numbers wakes (`want_seq`, additive proto field 17), a
+        new number is a reach that starts a full round from the relay
+        or unreachable and widens a relay retry, at most one per 30 s.
       - `relay.max_bytes_per_second` is a per-session token bucket with a
         one-second burst; queue overflow and violations are counted and
         all counters sit under `relay` in `/api/v1/status`.

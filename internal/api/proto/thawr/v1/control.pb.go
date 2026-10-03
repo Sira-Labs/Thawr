@@ -652,7 +652,12 @@ type NetPeer struct {
 	// probing its candidates or on the relay: the receiver treats it as
 	// traffic intent and probes back, so both sides punch at once and
 	// meet on the relay when nothing direct works (specs 004, 005).
-	Wanted        bool `protobuf:"varint,16,opt,name=wanted,proto3" json:"wanted,omitempty"`
+	Wanted bool `protobuf:"varint,16,opt,name=wanted,proto3" json:"wanted,omitempty"`
+	// want_seq numbers the latest request behind wanted. A changed number
+	// is a new request: the peer just started probing toward the
+	// receiver, which joins with a probe round of its own, also from the
+	// relay. A server that does not send it leaves it 0.
+	WantSeq       uint64 `protobuf:"varint,17,opt,name=want_seq,json=wantSeq,proto3" json:"want_seq,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -797,6 +802,13 @@ func (x *NetPeer) GetWanted() bool {
 		return x.Wanted
 	}
 	return false
+}
+
+func (x *NetPeer) GetWantSeq() uint64 {
+	if x != nil {
+		return x.WantSeq
+	}
+	return 0
 }
 
 // Endpoint is one ip:port candidate.
@@ -2102,7 +2114,7 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"advertised\x12\x12\n" +
 	"\x04ipv6\x18\t \x01(\tR\x04ipv6\x12!\n" +
 	"\foverlay_ipv6\x18\n" +
-	" \x01(\tR\voverlayIpv6\"\xcc\x03\n" +
+	" \x01(\tR\voverlayIpv6\"\xe7\x03\n" +
 	"\aNetPeer\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -2124,7 +2136,8 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"signatures\x12\x1b\n" +
 	"\texit_node\x18\x0e \x01(\bR\bexitNode\x12\x12\n" +
 	"\x04ipv6\x18\x0f \x01(\tR\x04ipv6\x12\x16\n" +
-	"\x06wanted\x18\x10 \x01(\bR\x06wanted\"J\n" +
+	"\x06wanted\x18\x10 \x01(\bR\x06wanted\x12\x19\n" +
+	"\bwant_seq\x18\x11 \x01(\x04R\awantSeq\"J\n" +
 	"\bEndpoint\x12\x12\n" +
 	"\x04addr\x18\x01 \x01(\tR\x04addr\x12*\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x16.thawr.v1.EndpointKindR\x04kind\"\x9e\x01\n" +

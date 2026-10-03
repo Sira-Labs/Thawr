@@ -56,6 +56,9 @@ type Hub struct {
 	// wants holds reach requests: target peer id -> requesting peer id
 	// -> request (specs 004, 005).
 	wants map[string]map[string]wantReq
+	// wantSeq numbers the wakes for reach requests, so a receiver can
+	// tell a new request from one it already acted on.
+	wantSeq uint64
 }
 
 // Reach requests ("from is trying to reach to"): a request stays in
@@ -210,6 +213,7 @@ func (h *Hub) Forget(peerID string) {
 // when it last woke the target (for wantRepeat).
 type wantReq struct {
 	at, woke time.Time
+	seq      uint64 // of the latest wake
 }
 
 // Want records that peer from is trying to reach peer to (it probes
@@ -247,7 +251,8 @@ func (h *Hub) Want(to, from string) {
 	wake := !seen || now.Sub(r.woke) >= wantRepeat
 	r.at = now
 	if wake {
-		r.woke = now
+		h.wantSeq++
+		r.woke, r.seq = now, h.wantSeq
 	}
 	reqs[from] = r
 	if wake {
@@ -269,21 +274,27 @@ func (h *Hub) Want(to, from string) {
 
 // Wanted reports whether peer from asked to reach peer to within the
 // last wantTTL.
-func (h *Hub) Wanted(to, from string) bool {
+func (h *Hub) Wanted(to, from string) bool { return h.WantSeq(to, from) != 0 }
+
+// WantSeq returns the sequence number of the latest wake for peer
+// from's request to reach peer to, or 0 when there is no request within
+// the last wantTTL. A changed number is a new request: the receiver
+// acts on it once, however long the request stays live.
+func (h *Hub) WantSeq(to, from string) uint64 {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	r, ok := h.wants[to][from]
 	if !ok {
-		return false
+		return 0
 	}
 	if h.now().Sub(r.at) < wantTTL {
-		return true
+		return r.seq
 	}
 	delete(h.wants[to], from)
 	if len(h.wants[to]) == 0 {
 		delete(h.wants, to)
 	}
-	return false
+	return 0
 }
 
 // Sweep marks peers offline whose last stream closed longer than

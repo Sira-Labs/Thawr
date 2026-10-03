@@ -153,6 +153,11 @@ message NetPeer {
   // traffic intent and probes back, so both sides punch at once and
   // meet on the relay when nothing direct works (specs 004, 005).
   bool wanted = 16;
+  // want_seq numbers the latest request behind wanted. A changed number
+  // is a new request: the peer just started probing toward the
+  // receiver, which joins with a probe round of its own, also from the
+  // relay. A server that does not send it leaves it 0.
+  uint64 want_seq = 17;
 }
 
 // EndpointKind classifies a candidate address.

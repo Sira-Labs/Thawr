@@ -73,7 +73,7 @@ func netMapToProto(nm control.NetMap) *thawrv1.NetMap {
 		np := &thawrv1.NetPeer{
 			Id: p.ID, Name: p.Name, Kind: p.Kind, Owner: p.Owner, PublicKey: p.PublicKey, Ipv4: p.IPv4.String(),
 			Online: p.Online, Endpoints: endpointsToProto(p.Endpoints), Symmetric: p.Symmetric, Keepalive: p.Keepalive, ViaHub: p.ViaHub,
-			Signatures: signaturesToProto(p.Signatures), ExitNode: p.ExitNode, Wanted: p.Wanted,
+			Signatures: signaturesToProto(p.Signatures), ExitNode: p.ExitNode, Wanted: p.Wanted, WantSeq: p.WantSeq,
 		}
 		if p.IPv6.IsValid() {
 			np.Ipv6 = p.IPv6.String()
