@@ -84,6 +84,10 @@ type DaemonOptions struct {
 	// EnableForward turns on kernel forwarding for a router and returns
 	// the undo; defaults to wg.EnableIPForward (tests inject a no-op).
 	EnableForward func() (func() error, error)
+	// IPv6 reports whether this host can carry the IPv6 overlay, which
+	// the daemon tells the server at every connect (spec 015); defaults
+	// to wg.IPv6Available.
+	IPv6 func() bool
 }
 
 func (o DaemonOptions) withDefaults() DaemonOptions {
@@ -101,6 +105,9 @@ func (o DaemonOptions) withDefaults() DaemonOptions {
 	}
 	if o.EnableForward == nil {
 		o.EnableForward = wg.EnableIPForward
+	}
+	if o.IPv6 == nil {
+		o.IPv6 = wg.IPv6Available
 	}
 	if o.Logger == nil {
 		o.Logger = slog.Default()
@@ -470,6 +477,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	} else {
 		base := wg.Config{PrivateKey: d.key, ListenPort: d.state.ListenPort,
 			Addresses: []netip.Prefix{netip.PrefixFrom(netip.MustParseAddr(d.state.IPv4), d.overlay.Bits())}}
+		if self6, ov6, ok := (NetMap{SelfIPv6: d.state.IPv6, Overlay6: d.state.OverlayIPv6}).selfIPv6(); ok {
+			base.Addresses = append(base.Addresses, netip.PrefixFrom(self6, ov6.Bits()))
+		}
 		if err := dev.Configure(ctx, base); err != nil {
 			return err
 		}
@@ -489,7 +499,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 			d.log.Error("local api", "err", err)
 		}
 	}()
-	d.log.Info("client ready", "interface", dev.Name(), "backend", dev.Backend(), "ipv4", d.state.IPv4, "listen_port", d.state.ListenPort, "socket", d.opts.Socket)
+	d.log.Info("client ready", "interface", dev.Name(), "backend", dev.Backend(), "ipv4", d.state.IPv4, "ipv6", d.state.IPv6, "listen_port", d.state.ListenPort, "socket", d.opts.Socket)
 
 	pathsDone := make(chan struct{})
 	go func() {
@@ -582,7 +592,7 @@ func (d *Daemon) syncOnce(ctx context.Context) error {
 		lockKey = d.lockKey.Public().String()
 	}
 	d.mu.Unlock()
-	stream, err := client.Sync(streamCtx, &thawrv1.SyncRequest{Generation: d.generation(), ClientVersion: d.opts.Version, LockKey: lockKey})
+	stream, err := client.Sync(streamCtx, &thawrv1.SyncRequest{Generation: d.generation(), ClientVersion: d.opts.Version, LockKey: lockKey, Ipv6: d.opts.IPv6()})
 	if err != nil {
 		return fmt.Errorf("sync: %w", err)
 	}
@@ -689,6 +699,8 @@ func (d *Daemon) applyLocked(ctx context.Context, nm NetMap, cache bool) error {
 	d.mu.Lock()
 	renamedFrom, renamed := adoptSelfName(&d.state, nm)
 	exitMoved := followExitNode(&d.state, nm.Peers)
+	v6Moved := adoptSelfIPv6(&d.state, nm)
+	self6 := d.state.IPv6
 	key, dev, prev, exitNode, newName := d.key, d.dev, d.held, d.state.ExitNodeID, d.state.Name
 	if nm.Advertised != nil {
 		d.advertised = nm.Advertised
@@ -721,7 +733,10 @@ func (d *Daemon) applyLocked(ctx context.Context, nm NetMap, cache bool) error {
 	if renamed {
 		d.log.Info("renamed by the server", "from", renamedFrom, "to", newName)
 	}
-	if exitMoved || renamed {
+	if v6Moved && self6 != "" {
+		d.log.Info("ipv6 overlay address", "ipv6", self6)
+	}
+	if exitMoved || renamed || v6Moved {
 		if serr := d.saveState(); serr != nil {
 			d.log.Warn("save state", "err", serr)
 		}
@@ -747,7 +762,7 @@ func (d *Daemon) applyLocked(ctx context.Context, nm NetMap, cache bool) error {
 	if err != nil {
 		return err
 	}
-	d.installRoutes(ctx, dev, cfg)
+	d.installRoutes(ctx, dev, cfg, Overlays(nm, d.overlay))
 	d.installFilter(ctx, dev, nm)
 	d.mu.Lock()
 	d.netmap = &nm
@@ -874,17 +889,17 @@ func (d *Daemon) installFilter(ctx context.Context, dev wg.Device, nm NetMap) {
 // installRoutes puts the prefixes reached through peers, the exit
 // node's default route included, into the OS routing table; a device
 // without route support is reported once.
-func (d *Daemon) installRoutes(ctx context.Context, dev wg.Device, cfg wg.Config) {
+func (d *Daemon) installRoutes(ctx context.Context, dev wg.Device, cfg wg.Config, overlays []netip.Prefix) {
 	rd, ok := dev.(wg.Routable)
 	if !ok {
-		if len(RoutesOf(cfg, d.overlay)) > 0 {
+		if len(RoutesOf(cfg, overlays...)) > 0 {
 			d.routesWarn.Do(func() {
 				d.log.Warn("device cannot install routes; subnet routes and exit nodes are unavailable", "backend", dev.Backend())
 			})
 		}
 		return
 	}
-	routes := RoutesOf(cfg, d.overlay)
+	routes := RoutesOf(cfg, overlays...)
 	d.devMu.Lock()
 	err := rd.SetRoutes(ctx, routes)
 	d.devMu.Unlock()

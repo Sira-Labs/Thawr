@@ -168,12 +168,15 @@ func (d *Daemon) reportLoop(ctx context.Context, client thawrv1.ControlClient) {
 	}
 }
 
-// localCandidates lists local addresses outside the overlay (another
+// localCandidates lists local addresses outside the overlays (another
 // Thawr interface on this host is never a way to reach a peer).
 func (d *Daemon) localCandidates() []netip.AddrPort {
+	d.mu.Lock()
+	overlay6, _ := netip.ParsePrefix(d.state.OverlayIPv6)
+	d.mu.Unlock()
 	var out []netip.AddrPort
 	for _, ap := range d.opts.Endpoints(d.state.ListenPort, d.opts.Interface) {
-		if d.overlay.Contains(ap.Addr()) {
+		if d.overlay.Contains(ap.Addr()) || (overlay6.IsValid() && overlay6.Contains(ap.Addr())) {
 			continue
 		}
 		out = append(out, ap)

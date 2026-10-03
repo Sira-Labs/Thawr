@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	thawrv1 "github.com/sira-labs/thawr/internal/api/proto/thawr/v1"
@@ -25,12 +26,17 @@ const PeerKeepalive = 25 * time.Second
 
 // NetMap is the client-side, JSON-serialisable form of a netmap.
 type NetMap struct {
-	Generation int64     `json:"generation"`
-	SelfID     string    `json:"self_id"`
-	SelfName   string    `json:"self_name"`
-	SelfKind   string    `json:"self_kind"`
-	SelfIPv4   string    `json:"self_ipv4"`
-	Overlay    string    `json:"overlay"`
+	Generation int64  `json:"generation"`
+	SelfID     string `json:"self_id"`
+	SelfName   string `json:"self_name"`
+	SelfKind   string `json:"self_kind"`
+	SelfIPv4   string `json:"self_ipv4"`
+	Overlay    string `json:"overlay"`
+	// SelfIPv6 and Overlay6 are this device's IPv6 overlay address and
+	// the /64; empty unless the server treats this device as IPv6
+	// capable (spec 015).
+	SelfIPv6   string    `json:"self_ipv6,omitempty"`
+	Overlay6   string    `json:"overlay_ipv6,omitempty"`
 	Peers      []Peer    `json:"peers"`
 	Hub        HubPeer   `json:"hub"`
 	ReceivedAt time.Time `json:"received_at"`
@@ -130,12 +136,14 @@ func (p Peer) Candidates() []control.Endpoint {
 
 // Peer is one visible peer.
 type Peer struct {
-	ID         string     `json:"id"`
-	Name       string     `json:"name"`
-	Kind       string     `json:"kind"`
-	Owner      string     `json:"owner"`
-	PublicKey  string     `json:"public_key"`
-	IPv4       string     `json:"ipv4"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Kind      string `json:"kind"`
+	Owner     string `json:"owner"`
+	PublicKey string `json:"public_key"`
+	IPv4      string `json:"ipv4"`
+	// IPv6 is set when both this device and the peer are IPv6 capable.
+	IPv6       string     `json:"ipv6,omitempty"`
 	Online     bool       `json:"online"`
 	Endpoints  []Endpoint `json:"endpoints"`
 	Symmetric  bool       `json:"symmetric"`
@@ -176,6 +184,8 @@ func NetMapFromProto(m *thawrv1.NetMap, now time.Time) NetMap {
 		SelfKind:       m.GetSelf().GetKind(),
 		SelfIPv4:       m.GetSelf().GetIpv4(),
 		Overlay:        m.GetSelf().GetOverlayCidr(),
+		SelfIPv6:       m.GetSelf().GetIpv6(),
+		Overlay6:       m.GetSelf().GetOverlayIpv6(),
 		Peers:          []Peer{},
 		Hub:            HubPeer{PublicKey: m.GetHub().GetPublicKey(), Endpoint: m.GetHub().GetEndpoint(), AllowedIPs: append([]string{}, m.GetHub().GetAllowedIps()...), Signatures: signaturesFromProto(m.GetHub().GetSignatures())},
 		SelfSignatures: signaturesFromProto(m.GetSelf().GetSignatures()),
@@ -189,19 +199,19 @@ func NetMapFromProto(m *thawrv1.NetMap, now time.Time) NetMap {
 		if f.GetPortLo() > 65535 || f.GetPortHi() > 65535 {
 			continue
 		}
-		nm.Filter = append(nm.Filter, FilterRule{Src: f.GetSrcIpv4(), Proto: f.GetProto(), PortLo: uint16(f.GetPortLo()), PortHi: uint16(f.GetPortHi())}) //nolint:gosec // range-checked above
+		nm.Filter = append(nm.Filter, FilterRule{Src: srcOf(f.GetSrcIpv4(), f.GetSrcIpv6()), Proto: f.GetProto(), PortLo: uint16(f.GetPortLo()), PortHi: uint16(f.GetPortHi())}) //nolint:gosec // range-checked above
 	}
 	for _, f := range m.GetForward() {
 		if f.GetPortLo() > 65535 || f.GetPortHi() > 65535 {
 			continue
 		}
-		nm.Forward = append(nm.Forward, ForwardRule{Src: f.GetSrcIpv4(), Dst: f.GetDstCidr(), Proto: f.GetProto(), PortLo: uint16(f.GetPortLo()), PortHi: uint16(f.GetPortHi())}) //nolint:gosec // range-checked above
+		nm.Forward = append(nm.Forward, ForwardRule{Src: srcOf(f.GetSrcIpv4(), f.GetSrcIpv6()), Dst: f.GetDstCidr(), Proto: f.GetProto(), PortLo: uint16(f.GetPortLo()), PortHi: uint16(f.GetPortHi())}) //nolint:gosec // range-checked above
 	}
 	for _, a := range m.GetSelf().GetAdvertised() {
 		nm.Advertised = append(nm.Advertised, AdvertisedRoute{Prefix: a.GetPrefix(), Approved: a.GetApproved()})
 	}
 	for _, p := range m.GetPeers() {
-		peer := Peer{ID: p.GetId(), Name: p.GetName(), Kind: p.GetKind(), Owner: p.GetOwner(), PublicKey: p.GetPublicKey(), IPv4: p.GetIpv4(),
+		peer := Peer{ID: p.GetId(), Name: p.GetName(), Kind: p.GetKind(), Owner: p.GetOwner(), PublicKey: p.GetPublicKey(), IPv4: p.GetIpv4(), IPv6: p.GetIpv6(),
 			Online: p.GetOnline(), Symmetric: p.GetSymmetric(), Keepalive: p.GetKeepalive(), ViaHub: p.GetViaHub(), ExitNode: p.GetExitNode(),
 			Endpoints: []Endpoint{}, AllowedIPs: append([]string{}, p.GetAllowedIps()...), Signatures: signaturesFromProto(p.GetSignatures())}
 		for _, e := range p.GetEndpoints() {
@@ -210,6 +220,28 @@ func NetMapFromProto(m *thawrv1.NetMap, now time.Time) NetMap {
 		nm.Peers = append(nm.Peers, peer)
 	}
 	return nm
+}
+
+// srcOf is a rule's source, carried in the field of its family.
+func srcOf(v4, v6 string) string {
+	if v4 != "" {
+		return v4
+	}
+	return v6
+}
+
+// selfIPv6 is this device's IPv6 overlay address and the /64 from nm;
+// ok is false when nm carries none, or nothing usable.
+func (nm NetMap) selfIPv6() (netip.Addr, netip.Prefix, bool) {
+	self, err := netip.ParseAddr(nm.SelfIPv6)
+	if err != nil || !self.Is6() || self.Is4In6() {
+		return netip.Addr{}, netip.Prefix{}, false
+	}
+	ov, err := netip.ParsePrefix(nm.Overlay6)
+	if err != nil || !ov.Contains(self) {
+		return netip.Addr{}, netip.Prefix{}, false
+	}
+	return self, ov.Masked(), true
 }
 
 func signaturesFromProto(in []*thawrv1.PeerSignature) []PeerSignature {
@@ -278,7 +310,8 @@ func BuildConfig(nm NetMap, key wg.Key, listenPort int, overlay netip.Prefix) (w
 }
 
 // BuildConfigWith is BuildConfig with an exit node: the peer with id
-// exitNodeID, when the netmap flags it as one, carries 0.0.0.0/0 and
+// exitNodeID, when the netmap flags it as one, carries 0.0.0.0/0, and
+// ::/0 as well when both ends have the IPv6 overlay (spec 015), and
 // the tunnel's own packets get the fwmark that keeps them out of it
 // (spec 013).
 func BuildConfigWith(nm NetMap, key wg.Key, listenPort int, overlay netip.Prefix, exitNodeID string) (wg.Config, error) {
@@ -290,6 +323,10 @@ func BuildConfigWith(nm NetMap, key wg.Key, listenPort int, overlay netip.Prefix
 		PrivateKey: key,
 		ListenPort: listenPort,
 		Addresses:  []netip.Prefix{netip.PrefixFrom(selfIP, overlay.Bits())},
+	}
+	self6, overlay6, v6 := nm.selfIPv6()
+	if v6 {
+		cfg.Addresses = append(cfg.Addresses, netip.PrefixFrom(self6, overlay6.Bits()))
 	}
 	if nm.Hub.PublicKey != "" {
 		hubKey, err := wg.ParseKey(nm.Hub.PublicKey)
@@ -327,6 +364,9 @@ func BuildConfigWith(nm NetMap, key wg.Key, listenPort int, overlay netip.Prefix
 		}
 		if exitNodeID != "" && p.ExitNode && p.ID == exitNodeID {
 			peer.AllowedIPs = append(peer.AllowedIPs, wg.ExitRoute)
+			if v6 && p.IPv6 != "" {
+				peer.AllowedIPs = append(peer.AllowedIPs, wg.ExitRoute6)
+			}
 			cfg.FwMark = wg.DefaultFwMark
 		}
 		cfg.Peers = append(cfg.Peers, peer)
@@ -335,16 +375,27 @@ func BuildConfigWith(nm NetMap, key wg.Key, listenPort int, overlay netip.Prefix
 }
 
 // RoutesOf lists the prefixes cfg reaches through peers beyond their
-// own /32 addresses: what the OS routing table must carry.
-func RoutesOf(cfg wg.Config, overlay netip.Prefix) []netip.Prefix {
+// own /32 and /128 addresses inside the overlays: what the OS routing
+// table must carry. The interface's own addresses route the overlays.
+func RoutesOf(cfg wg.Config, overlays ...netip.Prefix) []netip.Prefix {
 	var out []netip.Prefix
 	for _, p := range cfg.Peers {
 		for _, a := range p.AllowedIPs {
-			if a.Bits() == 32 && overlay.Contains(a.Addr()) {
+			if a.Bits() == a.Addr().BitLen() && slices.ContainsFunc(overlays, func(o netip.Prefix) bool { return o.Contains(a.Addr()) }) {
 				continue
 			}
 			out = append(out, a)
 		}
+	}
+	return out
+}
+
+// Overlays are the netmap's overlay prefixes: the IPv4 one given and,
+// when nm carries it, the IPv6 one.
+func Overlays(nm NetMap, overlay netip.Prefix) []netip.Prefix {
+	out := []netip.Prefix{overlay}
+	if _, ov6, ok := nm.selfIPv6(); ok {
+		out = append(out, ov6)
 	}
 	return out
 }
@@ -360,18 +411,21 @@ func FilterSet(nm NetMap, iface string, self netip.Addr) wg.FilterSet {
 // device itself advertises are enforced on its forwarding path and
 // those prefixes are masqueraded for overlay sources (spec 013). Rules
 // for anything else are dropped: a server cannot make a router forward
-// what the router never offered.
+// what the router never offered. An exit node with the IPv6 overlay
+// also forwards and masquerades ::/0 for the IPv6 overlay (spec 015).
 func FilterSetFor(nm NetMap, iface string, self netip.Addr, overlay netip.Prefix, advertised []netip.Prefix) wg.FilterSet {
 	set := wg.FilterSet{Interface: iface, Hook: wg.HookInput, Local: self}
+	self6, overlay6, v6 := nm.selfIPv6()
+	if v6 {
+		set.Local6 = self6
+	}
+	exit := slices.Contains(advertised, wg.ExitRoute)
 	serves := func(dst netip.Prefix) bool {
+		if wg.IsExitRoute(dst) {
+			return exit && (dst == wg.ExitRoute || v6)
+		}
 		for _, adv := range advertised {
-			if adv == wg.ExitRoute {
-				if dst == wg.ExitRoute {
-					return true
-				}
-				continue
-			}
-			if dst != wg.ExitRoute && adv.Bits() <= dst.Bits() && adv.Contains(dst.Addr()) {
+			if !wg.IsExitRoute(adv) && adv.Bits() <= dst.Bits() && adv.Contains(dst.Addr()) {
 				return true
 			}
 		}
@@ -386,10 +440,13 @@ func FilterSetFor(nm NetMap, iface string, self netip.Addr, overlay netip.Prefix
 		if err != nil || !serves(dst) {
 			continue
 		}
-		set.Forward = append(set.Forward, wg.ForwardRule{Src: netip.PrefixFrom(src, 32), Dst: dst, Proto: f.Proto, Lo: f.PortLo, Hi: f.PortHi})
+		set.Forward = append(set.Forward, wg.ForwardRule{Src: netip.PrefixFrom(src, src.BitLen()), Dst: dst, Proto: f.Proto, Lo: f.PortLo, Hi: f.PortHi})
 	}
 	if len(advertised) > 0 {
 		set.Masquerade, set.MasqueradeFrom = append([]netip.Prefix(nil), advertised...), overlay
+		if exit && v6 {
+			set.Masquerade, set.MasqueradeFrom6 = append(set.Masquerade, wg.ExitRoute6), overlay6
+		}
 	}
 	seen := map[netip.Addr]bool{}
 	visible := func(ip netip.Addr) {
@@ -399,12 +456,14 @@ func FilterSetFor(nm NetMap, iface string, self netip.Addr, overlay netip.Prefix
 		}
 	}
 	for _, p := range nm.Peers {
-		if ip, err := netip.ParseAddr(p.IPv4); err == nil {
-			visible(ip)
+		for _, a := range []string{p.IPv4, p.IPv6} {
+			if ip, err := netip.ParseAddr(a); err == nil {
+				visible(ip)
+			}
 		}
 	}
 	for _, a := range nm.Hub.AllowedIPs {
-		if p, err := netip.ParsePrefix(a); err == nil && p.Bits() == 32 {
+		if p, err := netip.ParsePrefix(a); err == nil && p.Bits() == p.Addr().BitLen() {
 			visible(p.Addr())
 		}
 	}
@@ -413,7 +472,7 @@ func FilterSetFor(nm NetMap, iface string, self netip.Addr, overlay netip.Prefix
 		if err != nil {
 			continue
 		}
-		set.Rules = append(set.Rules, wg.FilterRule{Src: netip.PrefixFrom(src, 32), Proto: f.Proto, Lo: f.PortLo, Hi: f.PortHi})
+		set.Rules = append(set.Rules, wg.FilterRule{Src: netip.PrefixFrom(src, src.BitLen()), Proto: f.Proto, Lo: f.PortLo, Hi: f.PortHi})
 	}
 	return set
 }
