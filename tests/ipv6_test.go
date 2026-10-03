@@ -110,17 +110,17 @@ func TestIPv6OverlayEndToEnd(t *testing.T) {
 	if !connect("8080") {
 		t.Fatal("allowed port 8080 unreachable over IPv6")
 	}
-	drops := func() uint64 {
-		if st := m.status(1); st.Filter != nil {
+	drops := func(i int) uint64 {
+		if st := m.status(i); st.Filter != nil {
 			return st.Filter.Drops
 		}
 		return 0
 	}
-	before := drops()
+	before := drops(1)
 	if connect("9090") {
 		t.Fatal("denied port 9090 reachable over IPv6")
 	}
-	if after := drops(); after <= before {
+	if after := drops(1); after <= before {
 		t.Errorf("bob's filter counted no drop for the denied IPv6 probe (%d → %d)", before, after)
 	}
 	// bob may not open a connection to alice: the policy grants only
@@ -132,8 +132,14 @@ func TestIPv6OverlayEndToEnd(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = l.Process.Kill(); _ = l.Wait() })
 	time.Sleep(500 * time.Millisecond)
+	// A failed dial alone could be a missing route; alice's filter must
+	// count the drop.
+	before = drops(0)
 	if out, err := m.clients[1].cmd(ctx, "nc", "-6", "-z", "-w", "2", alice.Self.IPv6, "7070").CombinedOutput(); err == nil {
 		t.Errorf("bob reached alice's port 7070 over IPv6 although the policy denies it:\n%s", out)
+	}
+	if after := drops(0); after <= before {
+		t.Errorf("alice's filter counted no drop for bob's denied IPv6 probe (%d → %d)", before, after)
 	}
 }
 
