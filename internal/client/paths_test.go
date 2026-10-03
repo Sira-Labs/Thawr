@@ -315,45 +315,38 @@ func TestSyncPathsWanted(t *testing.T) {
 		t.Error("an unchanged request became intent again")
 	}
 	apply(false)
-	if !apply(true).ping {
+	pp = apply(true)
+	if !pp.ping {
 		t.Error("a request after the previous one expired did not become intent")
+	}
+	pp.ping = false
+	// A key rotation replaces the machine, which starts idle: the
+	// standing request must count again.
+	rotated, err := wg.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer.PublicKey = rotated.PublicKey().String()
+	if !apply(true).ping {
+		t.Error("a standing request was lost with the key rotation")
 	}
 }
 
 func TestReachedSince(t *testing.T) {
-	key, err := wg.GenerateKey()
-	if err != nil {
-		t.Fatal(err)
-	}
-	other, err := wg.GenerateKey()
-	if err != nil {
-		t.Fatal(err)
-	}
-	d := &Daemon{}
-	fake := wgtest.New("thawr0")
 	read := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
-	ctx := context.Background()
 	in := path.Input{Handshake: read, Endpoint: candLAN1, Rx: 100}
-	if d.reachedSince(ctx, fake, key.PublicKey(), in) {
-		t.Error("a peer the device does not know reached it")
-	}
-	if err := fake.Configure(ctx, wg.Config{Peers: []wg.Peer{{PublicKey: key.PublicKey()}, {PublicKey: other.PublicKey()}}}); err != nil {
-		t.Fatal(err)
-	}
 	for _, tc := range []struct {
 		name  string
 		stats wg.PeerStats
 		want  bool
 	}{
-		{"nothing new", wg.PeerStats{PublicKey: key.PublicKey(), LastHandshake: read, Endpoint: candLAN1}, false},
-		{"later handshake", wg.PeerStats{PublicKey: key.PublicKey(), LastHandshake: read.Add(time.Millisecond), Endpoint: candLAN1}, true},
-		{"initiation from the configured endpoint", wg.PeerStats{PublicKey: key.PublicKey(), LastHandshake: read, Endpoint: candLAN1, RxBytes: 248}, true},
-		{"initiation moved the endpoint", wg.PeerStats{PublicKey: key.PublicKey(), LastHandshake: read, Endpoint: candRefl}, true},
-		{"loopback sink is not the peer", wg.PeerStats{PublicKey: key.PublicKey(), LastHandshake: read, Endpoint: netip.MustParseAddrPort("127.0.0.1:4000")}, false},
-		{"another peer's handshake", wg.PeerStats{PublicKey: other.PublicKey(), LastHandshake: read.Add(time.Minute), Endpoint: candRefl}, false},
+		{"nothing new", wg.PeerStats{LastHandshake: read, Endpoint: candLAN1, RxBytes: 100}, false},
+		{"later handshake", wg.PeerStats{LastHandshake: read.Add(time.Millisecond), Endpoint: candLAN1, RxBytes: 100}, true},
+		{"initiation from the configured endpoint", wg.PeerStats{LastHandshake: read, Endpoint: candLAN1, RxBytes: 248}, true},
+		{"initiation moved the endpoint", wg.PeerStats{LastHandshake: read, Endpoint: candRefl, RxBytes: 100}, true},
+		{"loopback sink is not the peer", wg.PeerStats{LastHandshake: read, Endpoint: netip.MustParseAddrPort("127.0.0.1:4000"), RxBytes: 100}, false},
 	} {
-		fake.SetStats(tc.stats)
-		if got := d.reachedSince(ctx, fake, key.PublicKey(), in); got != tc.want {
+		if got := reachedSince(tc.stats, in); got != tc.want {
 			t.Errorf("%s: %v, want %v", tc.name, got, tc.want)
 		}
 	}

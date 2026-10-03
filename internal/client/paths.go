@@ -92,6 +92,7 @@ func (d *Daemon) syncPaths(ctx context.Context, nm NetMap, cfg wg.Config) error 
 		}
 		seen[p.ID] = true
 		pp, ok := d.paths[p.ID]
+		reset := !ok || pp.key != key
 		if !ok {
 			s, err := newSink(ctx)
 			if err != nil {
@@ -113,7 +114,9 @@ func (d *Daemon) syncPaths(ctx context.Context, nm NetMap, cfg wg.Config) error 
 		// The peer is trying to reach this device: probe back as if it
 		// had traffic for the peer, so both sides punch at once, and the
 		// round ends on the relay when no candidate answers.
-		if p.Wanted && !pp.wanted {
+		// A new machine (new peer or key rotation) starts idle, so a
+		// standing request counts again.
+		if p.Wanted && (!pp.wanted || reset) {
 			pp.ping = true
 		}
 		pp.wanted = p.Wanted
@@ -194,14 +197,7 @@ func (d *Daemon) pathTick(ctx context.Context) {
 	if dev == nil {
 		return
 	}
-	stats := map[wg.Key]wg.PeerStats{}
-	if list, err := dev.Stats(ctx); err == nil {
-		for _, s := range list {
-			stats[s.PublicKey] = s
-		}
-	} else if ctx.Err() == nil {
-		d.log.Debug("device stats", "err", err)
-	}
+	stats := d.statsByKey(ctx, dev)
 	now := d.opts.Now()
 	if fd, ok := dev.(wg.Filterable); ok {
 		d.drops.Record(now, fd.FilterStats().Drops)
@@ -209,6 +205,8 @@ func (d *Daemon) pathTick(ctx context.Context) {
 	var report []PathResult
 	d.pmu.Lock()
 	changed := false
+	// Re-read once, when the first step would re-add, not per peer.
+	var fresh map[wg.Key]wg.PeerStats
 	for _, pp := range d.paths {
 		in := path.Input{Now: now, Intent: pp.sink.takeIntent() || pp.ping}
 		pp.ping = false
@@ -222,12 +220,17 @@ func (d *Daemon) pathTick(ctx context.Context) {
 		}
 		out := pp.machine.Step(in)
 		pp.steps++
-		if (out.Action == path.ActProbe || out.Action == path.ActRelay) && d.reachedSince(ctx, dev, pp.key, in) {
-			// The peer's own probe got through since stats were read: the
-			// re-add would throw that session away. Keep it; the next tick
-			// sees the handshake and takes the path (spec 004).
-			d.log.Debug("handshake arrived before the re-add; keeping it", "peer", pp.name)
-			out.Action = path.ActNone
+		if out.Action == path.ActProbe || out.Action == path.ActRelay {
+			if fresh == nil {
+				fresh = d.statsByKey(ctx, dev)
+			}
+			if s, ok := fresh[pp.key]; ok && reachedSince(s, in) {
+				// The peer's own probe got through since stats were read:
+				// the re-add would throw that session away. Keep it; the
+				// next tick sees the handshake and takes the path (spec 004).
+				d.log.Debug("handshake arrived before the re-add; keeping it", "peer", pp.name)
+				out.Action = path.ActNone
+			}
 		}
 		switch out.Action {
 		case path.ActSink:
@@ -274,27 +277,32 @@ func (d *Daemon) pathTick(ctx context.Context) {
 	}
 }
 
-// reachedSince reports, from stats read fresh, whether the peer reached
-// the device after the tick read in: a later handshake, received bytes
-// (an authenticated initiation counts), or WireGuard moving the
-// endpoint to a real address because an initiation came from there (as
-// responder, WireGuard records the handshake only once the initiator's
-// first data packet arrives). A
-// probe or relay step re-adds the peer, which would discard that
-// session.
-func (d *Daemon) reachedSince(ctx context.Context, dev wg.Device, key wg.Key, in path.Input) bool {
-	stats, err := dev.Stats(ctx)
+// statsByKey reads the device's per-peer stats; empty on error.
+func (d *Daemon) statsByKey(ctx context.Context, dev wg.Device) map[wg.Key]wg.PeerStats {
+	stats := map[wg.Key]wg.PeerStats{}
+	list, err := dev.Stats(ctx)
 	if err != nil {
-		return false
-	}
-	for _, s := range stats {
-		if s.PublicKey != key {
-			continue
+		if ctx.Err() == nil {
+			d.log.Debug("device stats", "err", err)
 		}
-		roamed := s.Endpoint.IsValid() && !s.Endpoint.Addr().IsLoopback() && s.Endpoint != in.Endpoint
-		return s.LastHandshake.After(in.Handshake) || roamed || s.RxBytes > in.Rx
+		return stats
 	}
-	return false
+	for _, s := range list {
+		stats[s.PublicKey] = s
+	}
+	return stats
+}
+
+// reachedSince reports, from stats s read after the tick read in,
+// whether the peer reached the device in between: a later handshake,
+// received bytes (an authenticated initiation counts), or WireGuard
+// moving the endpoint to a real address because an initiation came
+// from there (as responder, WireGuard records the handshake only once
+// the initiator's first data packet arrives). A probe or relay step
+// re-adds the peer, which would discard that session.
+func reachedSince(s wg.PeerStats, in path.Input) bool {
+	roamed := s.Endpoint.IsValid() && !s.Endpoint.Addr().IsLoopback() && s.Endpoint != in.Endpoint
+	return s.LastHandshake.After(in.Handshake) || roamed || s.RxBytes > in.Rx
 }
 
 func (pp *peerPath) result() PathResult {
