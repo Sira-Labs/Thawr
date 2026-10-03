@@ -161,6 +161,10 @@ type Peer struct {
 	// Wanted marks a peer that is trying to reach this device, by
 	// probing or on the relay (specs 004, 005).
 	Wanted bool `json:"wanted,omitempty"`
+	// WantSeq numbers the latest such request; a new number means the
+	// peer just started probing toward this device (0 from servers that
+	// do not send it).
+	WantSeq uint64 `json:"want_seq,omitempty"`
 }
 
 // PeerSignature is one lock key's signature over a peer record, as
@@ -215,7 +219,7 @@ func NetMapFromProto(m *thawrv1.NetMap, now time.Time) NetMap {
 	}
 	for _, p := range m.GetPeers() {
 		peer := Peer{ID: p.GetId(), Name: p.GetName(), Kind: p.GetKind(), Owner: p.GetOwner(), PublicKey: p.GetPublicKey(), IPv4: p.GetIpv4(), IPv6: p.GetIpv6(),
-			Online: p.GetOnline(), Symmetric: p.GetSymmetric(), Keepalive: p.GetKeepalive(), ViaHub: p.GetViaHub(), ExitNode: p.GetExitNode(), Wanted: p.GetWanted(),
+			Online: p.GetOnline(), Symmetric: p.GetSymmetric(), Keepalive: p.GetKeepalive(), ViaHub: p.GetViaHub(), ExitNode: p.GetExitNode(), Wanted: p.GetWanted(), WantSeq: p.GetWantSeq(),
 			Endpoints: []Endpoint{}, AllowedIPs: append([]string{}, p.GetAllowedIps()...), Signatures: signaturesFromProto(p.GetSignatures())}
 		for _, e := range p.GetEndpoints() {
 			peer.Endpoints = append(peer.Endpoints, Endpoint{Addr: e.GetAddr(), Kind: kindFromProto(e.GetKind())})

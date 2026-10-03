@@ -311,9 +311,14 @@ re-probed. Path states are reported to the server (`ReportPath`) and
 shown in the admin UI. A peer B with no traffic of its own learns that
 A wants it from the server: a `probing` or `relay` report from A (and a
 relay send to B without a session, §4.5) records the request in the
-hub for 30 s and wakes only B's stream; B's netmap flags A `wanted`,
-and B takes a newly flagged peer as traffic intent and starts its round
-toward A. The hub records requests only for peers with an open stream,
+hub for 30 s and wakes only B's stream; B's netmap flags A `wanted`
+with the number of the latest wake (`want_seq`, renumbered at most
+every 5 s while A keeps asking). B acts on each new number once: as
+traffic intent when idle, and from the relay or unreachable by starting
+a full round at once (a single retry from the relay widens into one),
+so a relayed pair punches together when either side's network changes.
+A reach starts at most one round per 30 s, or two relayed peers would
+keep restarting each other's rounds. The hub records requests only for peers with an open stream,
 and a netmap flags only peers the receiver may see. Two sides probing
 each other start within milliseconds, so the one with the larger public
 key lengthens the first window of each round by 1 s: their candidate

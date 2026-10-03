@@ -30,9 +30,12 @@ type peerPath struct {
 	machine   *path.Machine
 	sink      *sink
 	ping      bool
-	// wanted is the netmap's last wanted flag for the peer; a new
-	// request counts as traffic intent once (specs 004, 005).
+	// reach is a new reach request from the peer, not yet stepped.
+	reach bool
+	// wanted and wantSeq are the netmap's last request for the peer; a
+	// new request is acted on once (specs 004, 005).
 	wanted   bool
+	wantSeq  uint64
 	steps    int
 	state    path.State
 	endpoint netip.AddrPort
@@ -111,15 +114,15 @@ func (d *Daemon) syncPaths(ctx context.Context, nm NetMap, cfg wg.Config) error 
 		// re-adds each other in step (both derive the same order).
 		pp.machine.SetStagger(bytes.Compare(self[:], key[:]) > 0)
 		pp.cands, pp.symmetric = p.Candidates(), p.Symmetric
-		// The peer is trying to reach this device: probe back as if it
-		// had traffic for the peer, so both sides punch at once, and the
-		// round ends on the relay when no candidate answers.
-		// A new machine (new peer or key rotation) starts idle, so a
-		// standing request counts again.
-		if p.Wanted && (!pp.wanted || reset) {
-			pp.ping = true
+		// The peer is trying to reach this device: probe back, so both
+		// sides punch at once, and the round ends on the relay when no
+		// candidate answers. A request is new when its number changed (a
+		// server without numbers only flips the flag), or when a new
+		// machine (new peer or key rotation) has not seen it.
+		if p.Wanted && (reset || (p.WantSeq != 0 && p.WantSeq != pp.wantSeq) || (p.WantSeq == 0 && !pp.wanted)) {
+			pp.reach = true
 		}
-		pp.wanted = p.Wanted
+		pp.wanted, pp.wantSeq = p.Wanted, p.WantSeq
 	}
 	for id, pp := range d.paths {
 		if !seen[id] {
@@ -208,8 +211,8 @@ func (d *Daemon) pathTick(ctx context.Context) {
 	// Re-read once, when the first step would re-add, not per peer.
 	var fresh map[wg.Key]wg.PeerStats
 	for _, pp := range d.paths {
-		in := path.Input{Now: now, Intent: pp.sink.takeIntent() || pp.ping}
-		pp.ping = false
+		in := path.Input{Now: now, Intent: pp.sink.takeIntent() || pp.ping, Reach: pp.reach}
+		pp.ping, pp.reach = false, false
 		if s, ok := stats[pp.key]; ok {
 			in.Handshake, in.Rx, in.Tx = s.LastHandshake, s.RxBytes, s.TxBytes
 			// Loopback endpoints are our own sink or relay proxy, never a
@@ -234,7 +237,7 @@ func (d *Daemon) pathTick(ctx context.Context) {
 				d.log.Debug("peer reached the device before the re-add; keeping its session", "peer", pp.name)
 				pp.machine = before
 				pp.machine.Hold(now)
-				pp.ping = pp.ping || in.Intent
+				pp.ping, pp.reach = pp.ping || in.Intent, pp.reach || in.Reach
 				out = path.Output{State: before.State(), Endpoint: before.Endpoint(), Action: path.ActNone}
 			}
 		}

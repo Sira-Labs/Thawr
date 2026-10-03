@@ -297,31 +297,44 @@ func TestSyncPathsWanted(t *testing.T) {
 	d := &Daemon{paths: map[string]*peerPath{}, pathWake: make(chan struct{}, 1), relay: relay.NewClient(relay.ClientOptions{})}
 	t.Cleanup(d.closeSinks)
 	peer := Peer{ID: "p1", Name: "gw", PublicKey: key.PublicKey().String(), IPv4: "100.64.0.3"}
-	apply := func(wanted bool) *peerPath {
+	// apply syncs a netmap carrying the request and reports whether it
+	// raised a reach, consuming it as the prober would.
+	apply := func(wanted bool, seq uint64) bool {
 		t.Helper()
-		peer.Wanted = wanted
+		peer.Wanted, peer.WantSeq = wanted, seq
 		if err := d.syncPaths(context.Background(), NetMap{Peers: []Peer{peer}}, wg.Config{}); err != nil {
 			t.Fatal(err)
 		}
-		return d.paths["p1"]
+		pp := d.paths["p1"]
+		reach := pp.reach
+		pp.reach = false
+		return reach
 	}
-	if pp := apply(false); pp.ping {
-		t.Fatal("intent without a request")
+	// A server without request numbers: the flag's rising edge counts.
+	if apply(false, 0) {
+		t.Fatal("reach without a request")
 	}
-	pp := apply(true)
-	if !pp.ping {
-		t.Fatal("a new relay request did not become intent")
+	if !apply(true, 0) {
+		t.Fatal("a new request did not raise a reach")
 	}
-	pp.ping = false // the prober consumed it
-	if apply(true).ping {
-		t.Error("an unchanged request became intent again")
+	if apply(true, 0) {
+		t.Error("an unchanged request raised a reach again")
 	}
-	apply(false)
-	pp = apply(true)
-	if !pp.ping {
-		t.Error("a request after the previous one expired did not become intent")
+	apply(false, 0)
+	if !apply(true, 0) {
+		t.Error("a request after the previous one expired did not raise a reach")
 	}
-	pp.ping = false
+	// Numbered requests: each new number counts once, also while the
+	// flag stays set (the server never pushes the expiry in between).
+	if !apply(true, 5) {
+		t.Error("a numbered request did not raise a reach")
+	}
+	if apply(true, 5) {
+		t.Error("the same request number raised a reach again")
+	}
+	if !apply(true, 6) {
+		t.Error("a new request under a standing flag did not raise a reach")
+	}
 	// A key rotation replaces the machine, which starts idle: the
 	// standing request must count again.
 	rotated, err := wg.GenerateKey()
@@ -329,7 +342,7 @@ func TestSyncPathsWanted(t *testing.T) {
 		t.Fatal(err)
 	}
 	peer.PublicKey = rotated.PublicKey().String()
-	if !apply(true).ping {
+	if !apply(true, 6) {
 		t.Error("a standing request was lost with the key rotation")
 	}
 }
