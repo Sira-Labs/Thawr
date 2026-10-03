@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -17,26 +18,40 @@ import (
 const maxNameWidth = 20
 
 // renderStatus prints the human form of a status document. Ages are
-// relative to st.RetrievedAt so the output is reproducible.
+// relative to st.RetrievedAt so the output is reproducible. The IPV6
+// column appears only when some row has an IPv6 address (spec 015).
 func renderStatus(w io.Writer, st client.Status) error {
 	now := st.RetrievedAt
-	if _, err := fmt.Fprintf(w, "thawr %s · %s %s · server %s%s %s\n", st.Version, st.Self.Name, st.Self.IPv4, st.Server.Addr, serverVersion(st), serverState(st.Server, now)); err != nil {
+	self := st.Self.IPv4
+	if st.Self.IPv6 != "" {
+		self += " " + st.Self.IPv6
+	}
+	if _, err := fmt.Fprintf(w, "thawr %s · %s %s · server %s%s %s\n", st.Version, st.Self.Name, self, st.Server.Addr, serverVersion(st), serverState(st.Server, now)); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(w, "WireGuard: %s · %s · listen %d · NAT: %s%s%s%s\n%s\n", dash(st.WireGuard.Backend), dash(st.WireGuard.Interface), st.WireGuard.ListenPort, natLine(st.NAT), dnsLine(st.DNS), lockLine(st.Lock), heldLine(st.Held), routesLine(st)); err != nil {
-		return err
-	}
-	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
-	if _, err := fmt.Fprintln(tw, "PEER\tIP\tKIND\tOWNER\tPATH\tHANDSHAKE\tRX / TX"); err != nil {
 		return err
 	}
 	rows := st.Peers
 	if st.Hub != nil {
 		rows = append(rows, *st.Hub)
 	}
+	v6 := slices.ContainsFunc(rows, func(p client.PeerStatus) bool { return p.IPv6 != "" })
+	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
+	header := "PEER\tIP\tKIND\tOWNER\tPATH\tHANDSHAKE\tRX / TX"
+	if v6 {
+		header = "PEER\tIP\tIPV6\tKIND\tOWNER\tPATH\tHANDSHAKE\tRX / TX"
+	}
+	if _, err := fmt.Fprintln(tw, header); err != nil {
+		return err
+	}
 	for _, p := range rows {
 		hs, rxtx := handshakeColumns(p, now)
-		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", truncateName(p.Name), p.IPv4, dash(p.Kind), dash(p.Owner), pathColumn(p), hs, rxtx); err != nil {
+		ip := p.IPv4
+		if v6 {
+			ip += "\t" + dash(p.IPv6)
+		}
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", truncateName(p.Name), ip, dash(p.Kind), dash(p.Owner), pathColumn(p), hs, rxtx); err != nil {
 			return err
 		}
 	}

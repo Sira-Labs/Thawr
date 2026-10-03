@@ -57,9 +57,43 @@ func TestStatusRender(t *testing.T) {
 	if err := renderStatus(&out, statusFixture()); err != nil {
 		t.Fatal(err)
 	}
-	golden := filepath.Join("testdata", "status.golden")
+	checkGolden(t, "status.golden", out.String())
+	for _, want := range []string{"connected (netmap #42, 3s ago)", "NAT: cone (reflexive 203.0.113.9:41820)", "direct 198.51.100.4:51820", "1.2 MB / 340 kB", "via hub", "never", "3 rules · 0 dropped (last 5 min)"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q", want)
+		}
+	}
+	if strings.Contains(out.String(), "IPV6") {
+		t.Error("IPV6 column without any IPv6 address")
+	}
+}
+
+// TestStatusRenderIPv6 shows the self line with both addresses and the
+// IPV6 column once a row has one (spec 015).
+func TestStatusRenderIPv6(t *testing.T) {
+	st := statusFixture()
+	st.Self.IPv6 = "fd3a:9c1e:44b0::6440:7"
+	st.Hub.IPv6 = "fd3a:9c1e:44b0::6440:1"
+	st.Peers[0].IPv6 = "fd3a:9c1e:44b0::6440:3"
+	var out bytes.Buffer
+	if err := renderStatus(&out, st); err != nil {
+		t.Fatal(err)
+	}
+	checkGolden(t, "status_ipv6.golden", out.String())
+	for _, want := range []string{"alice-laptop 100.64.0.7 fd3a:9c1e:44b0::6440:7 ·", "IPV6", "fd3a:9c1e:44b0::6440:3"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q", want)
+		}
+	}
+}
+
+// checkGolden compares got with testdata/name; THAWR_UPDATE_GOLDEN=1
+// rewrites the file.
+func checkGolden(t *testing.T, name, got string) {
+	t.Helper()
+	golden := filepath.Join("testdata", name)
 	if os.Getenv("THAWR_UPDATE_GOLDEN") != "" {
-		if err := os.WriteFile(golden, out.Bytes(), 0o644); err != nil {
+		if err := os.WriteFile(golden, []byte(got), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -68,13 +102,8 @@ func TestStatusRender(t *testing.T) {
 		t.Fatalf("read golden (set THAWR_UPDATE_GOLDEN=1 to create it): %v", err)
 	}
 	// A checkout with CRLF conversion must not fail the comparison.
-	if got, want := out.String(), strings.ReplaceAll(string(want), "\r\n", "\n"); got != want {
+	if want := strings.ReplaceAll(string(want), "\r\n", "\n"); got != want {
 		t.Errorf("render differs from %s:\n--- got ---\n%s--- want ---\n%s", golden, got, want)
-	}
-	for _, want := range []string{"connected (netmap #42, 3s ago)", "NAT: cone (reflexive 203.0.113.9:41820)", "direct 198.51.100.4:51820", "1.2 MB / 340 kB", "via hub", "never", "3 rules · 0 dropped (last 5 min)"} {
-		if !strings.Contains(out.String(), want) {
-			t.Errorf("output lacks %q", want)
-		}
 	}
 }
 
@@ -236,6 +265,9 @@ func TestStatusJSONSchema(t *testing.T) {
 	held.Held = []client.HeldStatus{{Name: "homelab-nas", IPv4: "100.64.0.3", Kind: "server", PinnedKey: "NAS=", OfferedKey: "NEW=", Since: held.RetrievedAt, Reason: client.HeldKeyChanged}}
 	held.Peers[0].Path, held.Peers[0].PublicKey = client.PathKeyChanged, "NEW="
 	validate("held", held)
+	dual := statusFixture()
+	dual.Self.IPv6, dual.Peers[0].IPv6, dual.Hub.IPv6 = "fd3a:9c1e:44b0::6440:7", "fd3a:9c1e:44b0::6440:3", "fd3a:9c1e:44b0::6440:1"
+	validate("ipv6", dual)
 	bad := statusFixture()
 	bad.Peers[0].Path = "teleport"
 	data, _ := json.Marshal(bad)

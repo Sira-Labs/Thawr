@@ -81,7 +81,9 @@ type SelfStatus struct {
 	Name   string `json:"name"`
 	PeerID string `json:"peer_id"`
 	IPv4   string `json:"ipv4"`
-	Kind   string `json:"kind"`
+	// IPv6 is the IPv6 overlay address, empty without one (spec 015).
+	IPv6 string `json:"ipv6,omitempty"`
+	Kind string `json:"kind"`
 }
 
 // Server connection states.
@@ -168,8 +170,11 @@ const (
 
 // PeerStatus joins netmap knowledge with device counters.
 type PeerStatus struct {
-	Name      string `json:"name"`
-	IPv4      string `json:"ipv4"`
+	Name string `json:"name"`
+	IPv4 string `json:"ipv4"`
+	// IPv6 is set when this device and the peer both have the IPv6
+	// overlay (spec 015).
+	IPv6      string `json:"ipv6,omitempty"`
 	Kind      string `json:"kind"`
 	Owner     string `json:"owner"`
 	Online    bool   `json:"online"`
@@ -196,7 +201,7 @@ func (d *Daemon) Status(ctx context.Context) Status {
 	now := d.opts.Now()
 	d.mu.Lock()
 	nm, dev, held := d.netmap, d.dev, d.held
-	exitNode, exitNodeID, advertised, selfName := d.state.ExitNode, d.state.ExitNodeID, d.advertised, d.state.Name
+	exitNode, exitNodeID, advertised, selfName, self6 := d.state.ExitNode, d.state.ExitNodeID, d.advertised, d.state.Name, d.state.IPv6
 	lockSt := d.lockStatusLocked()
 	srv := ServerStatus{Addr: d.state.Server, State: ServerReconnecting, Attempt: d.attempt, LastError: d.lastError,
 		NextRetryAt: timePtr(d.nextRetryAt), UnreachableSince: timePtr(d.unreachableSince), LastMessageAt: timePtr(d.lastMessage)}
@@ -208,7 +213,7 @@ func (d *Daemon) Status(ctx context.Context) Status {
 	d.mu.Unlock()
 	st := Status{
 		Version:   d.opts.Version,
-		Self:      SelfStatus{Name: selfName, PeerID: d.state.PeerID, IPv4: d.state.IPv4},
+		Self:      SelfStatus{Name: selfName, PeerID: d.state.PeerID, IPv4: d.state.IPv4, IPv6: self6},
 		Server:    srv,
 		WireGuard: WGStatus{Interface: d.opts.Interface, ListenPort: d.state.ListenPort},
 		NAT:       NATStatus{Type: NATUnknown, Reflexive: []string{}, Local: []string{}},
@@ -276,6 +281,9 @@ func (d *Daemon) Status(ctx context.Context) Status {
 				hub.IPv4 = pfx.Addr().String()
 			}
 		}
+		if a, ok := hubAddr6(*nm); ok {
+			hub.IPv6 = a.String()
+		}
 		fill(hub)
 		if hub.LastHandshakeAt != nil && now.Sub(*hub.LastHandshakeAt) < hubStale {
 			hub.Path, hub.PathEndpoint = string(path.Direct), nm.Hub.Endpoint
@@ -283,7 +291,7 @@ func (d *Daemon) Status(ctx context.Context) Status {
 		st.Hub = hub
 	}
 	for _, p := range nm.Peers {
-		ps := PeerStatus{Name: p.Name, IPv4: p.IPv4, Kind: p.Kind, Owner: p.Owner, Online: p.Online, PublicKey: p.PublicKey,
+		ps := PeerStatus{Name: p.Name, IPv4: p.IPv4, IPv6: p.IPv6, Kind: p.Kind, Owner: p.Owner, Online: p.Online, PublicKey: p.PublicKey,
 			Path: string(path.Idle), EndpointCandidates: []Candidate{}}
 		for _, e := range p.Endpoints {
 			ps.EndpointCandidates = append(ps.EndpointCandidates, Candidate(e))
@@ -301,7 +309,7 @@ func (d *Daemon) Status(ctx context.Context) Status {
 			}
 		}
 		for _, a := range p.AllowedIPs {
-			if pfx, err := netip.ParsePrefix(a); err == nil && (pfx.Bits() != 32 || pfx.Addr().String() != p.IPv4) {
+			if pfx, err := netip.ParsePrefix(a); err == nil && (pfx.Bits() != pfx.Addr().BitLen() || (pfx.Addr().String() != p.IPv4 && pfx.Addr().String() != p.IPv6)) {
 				st.Routes = append(st.Routes, RouteStatus{Prefix: pfx.String(), Via: p.Name})
 			}
 		}
@@ -309,6 +317,9 @@ func (d *Daemon) Status(ctx context.Context) Status {
 			// The default route is the client's own addition (spec 013).
 			st.ExitNode.State = ExitStateActive
 			st.Routes = append(st.Routes, RouteStatus{Prefix: wg.ExitRoute.String(), Via: p.Name})
+			if _, _, ok := nm.selfIPv6(); ok && p.IPv6 != "" {
+				st.Routes = append(st.Routes, RouteStatus{Prefix: wg.ExitRoute6.String(), Via: p.Name})
+			}
 		}
 		// The server's presence verdict wins only while no path is in
 		// use: a direct path outlives a server outage.

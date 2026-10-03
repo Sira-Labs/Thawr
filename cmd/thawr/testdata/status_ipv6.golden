@@ -1,0 +1,11 @@
+thawr 0.1.0 · alice-laptop 100.64.0.7 fd3a:9c1e:44b0::6440:7 · server vpn.example.com:8443 v0.1.0 connected (netmap #42, 3s ago)
+WireGuard: kernel · thawr0 · listen 41820 · NAT: cone (reflexive 203.0.113.9:41820) · DNS: .thawr via resolved · lock: off
+
+PEER          IP            IPV6                     KIND     OWNER   PATH                           HANDSHAKE   RX / TX
+homelab-nas   100.64.0.3    fd3a:9c1e:44b0::6440:3   server   -       direct 198.51.100.4:51820      12s         1.2 MB / 340 kB
+build-box     100.64.0.9    -                        agent    -       relay                          3m          0 B / 0 B
+alice-phone   100.64.0.21   -                        human    alice   via hub                        -           -
+bob-laptop    100.64.0.12   -                        human    bob     idle                           never       -
+hub           100.64.0.1    fd3a:9c1e:44b0::6440:1   server   -       direct vpn.example.com:51820   25s         4 kB / 4.2 kB
+
+Filter: 3 rules · 0 dropped (last 5 min)
