@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -74,6 +75,7 @@ func (d *Daemon) syncPaths(ctx context.Context, nm NetMap, cfg wg.Config) error 
 	}
 	d.pmu.Lock()
 	defer d.pmu.Unlock()
+	self := cfg.PrivateKey.PublicKey()
 	seen := map[string]bool{}
 	var errs []error
 	for _, p := range nm.Peers {
@@ -104,6 +106,9 @@ func (d *Daemon) syncPaths(ctx context.Context, nm NetMap, cfg wg.Config) error 
 			d.relay.Release(relay.Key(pp.key))
 		}
 		pp.name, pp.key, pp.ipv4, pp.peer = p.Name, key, ip, byKey[key]
+		// The larger key staggers its probe windows, so the pair never
+		// re-adds each other in step (both derive the same order).
+		pp.machine.SetStagger(bytes.Compare(self[:], key[:]) > 0)
 		pp.cands, pp.symmetric = p.Candidates(), p.Symmetric
 		// The peer is trying to reach this device: probe back as if it
 		// had traffic for the peer, so both sides punch at once, and the
@@ -218,6 +223,13 @@ func (d *Daemon) pathTick(ctx context.Context) {
 		prev := pp.state
 		out := pp.machine.Step(in)
 		pp.steps++
+		if (out.Action == path.ActProbe || out.Action == path.ActRelay) && d.reachedSince(ctx, dev, pp.key, in) {
+			// The peer's own probe got through since stats were read: the
+			// re-add would throw that session away. Keep it; the next tick
+			// sees the handshake and takes the path (spec 004).
+			d.log.Debug("handshake arrived before the re-add; keeping it", "peer", pp.name)
+			out.Action = path.ActNone
+		}
 		switch out.Action {
 		case path.ActSink:
 			d.setPeerEndpoint(ctx, dev, pp, pp.sink.endpoint(), false)
@@ -258,6 +270,29 @@ func (d *Daemon) pathTick(ctx context.Context) {
 	if changed {
 		d.reportPaths(ctx, report)
 	}
+}
+
+// reachedSince reports, from stats read fresh, whether the peer reached
+// the device after the tick read in: a later handshake, received bytes
+// (an authenticated initiation counts), or WireGuard moving the
+// endpoint to a real address because an initiation came from there (as
+// responder, WireGuard records the handshake only once the initiator's
+// first data packet arrives). A
+// probe or relay step re-adds the peer, which would discard that
+// session.
+func (d *Daemon) reachedSince(ctx context.Context, dev wg.Device, key wg.Key, in path.Input) bool {
+	stats, err := dev.Stats(ctx)
+	if err != nil {
+		return false
+	}
+	for _, s := range stats {
+		if s.PublicKey != key {
+			continue
+		}
+		roamed := s.Endpoint.IsValid() && !s.Endpoint.Addr().IsLoopback() && s.Endpoint != in.Endpoint
+		return s.LastHandshake.After(in.Handshake) || roamed || s.RxBytes > in.Rx
+	}
+	return false
 }
 
 func (pp *peerPath) result() PathResult {

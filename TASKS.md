@@ -190,6 +190,13 @@ batches).
         dropping them: the first one is the handshake that opened the
         relay path, and losing it cost a 5 s WireGuard retry. First
         echo between two symmetric NATs: about 4 s.
+      - Probing back made both sides switch candidates on the same tick:
+        a re-add within a round trip of the other side's initiation
+        dropped the session it had just answered, and full cone against
+        symmetric fell to the relay in half the runs. The larger public
+        key staggers its rounds by half a window (both sides derive the
+        same order, no coordination needed), and a step is skipped when
+        fresh stats show the peer got through since the tick's read.
       - `relay.max_bytes_per_second` is a per-session token bucket with a
         one-second burst; queue overflow and violations are counted and
         all counters sit under `relay` in `/api/v1/status`.

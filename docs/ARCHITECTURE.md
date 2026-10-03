@@ -314,7 +314,13 @@ relay send to B without a session, §4.5) records the request in the
 hub for 30 s and wakes only B's stream; B's netmap flags A `wanted`,
 and B takes a newly flagged peer as traffic intent and starts its round
 toward A. The hub records requests only for peers with an open stream,
-and a netmap flags only peers the receiver may see. No userspace
+and a netmap flags only peers the receiver may see. Two sides probing
+each other start within milliseconds, so the one with the larger public
+key lengthens the first window of each round by 1 s: their candidate
+switches (each a re-add) then never land on the other's fresh
+handshake, which a re-add would throw away. A probe or relay step is
+also skipped when the device shows a handshake, received bytes or a
+moved endpoint for the peer since the tick read its stats. No userspace
 packet multiplexing: the kernel or `wireguard-go` device is always the
 one sending. Spec 004.
 
