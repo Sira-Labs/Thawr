@@ -4,16 +4,20 @@ name: automerge
 # marked ready, or pushed to while auto-merge is off (a push by someone
 # without write access turns it off), so it merges by itself (merge
 # commit) once the checks the branch rule on main requires have passed
-# and its review conversations are resolved. It enables auto-merge and
-# nothing else: no code from the pull request is checked out or run,
-# which keeps pull_request_target safe for forks and Dependabot.
+# and its review conversations are resolved. GitHub refuses to queue a
+# pull request that can merge right now (one marked ready, or reopened,
+# after its checks went green); that one is merged at once instead,
+# through the same merge call auto-merge uses, which enforces the same
+# rules. No code from the pull request is checked out or run, which
+# keeps pull_request_target safe for forks and Dependabot.
 #
 # One-time setup in the repository settings:
 #   1. General -> Pull Requests -> Allow auto-merge.
 #   2. Rules (or Branches) -> a rule for main that requires the ci checks
 #      to pass and conversations to be resolved. Without required checks
 #      GitHub has nothing to wait for and refuses to enable auto-merge,
-#      and this job fails rather than merging untested code.
+#      and this job fails rather than merging untested code: it merges
+#      directly only when the base branch's rules require status checks.
 #   3. Optional secret AUTOMERGE_TOKEN: a fine-grained token with contents
 #      and pull requests write access. Merges done with the default token
 #      start no other workflows, so without it ci and the pages deploy do
@@ -40,7 +44,28 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN || github.token }}
           PR_ID: ${{ github.event.pull_request.node_id }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          REPO: ${{ github.repository }}
         run: |
-          gh api graphql \
+          if out=$(gh api graphql \
             -f query='mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: MERGE}) { clientMutationId } }' \
-            -f id="$PR_ID"
+            -f id="$PR_ID" 2>&1); then
+            echo "$out"
+            exit 0
+          fi
+          echo "$out"
+          # Clean, unstable (a check that is not required failed) and
+          # has-hooks are the states that can merge now; anything else
+          # is a real failure.
+          if ! grep -qiE 'is in (clean|unstable|has_hooks) status' <<<"$out"; then
+            exit 1
+          fi
+          required=$(gh api "repos/$REPO/rules/branches/$BASE" --jq '[.[] | select(.type == "required_status_checks")] | length')
+          if [ "$required" -eq 0 ]; then
+            echo "::error::$BASE requires no status checks; not merging untested code"
+            exit 1
+          fi
+          # sha pins the merge to the head these checks ran on.
+          gh api -X PUT "repos/$REPO/pulls/$PR_NUMBER/merge" -f merge_method=merge -f sha="$HEAD_SHA"
