@@ -58,12 +58,16 @@ func TestRelayToDirectUpgrade(t *testing.T) {
 	if state, _, _ := pingPath(0); state != "relay" {
 		t.Fatalf("path = %s, want relay first", state)
 	}
+	st := status(0)
+	if len(st.Peers) != 1 {
+		t.Fatalf("status before the NAT swap: %+v", st)
+	}
+	peerIP := st.Peers[0].IPv4
 	for i, site := range sites {
 		applyNAT(t, site.nat, natRestricted, "p"+strconv.Itoa(i)+"n", site.lanIP)
 		// Existing conntrack entries keep the old random mappings.
 		_ = site.nat.cmd(context.Background(), "conntrack", "-F").Run()
 	}
-	peerIP := status(0).Peers[0].IPv4
 	deadline := time.Now().Add(3 * time.Minute) // discovery every 60 s, then a probe round
 	for {
 		st := status(0)

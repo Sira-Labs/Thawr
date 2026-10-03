@@ -263,10 +263,9 @@ func natMesh(t *testing.T, kinds []natKind, sameLAN bool) (status func(int) clie
 	}
 	status = func(i int) clientStatus {
 		var st clientStatus
-		out, err := sites[i].client.cmd(ctx, bin, "client", "status", "--json", "--socket", filepath.Join(dir, fmt.Sprintf("client-%d.sock", i+1))).Output()
-		if err != nil {
-			return st
-		}
+		// Exit 1 (server unreachable, e.g. right after a conntrack
+		// flush) still prints the status; only the JSON matters here.
+		out, _ := sites[i].client.cmd(ctx, bin, "client", "status", "--json", "--socket", filepath.Join(dir, fmt.Sprintf("client-%d.sock", i+1))).Output()
 		_ = json.Unmarshal(out, &st)
 		return st
 	}
