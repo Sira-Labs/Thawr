@@ -43,7 +43,7 @@ func TestEncryptedPingTwoClients(t *testing.T) {
 	}
 
 	writeFile(t, filepath.Join(dir, "policy.yaml"), allowAllPolicy)
-	writeFile(t, filepath.Join(dir, "server.yaml"), strings.NewReplacer("127.0.0.1", "0.0.0.0").Replace(serverConfig(dir)))
+	writeFile(t, filepath.Join(dir, "server.yaml"), starServerConfig(dir))
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	srv := srvNs.cmd(ctx, bin, "server", "--config", filepath.Join(dir, "server.yaml"))

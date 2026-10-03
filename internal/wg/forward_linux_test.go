@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/google/nftables"
 )
 
 // TestAllowForwardThroughDockerChain creates a Docker-style FORWARD
@@ -30,6 +32,16 @@ func TestAllowForwardThroughDockerChain(t *testing.T) {
 		}
 		return string(out)
 	}
+	// The host may run Docker itself (CI runners do): its chains get the
+	// rule too, so the test chain is counted on top of them.
+	c, err := nftables.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	existing, err := dropForwardChains(c)
+	if err != nil {
+		t.Fatal(err)
+	}
 	nft("add", "table", "ip", "thawrfwdtest")
 	defer func() {
 		_, _ = exec.CommandContext(ctx, "nft", "delete", "table", "ip", "thawrfwdtest").CombinedOutput()
@@ -41,8 +53,8 @@ func TestAllowForwardThroughDockerChain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if chains != 1 {
-		t.Errorf("chains touched: %d, want 1", chains)
+	if chains != len(existing)+1 {
+		t.Errorf("chains touched: %d, want %d", chains, len(existing)+1)
 	}
 	listing := nft("list", "chain", "ip", "thawrfwdtest", "FORWARD")
 	lines := strings.Split(strings.TrimSpace(listing), "\n")

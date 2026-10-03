@@ -44,8 +44,18 @@ func requireSystemd(t *testing.T) {
 // uninstall --purge removes everything. Spec 009 acceptance.
 func TestInstallSystemd(t *testing.T) {
 	requireSystemd(t)
-	bin := thawrBinary(t)
 	dir := shortTempDir(t)
+	// The units set ProtectHome=yes, so a binary in a checkout under
+	// /home (a CI runner's workspace) is invisible to the service; run
+	// a copy from the test's directory instead.
+	built, err := os.ReadFile(thawrBinary(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, "thawr")
+	if err := os.WriteFile(bin, built, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	writeFile(t, filepath.Join(dir, "server.yaml"), installConfig(dir))
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()

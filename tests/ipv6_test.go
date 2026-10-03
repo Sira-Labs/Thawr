@@ -123,9 +123,17 @@ func TestIPv6OverlayEndToEnd(t *testing.T) {
 	if after := drops(); after <= before {
 		t.Errorf("bob's filter counted no drop for the denied IPv6 probe (%d → %d)", before, after)
 	}
-	// bob may not reach alice at all.
-	if out, err := m.clients[1].cmd(ctx, "ping", "-6", "-c", "1", "-W", "2", alice.Self.IPv6).CombinedOutput(); err == nil {
-		t.Errorf("bob pinged alice over IPv6 although the policy denies it:\n%s", out)
+	// bob may not open a connection to alice: the policy grants only
+	// alice → bob. (ICMP echo between visible peers is allowed by
+	// design, so a ping would prove nothing.)
+	l := m.clients[0].cmd(ctx, "nc", "-6", "-l", "-k", "-p", "7070")
+	if err := l.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = l.Process.Kill(); _ = l.Wait() })
+	time.Sleep(500 * time.Millisecond)
+	if out, err := m.clients[1].cmd(ctx, "nc", "-6", "-z", "-w", "2", alice.Self.IPv6, "7070").CombinedOutput(); err == nil {
+		t.Errorf("bob reached alice's port 7070 over IPv6 although the policy denies it:\n%s", out)
 	}
 }
 

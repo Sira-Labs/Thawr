@@ -126,6 +126,15 @@ const allowAllPolicy = "version: 1\nacls:\n  - action: accept\n    src: ['*']\n 
 // names users starts with it and reloads its own once they exist.
 const emptyPolicy = "version: 1\n"
 
+// starServerConfig is serverConfig for the star topology: the server
+// namespace holds 10.9.<i>.1 toward client i and listens on all of
+// them, and public_addr is 10.9.0.1, which every namespace reaches
+// through its default route, so the hub endpoint the clients and the
+// phone get is reachable (0.0.0.0 would point each at itself).
+func starServerConfig(dir string) string {
+	return strings.NewReplacer("public_addr: 127.0.0.1", "public_addr: 10.9.0.1", "127.0.0.1", "0.0.0.0").Replace(serverConfig(dir))
+}
+
 func serverConfig(dir string) string {
 	return fmt.Sprintf(`public_addr: 127.0.0.1
 data_dir: %s/data
