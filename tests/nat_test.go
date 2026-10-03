@@ -55,7 +55,7 @@ const serverIP = "10.8.0.1"
 func natTopology(t *testing.T, kinds []natKind, sameLAN bool) (*netns, []natSite) {
 	t.Helper()
 	srv := newNetns(t, "srv")
-	srv.ip(t, "sysctl", "-w", "net.ipv4.ip_forward=1")
+	srv.ipForward(t)
 	var sites []natSite
 	for i, kind := range kinds {
 		client := newNetns(t, fmt.Sprintf("c%d", i))
@@ -66,7 +66,7 @@ func natTopology(t *testing.T, kinds []natKind, sameLAN bool) (*netns, []natSite
 			lan = "192.168.10"
 		} else {
 			nat = newNetns(t, fmt.Sprintf("n%d", i))
-			nat.ip(t, "sysctl", "-w", "net.ipv4.ip_forward=1")
+			nat.ipForward(t)
 			// NAT <-> server link.
 			ps, pn := fmt.Sprintf("p%ds", i), fmt.Sprintf("p%dn", i)
 			ip(t, "link", "add", ps, "type", "veth", "peer", "name", pn)
@@ -119,10 +119,10 @@ func applyNAT(t *testing.T, nat *netns, kind natKind, wanIface, lanClient string
 		masq = "masquerade fully-random"
 	}
 	rules := fmt.Sprintf(`table ip nat {
-  chain postrouting { type nat hook postrouting priority srcnat; oifname %q %s }
+  chain postrouting { type nat hook postrouting priority srcnat; oifname %q %s; }
 `, wanIface, masq)
 	if kind == natFullCone {
-		rules += fmt.Sprintf(`  chain prerouting { type nat hook prerouting priority dstnat; iifname %q udp dport 1024-65535 dnat to %s }
+		rules += fmt.Sprintf(`  chain prerouting { type nat hook prerouting priority dstnat; iifname %q udp dport 1024-65535 dnat to %s; }
 `, wanIface, lanClient)
 	}
 	rules += "}\n"
@@ -195,6 +195,7 @@ func natMesh(t *testing.T, kinds []natKind, sameLAN bool) (status func(int) clie
 	dir := shortTempDir(t)
 	srvNs, sites := natTopology(t, kinds, sameLAN)
 
+	writeFile(t, filepath.Join(dir, "policy.yaml"), allowAllPolicy)
 	writeFile(t, filepath.Join(dir, "server.yaml"), strings.NewReplacer("public_addr: 127.0.0.1", "public_addr: "+serverIP, "127.0.0.1", "0.0.0.0").Replace(serverConfig(dir)))
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	t.Cleanup(cancel)

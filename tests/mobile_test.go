@@ -70,7 +70,7 @@ func newStarMesh(t *testing.T, policy string, withPhone bool) *mobileMesh {
 		phone = newNetns(t, "ph")
 		nodes = append(nodes, phone)
 	}
-	srvNs.ip(t, "sysctl", "-w", "net.ipv4.ip_forward=1")
+	srvNs.ipForward(t)
 	for i, ns := range nodes {
 		veth := "v" + string(rune('a'+i))
 		sub := "10.9." + string(rune('0'+i))
@@ -83,7 +83,7 @@ func newStarMesh(t *testing.T, policy string, withPhone bool) *mobileMesh {
 		ns.ip(t, "link", "set", veth+"c", "up")
 		ns.ip(t, "route", "add", "default", "via", sub+".1")
 	}
-	writeFile(t, filepath.Join(dir, "policy.yaml"), policy)
+	writeFile(t, filepath.Join(dir, "policy.yaml"), emptyPolicy)
 	writeFile(t, filepath.Join(dir, "server.yaml"), strings.NewReplacer("127.0.0.1", "0.0.0.0").Replace(serverConfig(dir)))
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	t.Cleanup(cancel)
@@ -108,6 +108,10 @@ func newStarMesh(t *testing.T, policy string, withPhone bool) *mobileMesh {
 		if out, err := c.CombinedOutput(); err != nil {
 			t.Fatalf("user create: %v\n%s", err, out)
 		}
+	}
+	writeFile(t, filepath.Join(dir, "policy.yaml"), policy)
+	if out, err := admin("policy", "reload"); err != nil {
+		t.Fatalf("policy reload: %v\n%s", err, out)
 	}
 	for i, ns := range clients {
 		owner := []string{"alice", "bob"}[i]

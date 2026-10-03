@@ -28,7 +28,7 @@ func TestEncryptedPingTwoClients(t *testing.T) {
 	// Star topology: each client namespace has a veth into the server
 	// namespace; the server routes between them so clients reach each
 	// other directly (spec 004 adds NAT traversal for the harder cases).
-	srvNs.ip(t, "sysctl", "-w", "net.ipv4.ip_forward=1")
+	srvNs.ipForward(t)
 	for i, ns := range clients {
 		veth := "v" + string(rune('a'+i))
 		sub := "10.9." + string(rune('0'+i))
@@ -42,6 +42,7 @@ func TestEncryptedPingTwoClients(t *testing.T) {
 		ns.ip(t, "route", "add", "default", "via", sub+".1")
 	}
 
+	writeFile(t, filepath.Join(dir, "policy.yaml"), allowAllPolicy)
 	writeFile(t, filepath.Join(dir, "server.yaml"), strings.NewReplacer("127.0.0.1", "0.0.0.0").Replace(serverConfig(dir)))
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()

@@ -64,6 +64,14 @@ func (n *netns) ip(t *testing.T, args ...string) string {
 	return string(out)
 }
 
+// ipForward turns on IPv4 forwarding inside the namespace.
+func (n *netns) ipForward(t *testing.T) {
+	t.Helper()
+	if out, err := n.cmd(context.Background(), "sysctl", "-w", "net.ipv4.ip_forward=1").CombinedOutput(); err != nil {
+		t.Fatalf("in %s: sysctl net.ipv4.ip_forward=1: %v\n%s", n.name, err, out)
+	}
+}
+
 // ip runs an iproute2 command in the host namespace.
 func ip(t *testing.T, args ...string) {
 	t.Helper()
@@ -107,6 +115,16 @@ func writeFile(t *testing.T, path, content string) {
 		t.Fatal(err)
 	}
 }
+
+// allowAllPolicy lets every peer reach every port of every other. The
+// suites that test paths rather than policy run with it, since a
+// server without a policy denies everything (spec 006); it names no
+// user, so the server accepts it before any user exists.
+const allowAllPolicy = "version: 1\nacls:\n  - action: accept\n    src: ['*']\n    dst: ['*:*']\n"
+
+// emptyPolicy is valid before any user exists; a test whose policy
+// names users starts with it and reloads its own once they exist.
+const emptyPolicy = "version: 1\n"
 
 func serverConfig(dir string) string {
 	return fmt.Sprintf(`public_addr: 127.0.0.1
