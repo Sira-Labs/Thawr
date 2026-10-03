@@ -117,6 +117,7 @@ Every entity that can hold a WireGuard key is a **peer**. A peer has:
 | `tags` | Set of `tag:name`. Policy addresses peers by owner, group, or tag |
 | `public_key` | WireGuard public key. Private key never leaves the device for `agent` peers |
 | `ipv4` | Overlay address, `/32`, allocated by the server from `overlay.cidr` |
+| `ipv6` | IPv6 overlay address, `/128`: the server's ULA `/64` with `ipv4` in the last 32 bits (`100.64.0.7` → `<prefix>::6440:7`); `ipv6_capable` records whether the peer's client said it carries it (spec 015) |
 | `node_secret_hash` | SHA-256 of the bearer secret an `agent` peer uses on the control channel |
 | `last_seen_at`, `created_at`, `expires_at` | Lifecycle |
 
@@ -140,7 +141,15 @@ generates its WireGuard key (`server.key`, 0600), generates a self-signed
 TLS certificate valid 10 years with SAN = public host
 (`tls/cert.pem`, `tls/key.pem`), brings up `thawr0` with `100.64.0.1/10`,
 starts STUN, relay, gRPC, REST, and prints the TLS fingerprint. Subsequent
-starts reuse everything. Spec 001. On Windows, where the mode bits mean
+starts reuse everything. Spec 001. The IPv6 overlay prefix is
+`overlay.ipv6` or, when empty, a ULA `/64` generated once (`fd` + 40
+random bits, RFC 4193); either way it is recorded in the database (meta
+`overlay_ipv6`), a start whose configured prefix differs is refused, and
+peers without an IPv6 address get the derived one. The hub interface
+carries `<prefix>::6440:1/64` next to its IPv4 address, and the server
+enables IPv6 forwarding (Linux: `net.ipv6.conf.all.forwarding`, after
+moving interfaces with `accept_ra=1` to `2` so the host keeps its own
+router advertisements; both restored at shutdown). Spec 015. On Windows, where the mode bits mean
 nothing, every start makes Administrators the owner of `data_dir` and
 limits it, like the admin socket, to SYSTEM, Administrators and the
 owner (`internal/fsperm`).
@@ -206,6 +215,15 @@ peer's view:
 - the signed lock record, if any, and per peer (the hub and the
   receiver itself included) the signatures over its current record
   (spec 012)
+
+IPv6 (spec 015) rides on a capability flag: a client sends `ipv6: true`
+in `Enroll` and every `Sync` when its kernel runs IPv6, and the server
+stores it per peer. Only a capable receiver gets its own IPv6 address,
+the `/64`, the hub's `/128` and IPv6 filter rules, and it gets another
+peer's IPv6 address and `/128` only when that peer is capable too. An
+incapable receiver gets exactly the IPv4 netmap of before. Filter and
+forward rules carry one source address of either family; a source with
+both addresses gets a rule per family.
 
 With the network lock on (spec 012) the client runs the lock check
 before the pins: the record the server offers is reconciled with the
@@ -389,13 +407,14 @@ generate a WireGuard keypair in server memory, store the public key as
 a `static` peer with the next free overlay address and no node secret,
 and bump the generation. The REST layer renders a standard WireGuard
 `.conf` (`Endpoint = public_addr:51820`, `AllowedIPs = <overlay
-cidr>`, keepalive 25 s) and a QR code (half blocks in the terminal,
+cidr>, <ipv6 prefix>`, `Address = <v4>/32, <v6>/128`, keepalive 25 s)
+and a QR code (half blocks in the terminal,
 SVG in the UI), returns them once and zeroes the key. Admins may
 create for any owner; members only for themselves and only with tags
 `tagOwners` grants them.
 
 The generation bump makes `followRegistry` add the phone to the hub
-interface (`AllowedIPs = <ip>/32`) and `installHubFilter` install, on
+interface (`AllowedIPs = <ip>/32, <ipv6>/128`) and `installHubFilter` install, on
 the forward hook, every policy rule whose source or destination is a
 static peer (the hub forwards nothing else); the hub host forwards
 between the interface and itself (Linux: `conf/<iface>/forwarding`,
@@ -436,13 +455,17 @@ only the local host (its own overlay address and loopback): a peer the
 policy lets reach port 53 gets nothing, so a device's netmap is not
 disclosed through names. Answers carry a 30 s TTL; names outside the
 zone are REFUSED, since the OS only routes `.thawr` to the client
-resolver.
+resolver. A name answers A with its IPv4 address and AAAA with its IPv6
+address where the netmap carries one (NODATA otherwise), and PTR under
+`in-addr.arpa` and `ip6.arpa`; resolvers keep listening on IPv4 only
+and answer both record types there (spec 015).
 
 The server binds the same resolver on the hub address
 (`dns.enabled`, default true) with a `Source` over the peer registry,
 cached per hub generation, that answers a requesting overlay address
 only with peers the policy makes visible to it (the same `Visibility`
-that decides key distribution) plus the hub. The phone config carries
+that decides key distribution) plus the hub; IPv6 addresses go only to
+capable requesters and only for capable peers. The phone config carries
 `DNS = <hub ip>, thawr`; because the WireGuard app then sends every
 query through the tunnel, the hub resolver forwards names outside the
 zone to `dns.upstream` or, when empty, the nameservers of the host's
@@ -483,6 +506,12 @@ switch). A router enables `ip_forward` while it runs and extends its
 `inet thawr` table with a forward chain (policy drop; established
 flows and the forward rules from the netmap pass) and a nat chain
 that masquerades overlay sources toward the prefixes it advertises.
+With the IPv6 overlay on both ends (spec 015) an exit node also
+carries `::/0`: the client routes it through a second policy routing
+rule pair, and the exit node enables IPv6 forwarding (with the same
+`accept_ra` care as the hub) and masquerades the IPv6 overlay (NAT66).
+An exit node without the IPv6 overlay carries IPv4 only. Advertised
+subnet routes stay IPv4.
 The router takes the prefixes it forwards from its own state, never
 from the netmap, so a server that invents a route on a peer sends
 traffic into a drop rule. With `wireguard-go` on Linux the userspace
@@ -683,5 +712,5 @@ Windows with Go 1.26 or newer (the minimum required by the gRPC and
 
 No own cryptography, no Layer 2, no hosted control plane, no native
 mobile apps in v1, no routers or exit-node use outside Linux in this
-release (spec 013), no IPv6 overlay (spec 015; schema reserves
-`ipv6`).
+release (spec 013), no IPv6 subnet routes and no globally routed or
+IPv6-only overlay (spec 015).

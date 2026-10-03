@@ -11,6 +11,19 @@ when one exists, and GitHub's generated notes otherwise.
 
 ### Added
 
+- IPv6 overlay (spec 015): every peer gets an IPv6 address next to its
+  IPv4 one, the IPv4 address in the last 32 bits of a ULA `/64` the
+  server generates once and keeps (`overlay.ipv6` to choose it; a
+  changed prefix refuses to start). Clients say they carry IPv6 in
+  `Enroll` and `Sync`, and only then get IPv6 addresses, `/128`s and
+  IPv6 filter rules, so clients from before 015 keep an unchanged
+  IPv4 netmap. Kernel and userspace filters match IPv6 (ICMPv6 errors
+  and neighbour discovery always pass), names answer AAAA and
+  `ip6.arpa`, `client status` and the admin views show both addresses,
+  the phone config carries both, and exit nodes carry `::/0` with
+  NAT66. Linux hosts that enable IPv6 forwarding (the hub, routers)
+  move `accept_ra=1` interfaces to `2` first and restore both on stop.
+
 - `thawr admin backup` and `thawr server restore` (spec 014): one
   archive with the database (consistent `VACUUM INTO` snapshot), the
   server's WireGuard key, the pinned TLS certificate, the ACME cache

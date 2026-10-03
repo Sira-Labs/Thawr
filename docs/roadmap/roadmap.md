@@ -51,6 +51,10 @@ Progress log:
   metrics on the admin socket and an opt-in listener, a browser
   certificate from ACME chosen by server name while clients keep the
   pinned one). PRs #41–#43.
+- **2026-10-03** sprint 7: 015 IPv6 overlay (a ULA `/64` chosen once,
+  IPv6 addresses derived from IPv4, a capability flag so older clients
+  keep IPv4, dual-stack filters, AAAA and `ip6.arpa`, exit nodes with
+  `::/0` and NAT66). PRs #50–#52.
 
 Exit criteria: specs 001–012 implemented with unit tests and the netns
 integration suite green on a Linux VM; the manual checklists in

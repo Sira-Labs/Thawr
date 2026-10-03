@@ -138,9 +138,9 @@ re-added. The hub is always capable.
 - `<name>.thawr` answers AAAA with the peer's IPv6 address (capable
   peers), A as before; `hub.thawr` answers both.
 - Reverse lookups under `ip6.arpa` for the ULA prefix answer the name.
-- The resolver accepts queries from the device's own IPv6 address; the
-  registrars keep pointing the system at the IPv4 resolver address,
-  which answers both record types.
+- The resolvers keep listening on IPv4 only and answer both record
+  types there; the registrars keep pointing the system at that address,
+  so no resolver needs an IPv6 listener.
 
 ## Acceptance criteria
 

@@ -395,3 +395,56 @@ host, and an enrolled laptop.
    `data_dir/acme/<domain>` and restart: the browser certificate
    changes, the laptop notices nothing. Without `min_client_version`
    (or with `listen.https` off port 443) `server --check` warns.
+
+## Manual checklist for the IPv6 overlay (spec 015)
+
+Needs the VPS server, two Linux devices (one of them the exit node from
+spec 013), a Mac, a Windows PC and a phone, all upgraded unless a step
+says otherwise.
+
+1. Upgrade the server: the log line `ipv6 overlay ready` names a
+   `fdXX:XXXX:XXXX::/64` and `generated=true`; a restart keeps it
+   (`generated=false`). Set `overlay.ipv6` to another `/64` and restart:
+   the server refuses with `overlay.ipv6 changed`. Remove the key again.
+   `ip -6 addr show thawr0` shows `<prefix>::6440:1/64`;
+   `sysctl net.ipv6.conf.all.forwarding` reads 1, and on a VPS whose
+   IPv6 comes from router advertisements `ip -6 route` still has its
+   default route an hour later (`accept_ra` reads 2 on its interface).
+2. `thawr admin peer list` shows an IPV6 column with every peer's
+   address ending in its IPv4 address in hex.
+3. Before upgrading a Linux client, its `client status` shows no IPv6
+   and it still reaches every peer over IPv4. Upgrade it: the log has
+   `ipv6 overlay address`, `ip -6 addr show thawr0` has its `/64`
+   address (no `tentative` flag), `state.json` has `ipv6` and
+   `overlay_ipv6`, and `client status` lists both addresses on the
+   self line.
+4. With both Linux clients upgraded: `ping -6 <peer>.thawr` and
+   `ping -6 <peer ipv6>` answer; `dig AAAA <peer>.thawr @<own ipv4>`
+   and `dig -x <peer ipv6> @<own ipv4>` answer; `ssh -6 <peer>.thawr`
+   connects. With a policy that opens only port 22, `curl -6
+   http://[<peer ipv6>]:8080` times out and the peer's filter counts
+   the drop; `nft list table inet thawr` on the peer has the `ip6
+   saddr` rules and the `icmpv6 type 1-4` and `133-137` rules.
+5. Add a phone (`admin peer add-mobile`): the QR's config has
+   `Address = <v4>/32, <v6>/128` and the IPv6 prefix in `AllowedIPs`.
+   On the phone, a ping app reaches a Linux peer's IPv6 address; a
+   policy that denies the port denies it over IPv6 as well. A phone
+   added before the upgrade keeps working on IPv4.
+6. Exit node: on the laptop, `client exit-node <router>`;
+   `curl -6 https://ifconfig.co` shows the router's public IPv6
+   address (the laptop's own native IPv6 no longer leaks); `ip -6 rule`
+   lists the two thawr rules and `ip -6 route show table 0x7a77` the
+   default through `thawr0`; `nft list table inet thawr` on the router
+   has `ip6 saddr <prefix>/64 masquerade`. `client exit-node off`
+   restores the native IPv6 address. With an exit node not yet
+   upgraded, `curl -4` goes through it and `curl -6` leaves natively.
+7. macOS: after `client up`, `ifconfig utunN` shows the `inet6`
+   address with `prefixlen 64`, `netstat -rn -f inet6` routes the
+   `/64` through it, `ping6 <peer>.thawr` answers. As hub: `sysctl
+   net.inet6.ip6.forwarding` reads 1.
+8. Windows: `netsh interface ipv6 show addresses thawr0` lists the
+   address; `ping -6 <peer>.thawr` answers.
+9. A Linux host booted with `ipv6.disable=1`: the client runs with
+   IPv4 only (no IPv6 in its status) and other peers do not list an
+   IPv6 address for it; a server there logs that the hub has no IPv6
+   address and keeps serving IPv4.

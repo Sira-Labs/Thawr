@@ -53,6 +53,10 @@ sprints are in `docs/roadmap/`.
   policy says who may use it (`dst: ["10.1.0.0/24:22"]`,
   `"internet:*"`), and `thawr client exit-node <name>` sends a laptop's
   internet through the peer at home.
+- Dual stack: every peer has an IPv6 address from a private `/64` the
+  server picks once (`fd…::6440:7` next to `100.64.0.7`), with AAAA
+  names, the same policy over IPv6, both addresses in the phone's QR,
+  and IPv6 through exit nodes. Devices not yet upgraded keep IPv4.
 - Every device pins the hub's key and the key of every peer it reaches
   directly: a key that changes is held out of the tunnel until you run
   `thawr client trust <name>`, so a compromised server cannot silently

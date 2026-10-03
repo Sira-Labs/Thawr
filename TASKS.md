@@ -789,7 +789,7 @@ tree that followed. One commit each, highest severity first.
 
 ## Sprint 7 — IPv6 overlay
 
-- [~] **015 IPv6 overlay** — `docs/specs/015-ipv6-overlay.md`
+- [x] **015 IPv6 overlay** — `docs/specs/015-ipv6-overlay.md`
       Every peer gets an IPv6 address next to its IPv4 one. Three PRs:
       control plane, data plane (`internal/wg` and the hub), client with
       names, status and integration tests.
@@ -820,6 +820,34 @@ tree that followed. One commit each, highest severity first.
       - Control plane done (PR 1). Phones created from now on get both
         addresses in their config; until the hub has IPv6 (PR 2) that
         traffic has nowhere to go, which no release ships.
+      - Linux has no per-interface IPv6 forwarding switch, and turning on
+        `net.ipv6.conf.all.forwarding` makes the kernel ignore router
+        advertisements where `accept_ra=1`. Every interface (and
+        `default`) with 1 moves to 2 first; both come back on stop, and
+        nothing is touched when forwarding was already on.
+      - IPv6 addresses go on without DAD (`IFA_F_NODAD`): the derived
+        address is unique by construction. A kernel booted without IPv6
+        keeps IPv4 only (`wg.IPv6Available`), and that client says
+        `ipv6: false`, so no peer is handed an address it cannot reach.
+      - ICMPv6 errors (1–4) and neighbour discovery (133–137) pass both
+        filters without a rule; echo (128) follows the visible set like
+        ICMP echo. The userspace filter walks at most 8 extension
+        headers; a later fragment is treated like an IPv4 one.
+      - NAT66 needs `MasqueradeFrom6`: without the overlay's `/64` no
+        IPv6 masquerade rule exists, so a router never rewrites the
+        host's own IPv6 traffic. An exit node without the IPv6 overlay
+        forwards IPv4 only.
+      - The resolvers keep their IPv4 listener and answer AAAA there
+        (the spec's "queries from the own IPv6 address" became moot);
+        the hub resolver tells IPv6 addresses only to capable
+        requesters. The client answers `ip6.arpa` for all of `fd00::/8`,
+        since its `/64` may arrive after the resolver starts.
+      - `client status` shows the IPV6 column only when a row has an
+        address, so IPv4-only networks see the table they know.
+      - Not run here: this container's kernel has IPv6 disabled and no
+        iproute2, so the netns IPv6 tests (`TestIPv6OverlayEndToEnd`,
+        `TestIPv6PhoneViaHub`) and the TESTING 015 checklist are the
+        owner's to run; there is no netns exit-node IPv6 test.
 
 ## Phase 2 candidates (scheduled as specs 014–021 in `docs/roadmap/`)
 
