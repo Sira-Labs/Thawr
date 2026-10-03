@@ -131,6 +131,13 @@ func (m *Machine) SetStagger(on bool) {
 	}
 }
 
+// Clone returns a copy of the machine, for a caller that may have to
+// take back a step whose action it could not perform.
+func (m *Machine) Clone() *Machine {
+	c := *m
+	return &c
+}
+
 // State reports the current state.
 func (m *Machine) State() State { return m.state }
 
