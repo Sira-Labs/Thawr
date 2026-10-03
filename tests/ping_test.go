@@ -129,6 +129,14 @@ func TestEncryptedPingTwoClients(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 	}
 
+	// The direct path settles within seconds of the sync (spec 004);
+	// until it does there is nothing to carry a ping.
+	deadline = time.Now().Add(20 * time.Second)
+	for clients[0].cmd(ctx, "ping", "-c", "1", "-W", "1", st2.Self.IPv4).Run() != nil {
+		if time.Now().After(deadline) {
+			t.Fatalf("no path from client-1 to %s within 20 s", st2.Self.IPv4)
+		}
+	}
 	if out, err := clients[0].cmd(ctx, "ping", "-c", "3", "-W", "2", st2.Self.IPv4).CombinedOutput(); err != nil {
 		t.Fatalf("ping %s from client-1: %v\n%s", st2.Self.IPv4, err, out)
 	}
