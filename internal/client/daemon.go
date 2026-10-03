@@ -841,7 +841,7 @@ func (d *Daemon) Trust(ctx context.Context, names []string) ([]HeldStatus, error
 func selectHeld(held []HeldStatus, names []string) ([]HeldStatus, error) {
 	var accept []HeldStatus
 	for _, name := range names {
-		name = stripZone(name)
+		name = StripZone(name)
 		if name == "all" {
 			for _, h := range held {
 				if h.Reason != HeldUnsigned {
@@ -927,7 +927,7 @@ const ExitNodeOff = "off"
 // the netmap. The peer must be flagged as exit node in the current
 // netmap and not held.
 func (d *Daemon) SetExitNode(ctx context.Context, name string) (ExitNodeStatus, error) {
-	name = stripZone(name)
+	name = StripZone(name)
 	if name == ExitNodeOff {
 		name = ""
 	}

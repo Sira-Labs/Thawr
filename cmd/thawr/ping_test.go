@@ -114,3 +114,18 @@ func TestClientPingExitCodes(t *testing.T) {
 		t.Errorf("no ping route: exit %d", code)
 	}
 }
+
+// TestClientPingZoneName: `ping bob-laptop.thawr` reports the path of
+// bob-laptop; matching the status against the name with its zone found
+// no peer and exited 1 although the path was direct.
+func TestClientPingZoneName(t *testing.T) {
+	sock, pinged := probingDaemon(t)
+	out, code, err := runCLI(t, "client", "ping", "Bob-Laptop.thawr.", "--count", "0", "--json", "--socket", sock)
+	var res client.PathResult
+	if code != 0 || json.Unmarshal([]byte(out), &res) != nil || res.State != "direct" || res.Peer != "bob-laptop" {
+		t.Fatalf("exit %d (%v): %q", code, err, out)
+	}
+	if pinged() != 1 {
+		t.Errorf("daemon pinged %d times, want 1", pinged())
+	}
+}
