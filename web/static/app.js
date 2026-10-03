@@ -36,7 +36,7 @@
     const tr = document.createElement("tr");
     tr.className = "detail";
     const td = document.createElement("td");
-    td.colSpan = 9;
+    td.colSpan = 10;
     const section = (title, items) => {
       const h = document.createElement("div");
       h.className = "muted";
@@ -91,7 +91,7 @@
     tbody.replaceChildren();
     for (const p of peers) {
       const tr = document.createElement("tr");
-      tr.append(cell(p.name), cell(p.ipv4), cell(p.kind), cell(p.owner || "-"), cell(p.tags.join(", ") || "-"), cell(p.created_at), signedCell(p));
+      tr.append(cell(p.name), cell(p.ipv4), cell(p.ipv6 || "-"), cell(p.kind), cell(p.owner || "-"), cell(p.tags.join(", ") || "-"), cell(p.created_at), signedCell(p));
       tr.append(actionCell("Show", async () => {
         const next = tr.nextElementSibling;
         if (next && next.classList.contains("detail")) { next.remove(); return; }

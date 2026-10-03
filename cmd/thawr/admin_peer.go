@@ -21,6 +21,7 @@ type peerJSON struct {
 	Tags       []string `json:"tags"`
 	PublicKey  string   `json:"public_key"`
 	IPv4       string   `json:"ipv4"`
+	IPv6       string   `json:"ipv6,omitempty"`
 	Online     bool     `json:"online"`
 	CreatedAt  string   `json:"created_at"`
 	LastSeenAt string   `json:"last_seen_at,omitempty"`
@@ -86,10 +87,10 @@ func newAdminPeerCmd(flags *adminFlags) *cobra.Command {
 			now := time.Now()
 			rows := make([][]string, 0, len(peers))
 			for _, p := range peers {
-				rows = append(rows, []string{p.Name, p.IPv4, p.Kind, p.Mode, dash(p.Owner), dash(strings.Join(p.Tags, ",")), onlineWord(p.Online),
+				rows = append(rows, []string{p.Name, p.IPv4, dash(p.IPv6), p.Kind, p.Mode, dash(p.Owner), dash(strings.Join(p.Tags, ",")), onlineWord(p.Online),
 					lastSeen(p.LastSeenAt, now), pathSummaryText(p), dash(p.Version), dash(p.OS), signedWord(p.Signed)})
 			}
-			return table(cmd.OutOrStdout(), []string{"NAME", "IP", "KIND", "MODE", "OWNER", "TAGS", "STATE", "LAST SEEN", "PATHS", "VERSION", "OS", "SIGNED"}, rows)
+			return table(cmd.OutOrStdout(), []string{"NAME", "IP", "IPV6", "KIND", "MODE", "OWNER", "TAGS", "STATE", "LAST SEEN", "PATHS", "VERSION", "OS", "SIGNED"}, rows)
 		},
 	}
 	list.Flags().BoolVar(&onlineOnly, "online", false, "only peers with a live sync stream")
@@ -279,7 +280,7 @@ func renderPeerDetail(w io.Writer, d peerDetailJSON, now time.Time) error {
 		nat = "symmetric"
 	}
 	lines := [][2]string{
-		{"name", d.Name}, {"ip", d.IPv4}, {"kind", d.Kind}, {"mode", d.Mode}, {"owner", dash(d.Owner)},
+		{"name", d.Name}, {"ip", d.IPv4}, {"ipv6", dash(d.IPv6)}, {"kind", d.Kind}, {"mode", d.Mode}, {"owner", dash(d.Owner)},
 		{"tags", dash(strings.Join(d.Tags, ","))}, {"state", onlineWord(d.Online)}, {"last seen", lastSeen(d.LastSeenAt, now)},
 		{"version", dash(d.Version)}, {"os", dash(d.OS)}, {"key", d.PublicKey}, {"created", d.CreatedAt}, {"nat", nat}, {"signed", signedWord(d.Signed)},
 	}
