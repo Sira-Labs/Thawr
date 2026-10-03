@@ -59,7 +59,8 @@ when one exists, and GitHub's generated notes otherwise.
   connection is no longer dropped either. Two symmetric NATs now
   exchange the first echo through the relay within seconds, and two
   devices punching at each other no longer drop the session one of
-  them just answered.
+  them just answered. A pair that upgrades from the relay to a direct
+  path now closes its relay proxy.
 - Product page: the Windows downloads pass `-UseBasicParsing`, so Windows PowerShell 5.1 with
   the December 2025 update no longer asks for confirmation.
 - Product page: the install commands stop when a download fails or the checksum does not

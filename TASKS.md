@@ -197,6 +197,10 @@ batches).
         key staggers its rounds by half a window (both sides derive the
         same order, no coordination needed), and a step is skipped when
         fresh stats show the peer got through since the tick's read.
+      - A retry from the relay that succeeds goes relay -> probing ->
+        direct; the proxy was released only on a direct relay -> X
+        step, so upgraded peers kept it (and the relay connection)
+        forever. It is now released on any settled non-relay state.
       - `relay.max_bytes_per_second` is a per-session token bucket with a
         one-second burst; queue overflow and violations are counted and
         all counters sit under `relay` in `/api/v1/status`.

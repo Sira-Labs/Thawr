@@ -368,7 +368,7 @@ failed retry costs at most one window of loss; a candidate change (new
 netmap on both sides at once) starts a full simultaneous round, which
 is what upgrades a relayed pair to `direct` after a network change. A
 handshake arriving from a public address while relayed also upgrades
-the path (roaming). A peer with no traffic of its own would never
+the path (roaming). Any upgrade releases the peer's proxy after 10 s. A peer with no traffic of its own would never
 join: when a visible peer sends to a key without a session, the relay
 tells the hub, which marks the sender `wanted` for that peer (§4.4), so
 the peer's own probe round ends on the relay too. Datagrams a proxy

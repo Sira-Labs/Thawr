@@ -227,6 +227,35 @@ func TestDaemonSymmetricPeersUseRelay(t *testing.T) {
 	})
 }
 
+// TestDaemonRelayRetryReleasesProxy: a retry from the relay that ends
+// direct goes relay -> probing -> direct and must still release the
+// relay proxy (spec 005).
+func TestDaemonRelayRetryReleasesProxy(t *testing.T) {
+	cp := newControlPlane(t)
+	dirA, _, _, keyB := twoPeers(t, cp, []control.Endpoint{{Addr: candRefl, Kind: control.EndpointReflexive}}, false)
+	d, fake, stop := startDaemon(t, dirA, func(o *DaemonOptions) {
+		// A window long enough to answer the retry while it is open.
+		o.Path.ProbeWindow = time.Second
+	})
+	defer stop()
+	waitApplied(t, d, func(nm NetMap) bool { return len(nm.Peers) == 1 })
+	lc := NewLocalClient(d.opts.Socket)
+	if res, err := lc.Ping(context.Background(), "b"); err != nil || res.State != "relay" {
+		t.Fatalf("ping: %+v err=%v", res, err)
+	}
+	waitFor(t, "relay proxy open", func() bool { st, _ := lc.Status(context.Background()); return st.Relay.Peers == 1 })
+	waitFor(t, "retry from the relay", func() bool {
+		st, _ := lc.Status(context.Background())
+		return len(st.Peers) == 1 && st.Peers[0].Path == "probing"
+	})
+	fake.SetStats(wg.PeerStats{PublicKey: keyB, Endpoint: candRefl, LastHandshake: time.Now()})
+	waitFor(t, "direct after the retry", func() bool {
+		st, _ := lc.Status(context.Background())
+		return len(st.Peers) == 1 && st.Peers[0].Path == "direct"
+	})
+	waitFor(t, "proxy released", func() bool { st, _ := lc.Status(context.Background()); return st.Relay.Peers == 0 })
+}
+
 func TestEndpointReportDedup(t *testing.T) {
 	t0 := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
 	a := endpointReport{ListenPort: 1, Endpoints: []control.Endpoint{{Addr: candLAN1, Kind: control.EndpointLocal}}}

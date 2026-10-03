@@ -220,7 +220,6 @@ func (d *Daemon) pathTick(ctx context.Context) {
 				in.Endpoint = s.Endpoint
 			}
 		}
-		prev := pp.state
 		out := pp.machine.Step(in)
 		pp.steps++
 		if (out.Action == path.ActProbe || out.Action == path.ActRelay) && d.reachedSince(ctx, dev, pp.key, in) {
@@ -255,7 +254,10 @@ func (d *Daemon) pathTick(ctx context.Context) {
 		if out.Changed {
 			pp.state, pp.endpoint = out.State, out.Endpoint
 			changed = true
-			if prev == path.Relay && out.State != path.Relay && out.State != path.Probing {
+			// An upgrade usually passes through probing (a retry from the
+			// relay), so release on any settled non-relay state; it is a
+			// no-op without a proxy.
+			if out.State != path.Relay && out.State != path.Probing {
 				d.relay.Release(relay.Key(pp.key))
 			}
 			d.log.Info("path", "peer", pp.name, "state", out.State, "endpoint", out.Endpoint)
