@@ -305,7 +305,7 @@ func (d *Daemon) LockSign(ctx context.Context, names []string) (LockResult, erro
 	all := append([]*thawrv1.LockPeer{list.GetHub()}, list.GetPeers()...)
 	var chosen []*thawrv1.LockPeer
 	for _, name := range names {
-		name = stripZone(name)
+		name = StripZone(name)
 		if name == "all" {
 			for _, p := range all {
 				if !p.GetSigned() {
@@ -371,7 +371,7 @@ func (d *Daemon) LockAddSigner(ctx context.Context, name, expected string) (Lock
 	if err != nil {
 		return LockResult{}, err
 	}
-	name = stripZone(name)
+	name = StripZone(name)
 	list, err := client.ListLockPeers(ctx, &thawrv1.Empty{})
 	if err != nil {
 		return LockResult{}, fmt.Errorf("client: list peers: %w", err)

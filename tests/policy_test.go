@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -29,7 +28,7 @@ func TestPolicyEnforcedEndToEnd(t *testing.T) {
 	dir := shortTempDir(t)
 	srvNs := newNetns(t, "srv")
 	clients := []*netns{newNetns(t, "c1"), newNetns(t, "c2")}
-	srvNs.ip(t, "sysctl", "-w", "net.ipv4.ip_forward=1")
+	srvNs.ipForward(t)
 	for i, ns := range clients {
 		veth := "v" + string(rune('a'+i))
 		sub := "10.9." + string(rune('0'+i))
@@ -43,8 +42,8 @@ func TestPolicyEnforcedEndToEnd(t *testing.T) {
 		ns.ip(t, "route", "add", "default", "via", sub+".1")
 	}
 	policyPath := filepath.Join(dir, "policy.yaml")
-	writeFile(t, policyPath, "version: 1\nacls:\n  - action: accept\n    src: [alice]\n    dst: ['bob:8080']\n    proto: tcp\n")
-	writeFile(t, filepath.Join(dir, "server.yaml"), strings.NewReplacer("127.0.0.1", "0.0.0.0").Replace(serverConfig(dir)))
+	writeFile(t, policyPath, emptyPolicy)
+	writeFile(t, filepath.Join(dir, "server.yaml"), starServerConfig(dir))
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	srv := srvNs.cmd(ctx, bin, "server", "--config", filepath.Join(dir, "server.yaml"))
@@ -65,6 +64,10 @@ func TestPolicyEnforcedEndToEnd(t *testing.T) {
 		if out, err := c.CombinedOutput(); err != nil {
 			t.Fatalf("user create: %v\n%s", err, out)
 		}
+	}
+	writeFile(t, policyPath, "version: 1\nacls:\n  - action: accept\n    src: [alice]\n    dst: ['bob:8080']\n    proto: tcp\n")
+	if out, err := srvNs.cmd(ctx, bin, "admin", "--socket", socket, "policy", "reload").CombinedOutput(); err != nil {
+		t.Fatalf("policy reload: %v\n%s", err, out)
 	}
 	var daemons []*exec.Cmd
 	for i, ns := range clients {

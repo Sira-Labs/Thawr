@@ -30,6 +30,16 @@ func TestRelaySymmetricNATs(t *testing.T) {
 		t.Errorf("relay status: %+v", st.Relay)
 	}
 	peerIP := st.Peers[0].IPv4
+	// client-2 joins the relay once the server tells it client-1 waits
+	// there: within 10 s of both being online (spec 005), so allow 20 s
+	// for the first echo.
+	deadline := time.Now().Add(20 * time.Second)
+	for sites[0].client.cmd(context.Background(), "ping", "-c", "1", "-W", "1", peerIP).Run() != nil {
+		if time.Now().After(deadline) {
+			t.Fatalf("no echo from %s through the relay within %s", peerIP, time.Since(start).Round(time.Second))
+		}
+	}
+	t.Logf("first echo through the relay %s after the clients were up", time.Since(start).Round(100*time.Millisecond))
 	if out, err := sites[0].client.cmd(context.Background(), "ping", "-c", "3", "-W", "2", peerIP).CombinedOutput(); err != nil {
 		t.Fatalf("ping %s through the relay: %v\n%s", peerIP, err, out)
 	}
@@ -48,12 +58,16 @@ func TestRelayToDirectUpgrade(t *testing.T) {
 	if state, _, _ := pingPath(0); state != "relay" {
 		t.Fatalf("path = %s, want relay first", state)
 	}
+	st := status(0)
+	if len(st.Peers) != 1 {
+		t.Fatalf("status before the NAT swap: %+v", st)
+	}
+	peerIP := st.Peers[0].IPv4
 	for i, site := range sites {
 		applyNAT(t, site.nat, natRestricted, "p"+strconv.Itoa(i)+"n", site.lanIP)
 		// Existing conntrack entries keep the old random mappings.
 		_ = site.nat.cmd(context.Background(), "conntrack", "-F").Run()
 	}
-	peerIP := status(0).Peers[0].IPv4
 	deadline := time.Now().Add(3 * time.Minute) // discovery every 60 s, then a probe round
 	for {
 		st := status(0)
@@ -68,8 +82,13 @@ func TestRelayToDirectUpgrade(t *testing.T) {
 	if out, err := sites[0].client.cmd(context.Background(), "ping", "-c", "3", "-W", "2", peerIP).CombinedOutput(); err != nil {
 		t.Fatalf("ping after upgrade: %v\n%s", err, out)
 	}
-	if st := status(0); st.Relay.Peers != 0 {
-		t.Errorf("relay proxy still held after the upgrade: %+v", st.Relay)
+	// The proxy closes after the client's 10 s release delay.
+	deadline = time.Now().Add(15 * time.Second)
+	for status(0).Relay.Peers != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("relay proxy still held after the upgrade: %+v", status(0).Relay)
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
 }
 

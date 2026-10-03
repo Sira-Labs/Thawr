@@ -174,7 +174,7 @@ func TestDNSPhoneViaHub(t *testing.T) {
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	if err := m.phonePing(ctx, "100.64.0.1"); err != nil {
+	if err := m.phoneReaches(ctx, "100.64.0.1", 20*time.Second); err != nil {
 		t.Fatalf("phone cannot reach the hub: %v", err)
 	}
 	if got, err := dnsQuery(ctx, m.phone, "100.64.0.1", "alice-box.thawr", "a"); err != nil || strings.Join(got, ",") != aliceIP {

@@ -350,9 +350,9 @@ func (d *Daemon) dnsStatus() *DNSStatus {
 	return st
 }
 
-// stripZone removes a trailing ".thawr" (and a final dot) from a peer
+// StripZone removes a trailing ".thawr" (and a final dot) from a peer
 // name typed by a user.
-func stripZone(name string) string {
+func StripZone(name string) string {
 	n := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(name)), ".")
 	return strings.TrimSuffix(n, "."+dns.Zone)
 }

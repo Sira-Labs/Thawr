@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -39,15 +40,28 @@ func requireSystemd(t *testing.T) {
 }
 
 // TestInstallSystemd installs the server and a client as systemd
-// services with the real binary, checks that the units carry no
-// secrets, that both services run and the client connects, and that
-// uninstall --purge removes everything. Spec 009 acceptance.
+// services with the real binary: the server runs, refuses a client
+// beside it (the hub is already a peer on its host) and purges clean;
+// a client installed against a server running in the foreground keeps
+// no secret in its unit, connects, and uninstall keeps its data until
+// --purge. Spec 009 acceptance.
 func TestInstallSystemd(t *testing.T) {
 	requireSystemd(t)
-	bin := thawrBinary(t)
 	dir := shortTempDir(t)
-	writeFile(t, filepath.Join(dir, "server.yaml"), installConfig(dir))
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	// The units set ProtectHome=yes, so a binary in a checkout under
+	// /home (a CI runner's workspace) is invisible to the service; run
+	// a copy from the test's directory instead.
+	built, err := os.ReadFile(thawrBinary(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, "thawr")
+	if err := os.WriteFile(bin, built, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(dir, "server.yaml")
+	writeFile(t, config, installConfig(dir))
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	run := func(args ...string) (string, error) {
 		cmd := exec.CommandContext(ctx, bin, args...)
@@ -55,12 +69,15 @@ func TestInstallSystemd(t *testing.T) {
 		out, err := cmd.CombinedOutput()
 		return string(out), err
 	}
+	stateDir := filepath.Join(dir, "client")
+	clientSock := filepath.Join(dir, "client.sock")
 	t.Cleanup(func() {
-		_, _ = run("client", "uninstall", "--state-dir", filepath.Join(dir, "client"), "--purge", "--yes")
-		_, _ = run("server", "uninstall", "--config", filepath.Join(dir, "server.yaml"), "--purge", "--yes")
+		_, _ = run("client", "uninstall", "--state-dir", stateDir, "--purge", "--yes")
+		_, _ = run("server", "uninstall", "--config", config, "--purge", "--yes")
 	})
 
-	out, err := run("server", "install", "--config", filepath.Join(dir, "server.yaml"), "--bin", bin)
+	// The server as a service.
+	out, err := run("server", "install", "--config", config, "--bin", bin)
 	if err != nil || !strings.Contains(out, "thawr-server started") {
 		t.Fatalf("server install: %v\n%s", err, out)
 	}
@@ -70,7 +87,36 @@ func TestInstallSystemd(t *testing.T) {
 	if st := getStatus(t, socket); st["peer_count"] != float64(0) {
 		t.Errorf("status: %v", st)
 	}
+	out, err = run("client", "install", "--state-dir", stateDir, "--bin", bin, "--server", "https://127.0.0.1:18443", "--token", "unused")
+	if err == nil || !strings.Contains(out, "thawr-server is installed here") {
+		t.Errorf("client install beside the server: %v\n%s", err, out)
+	}
+	if _, err := os.Stat("/etc/systemd/system/thawr-client.service"); err == nil {
+		t.Error("refused client install left a unit behind")
+	}
+	if out, err := run("server", "uninstall", "--config", config, "--purge", "--yes"); err != nil {
+		t.Fatalf("server purge: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "data")); err == nil {
+		t.Error("data_dir kept after --purge")
+	}
 
+	// The client as a service, against a server in the foreground.
+	var srvLog syncBuffer
+	srv := exec.CommandContext(ctx, bin, "server", "--config", config)
+	srv.Stdout, srv.Stderr = &srvLog, &srvLog
+	if err := srv.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = srv.Process.Signal(syscall.SIGTERM)
+		_ = srv.Wait()
+		if t.Failed() {
+			t.Logf("foreground server:\n%s", srvLog.String())
+		}
+	})
+	// The service's socket file may outlive it; wait for an answer.
+	waitFor(t, 15*time.Second, "foreground server", func() bool { _, err := run("admin", "--socket", socket, "peer", "list"); return err == nil })
 	writeFile(t, filepath.Join(dir, "pw"), "integrationpassword\n")
 	if out, err := run("admin", "--socket", socket, "user", "create", "alice", "--role", "member"); err != nil {
 		t.Fatalf("user create: %v\n%s", err, out)
@@ -85,23 +131,18 @@ func TestInstallSystemd(t *testing.T) {
 	if err := json.Unmarshal([]byte(tokOut), &tok); err != nil {
 		t.Fatal(err)
 	}
-
-	stateDir := filepath.Join(dir, "client")
-	clientSock := filepath.Join(dir, "client.sock")
 	out, err = run("client", "install", "--state-dir", stateDir, "--socket", clientSock, "--interface", "thawr8", "--bin", bin,
 		"--server", "https://127.0.0.1:18443", "--token", tok.Secret, "--accept-fingerprint")
 	if err != nil || !strings.Contains(out, "thawr-client started") {
 		t.Fatalf("client install: %v\n%s", err, out)
 	}
-	for _, unit := range []string{"thawr-server", "thawr-client"} {
-		data, err := os.ReadFile("/etc/systemd/system/" + unit + ".service")
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, bad := range []string{tok.Secret, "--token", "--server"} {
-			if strings.Contains(string(data), bad) {
-				t.Errorf("%s unit contains %q", unit, bad)
-			}
+	data, err := os.ReadFile("/etc/systemd/system/thawr-client.service")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{tok.Secret, "--token", "--server"} {
+		if strings.Contains(string(data), bad) {
+			t.Errorf("client unit contains %q", bad)
 		}
 	}
 	waitActive(t, ctx, "thawr-client")
@@ -123,12 +164,6 @@ func TestInstallSystemd(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(stateDir, "state.json")); err == nil {
 		t.Error("state kept after --purge")
-	}
-	if out, err := run("server", "uninstall", "--config", filepath.Join(dir, "server.yaml"), "--purge", "--yes"); err != nil {
-		t.Fatalf("server purge: %v\n%s", err, out)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "data")); err == nil {
-		t.Error("data_dir kept after --purge")
 	}
 	for _, unit := range []string{"thawr-server", "thawr-client"} {
 		if _, err := os.Stat("/etc/systemd/system/" + unit + ".service"); err == nil {

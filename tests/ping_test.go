@@ -28,7 +28,7 @@ func TestEncryptedPingTwoClients(t *testing.T) {
 	// Star topology: each client namespace has a veth into the server
 	// namespace; the server routes between them so clients reach each
 	// other directly (spec 004 adds NAT traversal for the harder cases).
-	srvNs.ip(t, "sysctl", "-w", "net.ipv4.ip_forward=1")
+	srvNs.ipForward(t)
 	for i, ns := range clients {
 		veth := "v" + string(rune('a'+i))
 		sub := "10.9." + string(rune('0'+i))
@@ -42,7 +42,8 @@ func TestEncryptedPingTwoClients(t *testing.T) {
 		ns.ip(t, "route", "add", "default", "via", sub+".1")
 	}
 
-	writeFile(t, filepath.Join(dir, "server.yaml"), strings.NewReplacer("127.0.0.1", "0.0.0.0").Replace(serverConfig(dir)))
+	writeFile(t, filepath.Join(dir, "policy.yaml"), allowAllPolicy)
+	writeFile(t, filepath.Join(dir, "server.yaml"), starServerConfig(dir))
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	srv := srvNs.cmd(ctx, bin, "server", "--config", filepath.Join(dir, "server.yaml"))
@@ -128,6 +129,14 @@ func TestEncryptedPingTwoClients(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 	}
 
+	// The direct path settles within seconds of the sync (spec 004);
+	// until it does there is nothing to carry a ping.
+	deadline = time.Now().Add(20 * time.Second)
+	for clients[0].cmd(ctx, "ping", "-c", "1", "-W", "1", st2.Self.IPv4).Run() != nil {
+		if time.Now().After(deadline) {
+			t.Fatalf("no path from client-1 to %s within 20 s", st2.Self.IPv4)
+		}
+	}
 	if out, err := clients[0].cmd(ctx, "ping", "-c", "3", "-W", "2", st2.Self.IPv4).CombinedOutput(); err != nil {
 		t.Fatalf("ping %s from client-1: %v\n%s", st2.Self.IPv4, err, out)
 	}

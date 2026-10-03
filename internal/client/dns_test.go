@@ -381,8 +381,8 @@ func TestDNSCleanupNotBlockedByRegistrar(t *testing.T) {
 
 func TestStripZone(t *testing.T) {
 	for in, want := range map[string]string{"nas": "nas", "nas.thawr": "nas", "NAS.thawr.": "nas", "nas.thawr.thawr": "nas.thawr", " nas ": "nas"} {
-		if got := stripZone(in); got != want {
-			t.Errorf("stripZone(%q) = %q, want %q", in, got, want)
+		if got := StripZone(in); got != want {
+			t.Errorf("StripZone(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

@@ -30,6 +30,8 @@ type pingOptions struct {
 // settled path. Exit 0 needs a usable path (direct, relay or via the
 // hub) and, when echoes were sent, at least one reply.
 func runPing(ctx context.Context, out, errOut io.Writer, o pingOptions) error {
+	// Status lists peers by bare name; `ping nas.thawr` must find nas.
+	o.peer = client.StripZone(o.peer)
 	lc := client.NewLocalClient(o.socket)
 	before, err := lc.Status(ctx)
 	if err != nil {

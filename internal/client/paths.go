@@ -389,7 +389,7 @@ func (d *Daemon) reportPaths(ctx context.Context, results []PathResult) {
 // unreachable) or ctx ends. A peer reached through the hub has no path
 // of its own and answers "hub" at once.
 func (d *Daemon) Ping(ctx context.Context, name string) (PathResult, error) {
-	name = stripZone(name)
+	name = StripZone(name)
 	d.pmu.Lock()
 	var target *peerPath
 	for _, pp := range d.paths {

@@ -3,11 +3,13 @@
 package tests
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -37,7 +39,7 @@ func TestEnrollTwoClients(t *testing.T) {
 		ns.ip(t, "link", "set", veth+"c", "up")
 	}
 
-	writeFile(t, filepath.Join(dir, "server.yaml"), strings.NewReplacer("127.0.0.1", "0.0.0.0").Replace(serverConfig(dir)))
+	writeFile(t, filepath.Join(dir, "server.yaml"), starServerConfig(dir))
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	srv := srvNs.cmd(ctx, bin, "server", "--config", filepath.Join(dir, "server.yaml"))
@@ -75,14 +77,31 @@ func TestEnrollTwoClients(t *testing.T) {
 		if err := json.Unmarshal([]byte(admin("token", "create", "--owner", "alice", "--json")), &tok); err != nil {
 			t.Fatal(err)
 		}
+		// `client up` enrols and then runs the daemon in the foreground
+		// (spec 007): wait for the state file, then stop it.
 		server := "https://10.9." + string(rune('0'+i)) + ".1:8443"
-		out, err := ns.cmd(ctx, bin, "client", "up", "--dns", "serve", "--server", server, "--token", tok.Secret, "--fingerprint", fingerprint,
-			"--state-dir", filepath.Join(dir, "client"+string(rune('1'+i))), "--name", "client-"+string(rune('1'+i))).CombinedOutput()
-		if err != nil {
-			t.Fatalf("client %d up: %v\n%s", i+1, err, out)
+		name, stateDir := "client-"+string(rune('1'+i)), filepath.Join(dir, "client"+string(rune('1'+i)))
+		var out syncBuffer
+		up := ns.cmd(ctx, bin, "client", "up", "--dns", "serve", "--server", server, "--token", tok.Secret, "--fingerprint", fingerprint,
+			"--state-dir", stateDir, "--socket", filepath.Join(dir, name+".sock"), "--name", name)
+		up.Stdout, up.Stderr = &out, &out
+		if err := up.Start(); err != nil {
+			t.Fatal(err)
 		}
-		if !strings.Contains(string(out), "enrolled as client-"+string(rune('1'+i))) {
-			t.Errorf("client %d output: %s", i+1, out)
+		deadline := time.Now().Add(20 * time.Second)
+		for {
+			if _, err := os.Stat(filepath.Join(stateDir, "state.json")); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("client %d never enrolled:\n%s", i+1, out.String())
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+		_ = up.Process.Signal(syscall.SIGTERM)
+		_ = up.Wait()
+		if !strings.Contains(out.String(), "msg=enrolled name="+name) {
+			t.Errorf("client %d output: %s", i+1, out.String())
 		}
 	}
 
@@ -114,4 +133,23 @@ func fingerprintFromLogs(t *testing.T, logs string) string {
 	}
 	t.Fatal("no tls_fingerprint in server logs")
 	return ""
+}
+
+// syncBuffer is a bytes.Buffer safe for a process writing while the
+// test reads.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }

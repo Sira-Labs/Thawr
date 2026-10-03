@@ -70,7 +70,7 @@ func newStarMesh(t *testing.T, policy string, withPhone bool) *mobileMesh {
 		phone = newNetns(t, "ph")
 		nodes = append(nodes, phone)
 	}
-	srvNs.ip(t, "sysctl", "-w", "net.ipv4.ip_forward=1")
+	srvNs.ipForward(t)
 	for i, ns := range nodes {
 		veth := "v" + string(rune('a'+i))
 		sub := "10.9." + string(rune('0'+i))
@@ -83,8 +83,8 @@ func newStarMesh(t *testing.T, policy string, withPhone bool) *mobileMesh {
 		ns.ip(t, "link", "set", veth+"c", "up")
 		ns.ip(t, "route", "add", "default", "via", sub+".1")
 	}
-	writeFile(t, filepath.Join(dir, "policy.yaml"), policy)
-	writeFile(t, filepath.Join(dir, "server.yaml"), strings.NewReplacer("127.0.0.1", "0.0.0.0").Replace(serverConfig(dir)))
+	writeFile(t, filepath.Join(dir, "policy.yaml"), emptyPolicy)
+	writeFile(t, filepath.Join(dir, "server.yaml"), starServerConfig(dir))
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	t.Cleanup(cancel)
 	srv := srvNs.cmd(ctx, bin, "server", "--config", filepath.Join(dir, "server.yaml"))
@@ -102,12 +102,18 @@ func newStarMesh(t *testing.T, policy string, withPhone bool) *mobileMesh {
 		return srvNs.cmd(ctx, bin, append([]string{"admin", "--socket", socket}, args...)...).CombinedOutput()
 	}
 	writeFile(t, filepath.Join(dir, "pw"), "integrationpassword\n")
-	for _, user := range []string{"alice", "bob"} {
-		c := srvNs.cmd(ctx, bin, "admin", "--socket", socket, "user", "create", user, "--role", "member")
+	// alice is an admin: the first network-lock record must come from a
+	// device an admin owns (spec 012); bob is a member.
+	for user, role := range map[string]string{"alice": "admin", "bob": "member"} {
+		c := srvNs.cmd(ctx, bin, "admin", "--socket", socket, "user", "create", user, "--role", role)
 		c.Env = append(c.Environ(), "THAWR_PASSWORD_FILE="+filepath.Join(dir, "pw"))
 		if out, err := c.CombinedOutput(); err != nil {
 			t.Fatalf("user create: %v\n%s", err, out)
 		}
+	}
+	writeFile(t, filepath.Join(dir, "policy.yaml"), policy)
+	if out, err := admin("policy", "reload"); err != nil {
+		t.Fatalf("policy reload: %v\n%s", err, out)
 	}
 	for i, ns := range clients {
 		owner := []string{"alice", "bob"}[i]
@@ -169,9 +175,9 @@ func newStarMesh(t *testing.T, policy string, withPhone bool) *mobileMesh {
 	if fi, _ := os.Stat(conf); fi.Mode().Perm() != 0o600 {
 		t.Errorf("conf mode %o, want 600", fi.Mode().Perm())
 	}
-	fixed := strings.ReplaceAll(string(raw), "Endpoint = 0.0.0.0:51820", "Endpoint = 10.9.2.1:51820")
-	if fixed == string(raw) {
-		t.Fatalf("unexpected endpoint in exported config:\n%s", raw)
+	fixed := string(raw)
+	if !strings.Contains(fixed, "Endpoint = 10.9.0.1:51820") {
+		t.Fatalf("exported config does not point at public_addr:\n%s", raw)
 	}
 	// wg-quick would hand the DNS line to resolvconf, which the harness
 	// host may not have; the DNS test queries the hub resolver directly.
@@ -216,6 +222,21 @@ func (m *mobileMesh) phonePing(ctx context.Context, ip string) error {
 	return nil
 }
 
+// phoneReaches retries a ping from the phone until it is answered or
+// the deadline passes: the hub adds a new static peer to its interface
+// with the next netmap generation, and WireGuard retries a handshake
+// only every 5 s.
+func (m *mobileMesh) phoneReaches(ctx context.Context, ip string, within time.Duration) error {
+	deadline := time.Now().Add(within)
+	for {
+		err := m.phonePing(ctx, ip)
+		if err == nil || time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
 func (m *mobileMesh) phoneConnect(ctx context.Context, ip, port string) bool {
 	return m.phone.cmd(ctx, "nc", "-z", "-w", "2", ip, port).Run() == nil
 }
@@ -244,7 +265,7 @@ func TestMobilePeerViaHub(t *testing.T) {
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	if err := m.phonePing(ctx, aliceBox); err != nil {
+	if err := m.phoneReaches(ctx, aliceBox, 20*time.Second); err != nil {
 		t.Fatalf("phone → alice-box: %v", err)
 	}
 	// alice-box can answer the phone at its overlay address, too.
@@ -271,9 +292,9 @@ func TestMobilePeerViaHub(t *testing.T) {
 }
 
 // TestMobilePolicyEnforced: the phone reaches only what the policy
-// allows for its owner: an open port on bob-box connects, a closed one
-// is dropped by bob-box's filter, and a peer alice may not see is
-// dropped by the hub before forwarding.
+// allows for its owner: an open port on bob-box connects, while a
+// closed one and a peer alice may not see are dropped by the hub before
+// forwarding.
 func TestMobilePolicyEnforced(t *testing.T) {
 	m := newMobileMesh(t, "version: 1\nacls:\n  - action: accept\n    src: [alice]\n    dst: ['bob:8080']\n    proto: tcp\n")
 	ctx := context.Background()
@@ -298,16 +319,19 @@ func TestMobilePolicyEnforced(t *testing.T) {
 		}
 		defer func() { _ = l.Process.Kill(); _ = l.Wait() }()
 	}
-	time.Sleep(500 * time.Millisecond)
-	if !m.phoneConnect(ctx, bobIP, "8080") {
-		t.Fatal("phone cannot reach the allowed port 8080 on bob-box")
+	// The phone's first handshake waits for the hub to add it.
+	deadline = time.Now().Add(20 * time.Second)
+	for !m.phoneConnect(ctx, bobIP, "8080") {
+		if time.Now().After(deadline) {
+			t.Fatal("phone cannot reach the allowed port 8080 on bob-box")
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
-	before := m.status(1).Filter
+	// The hub's forward filter carries every rule toward a peer whose
+	// source is static, so it drops the denied port before forwarding
+	// (spec 008); bob-box's filter never sees the packet.
 	if m.phoneConnect(ctx, bobIP, "9090") {
 		t.Fatal("phone reached the denied port 9090 on bob-box")
-	}
-	if after := m.status(1).Filter; before == nil || after == nil || after.Drops <= before.Drops {
-		t.Errorf("bob-box's filter counted no drop for the phone: before=%+v after=%+v", before, after)
 	}
 	// A peer alice may not see is unreachable: the hub does not forward.
 	c := m.srv.cmd(ctx, m.bin, "admin", "--socket", m.socket, "user", "create", "carol", "--role", "member")

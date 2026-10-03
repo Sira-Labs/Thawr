@@ -47,6 +47,33 @@ jobs:
           CGO_ENABLED: "1" # race runtime needs cgo; the binary stays CGO_ENABLED=0
         run: go test -race -count=1 ./...
 
+  # The netns integration suite (`make integration`) and the nftables
+  # tests in internal/wg: server, clients and NATs in network namespaces
+  # with the real binary. They need root and the tools below; GitHub's
+  # Linux runners have the WireGuard module, IPv6, systemd and
+  # passwordless sudo, so nothing skips for want of the host.
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # The tests run as root; keep the checkout token off the disk.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends \
+            iproute2 iputils-ping nftables conntrack netcat-openbsd wireguard-tools iperf3
+      - name: integration
+        env:
+          CGO_ENABLED: "1" # race runtime needs cgo; the binary under test stays CGO_ENABLED=0
+        run: sudo -E env "PATH=$PATH" go test -race -count=1 -v -tags integration -timeout 25m ./tests/... ./internal/wg/...
+
   cross-build:
     runs-on: ubuntu-latest
     strategy:
