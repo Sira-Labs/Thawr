@@ -54,8 +54,8 @@ type Hub struct {
 	pending  bool
 	timer    *time.Timer
 	// wants holds reach requests: target peer id -> requesting peer id
-	// -> time of the latest request (specs 004, 005).
-	wants map[string]map[string]time.Time
+	// -> request (specs 004, 005).
+	wants map[string]map[string]wantReq
 }
 
 // Reach requests ("from is trying to reach to"): a request stays in
@@ -91,7 +91,7 @@ func NewHub(ctx context.Context, st *store.Store, now func() time.Time, log *slo
 		sequence: gen,
 		subs:     map[*subscriber]struct{}{},
 		presence: map[string]*presenceEntry{},
-		wants:    map[string]map[string]time.Time{},
+		wants:    map[string]map[string]wantReq{},
 	}, nil
 }
 
@@ -206,6 +206,12 @@ func (h *Hub) Forget(peerID string) {
 	h.mu.Unlock()
 }
 
+// wantReq is one reach request: when it was last made (for wantTTL) and
+// when it last woke the target (for wantRepeat).
+type wantReq struct {
+	at, woke time.Time
+}
+
 // Want records that peer from is trying to reach peer to (it probes
 // to's candidates or waits for it on the relay) and wakes to's Sync
 // streams at once, without a new generation, so to's next netmap asks
@@ -226,17 +232,24 @@ func (h *Hub) Want(to, from string) {
 	now := h.now()
 	reqs := h.wants[to]
 	if reqs == nil {
-		reqs = map[string]time.Time{}
+		reqs = map[string]wantReq{}
 		h.wants[to] = reqs
 	}
-	for id, at := range reqs {
-		if now.Sub(at) >= wantTTL {
+	for id, r := range reqs {
+		if now.Sub(r.at) >= wantTTL {
 			delete(reqs, id)
 		}
 	}
-	last, seen := reqs[from]
-	reqs[from] = now
-	wake := !seen || now.Sub(last) >= wantRepeat
+	r, seen := reqs[from]
+	// The repeat gate counts from the last wake, not the last request:
+	// a sender repeating faster than wantRepeat still wakes the target
+	// every wantRepeat.
+	wake := !seen || now.Sub(r.woke) >= wantRepeat
+	r.at = now
+	if wake {
+		r.woke = now
+	}
+	reqs[from] = r
 	if wake {
 		for s := range h.subs {
 			if s.peerID != to {
@@ -259,11 +272,11 @@ func (h *Hub) Want(to, from string) {
 func (h *Hub) Wanted(to, from string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	at, ok := h.wants[to][from]
+	r, ok := h.wants[to][from]
 	if !ok {
 		return false
 	}
-	if h.now().Sub(at) < wantTTL {
+	if h.now().Sub(r.at) < wantTTL {
 		return true
 	}
 	delete(h.wants[to], from)

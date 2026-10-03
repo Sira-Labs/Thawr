@@ -57,6 +57,21 @@ func TestHubWanted(t *testing.T) {
 	clk.Advance(wantRepeat)
 	h.Want("b", "a")
 	waitWake(t, chB)
+	// A sender repeating every second still wakes the target once per
+	// wantRepeat: the gate counts from the last wake.
+	for i := 1; i <= 2*int(wantRepeat/time.Second); i++ {
+		clk.Advance(time.Second)
+		h.Want("b", "a")
+		woke := false
+		select {
+		case <-chB:
+			woke = true
+		case <-time.After(30 * time.Millisecond):
+		}
+		if want := i%int(wantRepeat/time.Second) == 0; woke != want {
+			t.Errorf("request %d s after a wake: woke=%v, want %v", i, woke, want)
+		}
+	}
 
 	// The request expires after wantTTL.
 	clk.Advance(wantTTL - time.Second)
