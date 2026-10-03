@@ -63,6 +63,9 @@ func netMapToProto(nm control.NetMap) *thawrv1.NetMap {
 		Hub:        &thawrv1.HubPeer{PublicKey: nm.Hub.PublicKey, Endpoint: nm.Hub.Endpoint, Signatures: signaturesToProto(nm.Hub.Signatures)},
 		Lock:       lockToProto(nm.Lock),
 	}
+	if nm.SelfIPv6.IsValid() {
+		out.Self.Ipv6, out.Self.OverlayIpv6 = nm.SelfIPv6.String(), nm.Overlay6.String()
+	}
 	for _, p := range nm.Hub.AllowedIPs {
 		out.Hub.AllowedIps = append(out.Hub.AllowedIps, p.String())
 	}
@@ -72,16 +75,31 @@ func netMapToProto(nm control.NetMap) *thawrv1.NetMap {
 			Online: p.Online, Endpoints: endpointsToProto(p.Endpoints), Symmetric: p.Symmetric, Keepalive: p.Keepalive, ViaHub: p.ViaHub,
 			Signatures: signaturesToProto(p.Signatures), ExitNode: p.ExitNode,
 		}
+		if p.IPv6.IsValid() {
+			np.Ipv6 = p.IPv6.String()
+		}
 		for _, a := range p.AllowedIPs {
 			np.AllowedIps = append(np.AllowedIps, a.String())
 		}
 		out.Peers = append(out.Peers, np)
 	}
 	for _, f := range nm.Filter {
-		out.Filter = append(out.Filter, &thawrv1.FilterRule{SrcIpv4: f.SrcIPv4.String(), Proto: f.Proto, PortLo: uint32(f.PortLo), PortHi: uint32(f.PortHi)})
+		r := &thawrv1.FilterRule{Proto: f.Proto, PortLo: uint32(f.PortLo), PortHi: uint32(f.PortHi)}
+		if f.Src.Is4() {
+			r.SrcIpv4 = f.Src.String()
+		} else {
+			r.SrcIpv6 = f.Src.String()
+		}
+		out.Filter = append(out.Filter, r)
 	}
 	for _, f := range nm.Forward {
-		out.Forward = append(out.Forward, &thawrv1.ForwardRule{SrcIpv4: f.SrcIPv4.String(), DstCidr: f.Dst.String(), Proto: f.Proto, PortLo: uint32(f.PortLo), PortHi: uint32(f.PortHi)})
+		r := &thawrv1.ForwardRule{DstCidr: f.Dst.String(), Proto: f.Proto, PortLo: uint32(f.PortLo), PortHi: uint32(f.PortHi)}
+		if f.Src.Is4() {
+			r.SrcIpv4 = f.Src.String()
+		} else {
+			r.SrcIpv6 = f.Src.String()
+		}
+		out.Forward = append(out.Forward, r)
 	}
 	for _, a := range nm.SelfAdvertised {
 		out.Self.Advertised = append(out.Self.Advertised, &thawrv1.AdvertisedRoute{Prefix: a.Prefix.String(), Approved: a.Approved})

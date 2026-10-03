@@ -280,17 +280,20 @@ func ParseTTL(s string) (time.Duration, error) {
 // --- peers ---
 
 type peerView struct {
-	ID         string   `json:"id"`
-	Name       string   `json:"name"`
-	Kind       string   `json:"kind"`
-	Mode       string   `json:"mode"`
-	Owner      string   `json:"owner"`
-	Tags       []string `json:"tags"`
-	PublicKey  string   `json:"public_key"`
-	IPv4       string   `json:"ipv4"`
-	Online     bool     `json:"online"`
-	CreatedAt  string   `json:"created_at"`
-	LastSeenAt string   `json:"last_seen_at,omitempty"`
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Kind      string   `json:"kind"`
+	Mode      string   `json:"mode"`
+	Owner     string   `json:"owner"`
+	Tags      []string `json:"tags"`
+	PublicKey string   `json:"public_key"`
+	IPv4      string   `json:"ipv4"`
+	// IPv6 is the peer's IPv6 overlay address (spec 015); empty while
+	// the server has none for it.
+	IPv6       string `json:"ipv6,omitempty"`
+	Online     bool   `json:"online"`
+	CreatedAt  string `json:"created_at"`
+	LastSeenAt string `json:"last_seen_at,omitempty"`
 	// Version and OS are what the client reported.
 	Version string `json:"version"`
 	OS      string `json:"os"`
@@ -310,7 +313,7 @@ type pathSummary struct {
 
 func (h *rest) peerView(ctx context.Context, p store.Peer, names map[string]string, signed map[string]bool) peerView {
 	v := peerView{ID: p.ID, Name: p.Name, Kind: p.Kind, Mode: p.Mode, Owner: h.userName(ctx, p.OwnerID, names), Tags: p.Tags,
-		PublicKey: p.PublicKey, IPv4: p.IPv4, CreatedAt: p.CreatedAt.UTC().Format(timeFormat), Version: p.ClientVersion, OS: p.OS}
+		PublicKey: p.PublicKey, IPv4: p.IPv4, IPv6: p.IPv6, CreatedAt: p.CreatedAt.UTC().Format(timeFormat), Version: p.ClientVersion, OS: p.OS}
 	if v.Tags == nil {
 		v.Tags = []string{}
 	}
@@ -377,7 +380,7 @@ func (h *rest) handleGetPeer(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.deps.Policy != nil {
 		for _, f := range h.deps.Policy.FilterFor(r.Context(), peer.ID) {
-			detail.Filter = append(detail.Filter, filterView{Src: f.SrcIPv4.String(), Proto: f.Proto, PortLo: f.PortLo, PortHi: f.PortHi})
+			detail.Filter = append(detail.Filter, filterView{Src: f.Src.String(), Proto: f.Proto, PortLo: f.PortLo, PortHi: f.PortHi})
 		}
 	}
 	if h.deps.Paths != nil {

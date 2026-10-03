@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net"
@@ -69,6 +71,9 @@ type Deps struct {
 	// DNSListen binds the hub resolver; defaults to dns.Listen (tests
 	// bind loopback, the fake device carries no hub address).
 	DNSListen func(ctx context.Context, addr netip.AddrPort) (net.PacketConn, net.Listener, error)
+	// Rand generates the IPv6 overlay prefix on first start; defaults
+	// to crypto/rand.
+	Rand io.Reader
 }
 
 // Server is the composed control server.
@@ -131,6 +136,9 @@ func New(cfg *config.Config, deps Deps) (*Server, error) {
 	}
 	if deps.OpenDevice == nil {
 		deps.OpenDevice = wg.Open
+	}
+	if deps.Rand == nil {
+		deps.Rand = rand.Reader
 	}
 	if deps.Now == nil {
 		deps.Now = time.Now
@@ -218,6 +226,17 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 	}
 	s.log.Info("database ready", "path", filepath.Join(cfg.DataDir, DBFile), "schema_version", schema)
 
+	prefix6, generated6, err := resolveOverlayIPv6(ctx, cfg.Overlay.IPv6, s.st.Meta(), s.deps.Rand)
+	if err != nil {
+		return err
+	}
+	cfg.Overlay.IPv6 = prefix6.String()
+	filled, err := backfillIPv6(ctx, s.st.Peers(), prefix6)
+	if err != nil {
+		return err
+	}
+	s.log.Info("ipv6 overlay ready", "prefix", prefix6, "generated", generated6, "peers_assigned", filled)
+
 	keyPath := filepath.Join(cfg.DataDir, ServerKeyFile)
 	s.hubKey, created, err = loadOrCreateServerKey(ctx, keyPath, s.st.Meta())
 	if err != nil {
@@ -251,7 +270,7 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 		return err
 	}
 	defer stopDNS()
-	hubInfo := api.HubInfo{PublicKey: s.hubKey.PublicKey().String(), Endpoint: cfg.HubEndpoint(), Overlay: cfg.OverlayPrefix()}
+	hubInfo := api.HubInfo{PublicKey: s.hubKey.PublicKey().String(), Endpoint: cfg.HubEndpoint(), Overlay: cfg.OverlayPrefix(), Overlay6: s.overlay6()}
 	if cfg.DNS.Enabled {
 		hubInfo.DNS = cfg.HubAddr().Addr()
 		hubInfo.DNSNoUpstream = s.dnsNoUpstream
@@ -684,7 +703,7 @@ func (s *Server) buildServices(ctx context.Context) error {
 	s.hub = hub
 	s.endpoints = control.NewEndpointTable(s.deps.Now)
 	s.paths = control.NewPathTable(s.deps.Now)
-	s.policySvc = control.NewPolicyService(s.st, s.log, s.cfg.PolicyFile, hub).WithOverlay(s.cfg.OverlayPrefix())
+	s.policySvc = control.NewPolicyService(s.st, s.log, s.cfg.PolicyFile, hub).WithOverlay(s.cfg.OverlayPrefix()).WithOverlay6(s.overlay6())
 	if err := s.policySvc.LoadInitial(ctx); err != nil {
 		return err
 	}
@@ -694,11 +713,11 @@ func (s *Server) buildServices(ctx context.Context) error {
 	users.WithAuditor(auditor)
 	s.policySvc.WithAuditor(auditor)
 	s.tokens = control.NewTokens(s.st, s.deps.Now, s.log).WithTagAllowed(s.policySvc.TagAllowed).WithPeerRefs(s.policySvc.PeerRefs).WithAuditor(auditor)
-	s.enroller = control.NewEnroller(s.st, s.deps.Now, s.log, s.cfg.OverlayPrefix(), s.cfg.MinClientVersion).WithNotifier(hub).WithAuditor(auditor).WithPeerRefs(s.policySvc.PeerRefs)
+	s.enroller = control.NewEnroller(s.st, s.deps.Now, s.log, s.cfg.OverlayPrefix(), s.cfg.MinClientVersion).WithNotifier(hub).WithAuditor(auditor).WithPeerRefs(s.policySvc.PeerRefs).WithOverlay6(s.overlay6())
 	s.lockSvc = control.NewLockService(s.st, s.deps.Now, s.log, s.hubKey.PublicKey().String()).WithNotifier(hub).WithAuditor(auditor)
 	s.routesSvc = control.NewRoutesService(s.st, s.log, s.deps.Now, s.cfg.OverlayPrefix()).WithNotifier(hub).WithAuditor(auditor)
 	s.registry = control.NewRegistry(s.st, s.log).WithNotifier(hub).WithClock(s.deps.Now).
-		WithOverlay(s.cfg.OverlayPrefix()).WithTagAllowed(s.policySvc.TagAllowed).WithAuditor(auditor).WithLock(s.lockSvc).WithPeerRefs(s.policySvc.PeerRefs)
+		WithOverlay(s.cfg.OverlayPrefix()).WithOverlay6(s.overlay6()).WithTagAllowed(s.policySvc.TagAllowed).WithAuditor(auditor).WithLock(s.lockSvc).WithPeerRefs(s.policySvc.PeerRefs)
 	s.staticSeen = map[string]time.Time{}
 	s.sessions = api.NewSessions(s.deps.Now)
 	s.relay = relay.NewServer(keyVisibility{control.NewKeyVisibility(s.st, visibility, hub.Generation)},
@@ -708,6 +727,8 @@ func (s *Server) buildServices(ctx context.Context) error {
 		Endpoint:  s.cfg.HubEndpoint(),
 		Address:   s.cfg.HubAddr().Addr(),
 		Overlay:   s.cfg.OverlayPrefix(),
+		Address6:  s.hubAddr6(),
+		Overlay6:  s.overlay6(),
 		STUNAddrs: s.cfg.STUNEndpoints(),
 	}, hub.Generation)
 	s.dnsSource = newRegistrySource(s.st, visibility, hub.Generation, s.cfg.HubAddr().Addr())

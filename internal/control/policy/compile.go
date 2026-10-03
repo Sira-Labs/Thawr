@@ -12,6 +12,9 @@ type Peer struct {
 	Owner string // user name; empty for ownerless peers
 	Tags  []string
 	IPv4  netip.Addr
+	// IPv6 is the peer's IPv6 overlay address (spec 015); filter and
+	// forward rules are emitted for it next to the IPv4 ones.
+	IPv6 netip.Addr
 	// Routes are the prefixes the peer advertises and an admin approved
 	// (spec 013); 0.0.0.0/0 makes it an exit node.
 	Routes []netip.Prefix
@@ -51,6 +54,10 @@ type Route struct {
 
 // ExitPrefix is the route an exit node advertises.
 var ExitPrefix = netip.MustParsePrefix("0.0.0.0/0")
+
+// ExitPrefix6 is the IPv6 internet an exit node carries for sources
+// with an IPv6 address (spec 015); it is never advertised on its own.
+var ExitPrefix6 = netip.MustParsePrefix("::/0")
 
 // Summary describes a compiled policy in one line.
 type Summary struct {
@@ -144,7 +151,7 @@ func CompileWith(p *Policy, peers []Peer, overlay netip.Prefix) *Compiled {
 					b.set(i)
 				}
 			case SelCIDR:
-				if pe.IPv4.IsValid() && sel.Prefix.Contains(pe.IPv4) {
+				if (pe.IPv4.IsValid() && sel.Prefix.Contains(pe.IPv4)) || (pe.IPv6.IsValid() && sel.Prefix.Contains(pe.IPv6)) {
 					b.set(i)
 				}
 			case SelSelf, SelInternet:
@@ -213,11 +220,13 @@ func CompileWith(p *Policy, peers []Peer, overlay netip.Prefix) *Compiled {
 	return c
 }
 
-// IsRoute reports whether a dst prefix names a subnet route: it lies
-// entirely outside the overlay. A prefix inside the overlay selects
-// peers; one that contains the overlay is neither (Validate rejects it).
+// IsRoute reports whether a dst prefix names a subnet route: an IPv4
+// prefix entirely outside the overlay. A prefix inside the overlay
+// selects peers; one that contains the overlay is neither (Validate
+// rejects it). IPv6 prefixes always select peers by their IPv6 overlay
+// address; IPv6 subnet routes are not supported (spec 015).
 func IsRoute(prefix, overlay netip.Prefix) bool {
-	return overlay.IsValid() && prefix.IsValid() && !prefix.Overlaps(overlay)
+	return overlay.IsValid() && prefix.IsValid() && prefix.Addr().Is4() && !prefix.Overlaps(overlay)
 }
 
 // matches reports whether rule r lets src reach dst (indices).
@@ -329,6 +338,9 @@ func (c *Compiled) FilterFor(dst string) []FilterRule {
 		}
 		for _, pr := range c.allowedIdx(i, j) {
 			out = append(out, FilterRule{Src: src.IPv4, Proto: pr.Proto, Lo: pr.Lo, Hi: pr.Hi})
+			if src.IPv6.IsValid() {
+				out = append(out, FilterRule{Src: src.IPv6, Proto: pr.Proto, Lo: pr.Lo, Hi: pr.Hi})
+			}
 		}
 	}
 	sort.SliceStable(out, func(a, b int) bool { return out[a].Src.Less(out[b].Src) })
@@ -359,11 +371,17 @@ func (c *Compiled) ForwardFor(router string) []ForwardRule {
 			if !rr.src.has(i) || !c.serves(rr, j) {
 				continue
 			}
-			k := key{src.IPv4, rr.prefix, rr.proto}
-			if _, seen := byKey[k]; !seen {
-				order = append(order, k)
+			keys := []key{{src.IPv4, rr.prefix, rr.proto}}
+			// The internet is both families; a subnet route is IPv4 only.
+			if rr.internet && src.IPv6.IsValid() {
+				keys = append(keys, key{src.IPv6, ExitPrefix6, rr.proto})
 			}
-			byKey[k] = append(byKey[k], rr.ports...)
+			for _, k := range keys {
+				if _, seen := byKey[k]; !seen {
+					order = append(order, k)
+				}
+				byKey[k] = append(byKey[k], rr.ports...)
+			}
 		}
 	}
 	var out []ForwardRule

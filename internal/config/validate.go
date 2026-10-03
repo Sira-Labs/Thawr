@@ -21,6 +21,9 @@ func (e *ValidationError) Error() string {
 	return "config: " + strings.Join(e.Problems, "; ")
 }
 
+// ulaRange holds the locally assigned unique local addresses (RFC 4193).
+var ulaRange = netip.MustParsePrefix("fd00::/8")
+
 var versionRe = regexp.MustCompile(`^\d+\.\d+$`)
 
 // dnsNameRe matches a fully qualified host name with at least two
@@ -98,6 +101,15 @@ func (c *Config) Validate() error {
 		add("overlay.cidr: only IPv4 is supported in v1")
 	} else if p.Bits() > 30 {
 		add("overlay.cidr: prefix must be /30 or larger to hold a hub and peers")
+	}
+	if c.Overlay.IPv6 != "" {
+		if p, err := netip.ParsePrefix(c.Overlay.IPv6); err != nil {
+			add("overlay.ipv6: %q is not a CIDR", c.Overlay.IPv6)
+		} else if !ulaRange.Contains(p.Addr()) || p.Addr().Is4In6() {
+			add("overlay.ipv6: %q must be a unique local prefix inside fd00::/8", c.Overlay.IPv6)
+		} else if p.Bits() != 64 {
+			add("overlay.ipv6: %q must be a /64", c.Overlay.IPv6)
+		}
 	}
 	if c.Relay.MaxBytesPerSecond < 0 {
 		add("relay.max_bytes_per_second: must not be negative")

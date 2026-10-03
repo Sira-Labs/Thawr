@@ -83,6 +83,10 @@ func TestValidate(t *testing.T) {
 		{"bad public port", "public_addr: 'vpn:abc'\n", []string{"public_addr: port"}},
 		{"bad cidr", "public_addr: a\noverlay:\n  cidr: nope\n", []string{"overlay.cidr"}},
 		{"ipv6 cidr", "public_addr: a\noverlay:\n  cidr: fd00::/64\n", []string{"only IPv4"}},
+		{"ipv6 not a prefix", "public_addr: a\noverlay:\n  ipv6: fd00::1\n", []string{"overlay.ipv6"}},
+		{"ipv6 not ula", "public_addr: a\noverlay:\n  ipv6: '2001:db8::/64'\n", []string{"inside fd00::/8"}},
+		{"ipv6 fc00 half", "public_addr: a\noverlay:\n  ipv6: 'fc00::/64'\n", []string{"inside fd00::/8"}},
+		{"ipv6 not /64", "public_addr: a\noverlay:\n  ipv6: 'fd12:3456:789a::/48'\n", []string{"must be a /64"}},
 		{"tiny cidr", "public_addr: a\noverlay:\n  cidr: 10.0.0.0/31\n", []string{"/30 or larger"}},
 		{"long interface", "public_addr: a\noverlay:\n  interface: abcdefghijklmnopq\n", []string{"overlay.interface"}},
 		{"bad listen", "public_addr: a\nlisten:\n  https: '443'\n", []string{"listen.https"}},
@@ -264,5 +268,22 @@ options timeout:2 attempts:3
 	}
 	if ParseResolvConf(strings.NewReader("")) != nil {
 		t.Error("empty input yields entries")
+	}
+}
+
+func TestOverlayPrefix6(t *testing.T) {
+	cfg, err := Parse([]byte("public_addr: a\n"), noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cfg.OverlayPrefix6(); ok {
+		t.Error("an empty overlay.ipv6 reported a prefix")
+	}
+	cfg, err = Parse([]byte("public_addr: a\noverlay:\n  ipv6: 'fd3a:9c1e:44b0:0::/64'\n"), noEnv)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if p, ok := cfg.OverlayPrefix6(); !ok || p.String() != "fd3a:9c1e:44b0::/64" {
+		t.Errorf("OverlayPrefix6 = %v %v", p, ok)
 	}
 }

@@ -44,6 +44,7 @@ type PeerOps interface {
 	Leave(ctx context.Context, peerID string) error
 	Touch(ctx context.Context, peerID string) error
 	SetClientVersion(ctx context.Context, peerID, version string) error
+	SetIPv6Capable(ctx context.Context, peerID string, capable bool) (bool, error)
 }
 
 // HubInfo describes the server's own WireGuard endpoint as advertised
@@ -52,6 +53,8 @@ type HubInfo struct {
 	PublicKey string
 	Endpoint  string
 	Overlay   netip.Prefix
+	// Overlay6 is the IPv6 overlay prefix (spec 015).
+	Overlay6 netip.Prefix
 	// DNS is the hub resolver phones are told to use; invalid when the
 	// server runs without one.
 	DNS netip.Addr
@@ -114,11 +117,12 @@ func (s *controlServer) Enroll(ctx context.Context, req *thawrv1.EnrollRequest) 
 		ClientVersion: req.GetClientVersion(),
 		Name:          req.GetName(),
 		RemoteIP:      remoteIP(ctx),
+		IPv6:          req.GetIpv6(),
 	})
 	if err != nil {
 		return nil, s.toStatus(err)
 	}
-	return &thawrv1.EnrollResponse{
+	resp := &thawrv1.EnrollResponse{
 		PeerId:           res.Peer.ID,
 		Name:             res.Peer.Name,
 		Ipv4:             res.Peer.IPv4,
@@ -128,7 +132,14 @@ func (s *controlServer) Enroll(ctx context.Context, req *thawrv1.EnrollRequest) 
 		HubEndpoint:      s.deps.Hub.Endpoint,
 		ServerVersion:    s.deps.Version,
 		NetmapGeneration: res.Generation,
-	}, nil
+	}
+	// Only a client that asked for IPv6 gets it; an older one would not
+	// know what to do with the address.
+	if req.GetIpv6() && res.Peer.IPv6 != "" && s.deps.Hub.Overlay6.IsValid() {
+		resp.Ipv6 = res.Peer.IPv6
+		resp.OverlayIpv6 = s.deps.Hub.Overlay6.String()
+	}
+	return resp, nil
 }
 
 // Sync streams the caller's netmap: a full map now, a full map on every
@@ -165,6 +176,11 @@ func (s *controlServer) Sync(req *thawrv1.SyncRequest, stream grpc.ServerStreami
 			if err := s.deps.Peers.SetClientVersion(ctx, me.ID, v); err != nil {
 				log.Warn("record client version failed", "err", err)
 			}
+		}
+		// Recorded before the first netmap is built, so it already
+		// carries IPv6 when the client asked for it.
+		if _, err := s.deps.Peers.SetIPv6Capable(ctx, me.ID, req.GetIpv6()); err != nil {
+			log.Warn("record ipv6 capability failed", "err", err)
 		}
 	}
 

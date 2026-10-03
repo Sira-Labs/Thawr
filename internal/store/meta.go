@@ -21,6 +21,9 @@ type Meta struct {
 const (
 	MetaNetmapGeneration     = "netmap_generation"
 	MetaServerKeyFingerprint = "server_key_fingerprint"
+	// MetaOverlayIPv6 is the IPv6 overlay prefix in effect (spec 015),
+	// kept so a restart or restore never changes peers' addresses.
+	MetaOverlayIPv6 = "overlay_ipv6"
 )
 
 // Get returns the value for key or ErrNotFound.

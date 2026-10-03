@@ -13,6 +13,7 @@ listen:
 overlay:
   cidr: 100.64.0.0/10
   interface: thawr0              # macOS: utun (the kernel picks the number)
+  ipv6: ""                       # unique local /64 (fd00::/8); empty: generated on first start and kept
 
 tls:
   mode: self-signed              # self-signed | file | acme

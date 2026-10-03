@@ -15,6 +15,9 @@ type Registry struct {
 	Peers   []string
 	Tags    []string
 	Overlay netip.Prefix
+	// Overlay6 is the IPv6 overlay prefix (spec 015); an IPv6 prefix in
+	// a rule must lie inside it, since IPv6 subnet routes do not exist.
+	Overlay6 netip.Prefix
 }
 
 // Validate checks the policy against the registry. Unknown users and
@@ -55,6 +58,12 @@ func (p *Policy) Validate(reg Registry) (warnings []string, err error) {
 		case SelCIDR:
 			// Inside the overlay it selects peers, outside it is a route;
 			// a prefix that contains the overlay is neither.
+			if sel.Prefix.Addr().Is6() {
+				if reg.Overlay6.IsValid() && (sel.Prefix.Bits() < reg.Overlay6.Bits() || !reg.Overlay6.Contains(sel.Prefix.Addr())) {
+					errs = append(errs, fmt.Errorf("%s: %s is outside the IPv6 overlay %s; IPv6 subnet routes are not supported", where, sel.Prefix, reg.Overlay6))
+				}
+				break
+			}
 			if reg.Overlay.IsValid() && sel.Prefix.Overlaps(reg.Overlay) && !reg.Overlay.Contains(sel.Prefix.Addr()) {
 				errs = append(errs, fmt.Errorf("%s: %s overlaps the overlay %s", where, sel.Prefix, reg.Overlay))
 			}

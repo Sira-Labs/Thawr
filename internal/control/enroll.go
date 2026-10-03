@@ -30,6 +30,9 @@ type EnrollRequest struct {
 	ClientVersion string
 	Name          string // optional requested peer name
 	RemoteIP      string
+	// IPv6 is true when the client handles an IPv6 overlay address
+	// (spec 015).
+	IPv6 bool
 }
 
 // EnrollResult is the newly registered peer and its node secret, which
@@ -46,6 +49,7 @@ type Enroller struct {
 	now        func() time.Time
 	log        *slog.Logger
 	overlay    netip.Prefix
+	overlay6   netip.Prefix
 	minVersion string
 	limit      *rateLimit
 	notify     Notifier
@@ -58,6 +62,13 @@ type Enroller struct {
 // gets a numbered name instead of that peer's grants.
 func (e *Enroller) WithPeerRefs(refs PeerRefs) *Enroller {
 	e.peerRefs = refs
+	return e
+}
+
+// WithOverlay6 sets the IPv6 overlay prefix new peers' IPv6 addresses
+// are derived from (spec 015).
+func (e *Enroller) WithOverlay6(prefix netip.Prefix) *Enroller {
+	e.overlay6 = prefix
 	return e
 }
 
@@ -191,6 +202,8 @@ func (e *Enroller) Enroll(ctx context.Context, req EnrollRequest) (EnrollResult,
 			Tags:           tok.Tags,
 			PublicKey:      pub.String(),
 			IPv4:           ip.String(),
+			IPv6:           addrString(IPv6For(e.overlay6, ip)),
+			IPv6Capable:    req.IPv6,
 			NodeSecretHash: hashSecret(nodeSecret),
 			CreatedAt:      now,
 			ClientVersion:  req.ClientVersion,
@@ -211,12 +224,12 @@ func (e *Enroller) Enroll(ctx context.Context, req EnrollRequest) (EnrollResult,
 			return err
 		}
 		if err := e.audit.Record(ctx, tx, PeerPrincipal(peer.Name), AuditPeerEnrol, peer.ID,
-			map[string]string{"name": peer.Name, "kind": peer.Kind, "tags": tagsDetail(peer.Tags), "ipv4": peer.IPv4, "key": wg.Fingerprint(pub), "token": tok.ID, "os": peer.OS, "client_version": req.ClientVersion}); err != nil {
+			map[string]string{"name": peer.Name, "kind": peer.Kind, "tags": tagsDetail(peer.Tags), "ipv4": peer.IPv4, "ipv6": peer.IPv6, "key": wg.Fingerprint(pub), "token": tok.ID, "os": peer.OS, "client_version": req.ClientVersion}); err != nil {
 			return err
 		}
 		result = EnrollResult{Peer: peer, NodeSecret: nodeSecret, Generation: gen}
 		e.log.Info("peer enrolled", "peer", peer.Name, "peer_id", peer.ID, "kind", peer.Kind,
-			"ipv4", peer.IPv4, "key", wg.Fingerprint(pub), "token", tok.ID, "remote", req.RemoteIP,
+			"ipv4", peer.IPv4, "ipv6", peer.IPv6, "key", wg.Fingerprint(pub), "token", tok.ID, "remote", req.RemoteIP,
 			"os", req.OS, "arch", req.Arch, "client_version", req.ClientVersion, "generation", gen)
 		return nil
 	})

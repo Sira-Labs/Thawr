@@ -52,7 +52,7 @@ func TestPolicyVisibilityNetMap(t *testing.T) {
 	if len(nmB.Peers) != 1 || nmB.Peers[0].ID != a1.Peer.ID {
 		t.Fatalf("bob's netmap peers: %+v", nmB.Peers)
 	}
-	if len(nmB.Filter) != 2 || nmB.Filter[0].SrcIPv4.String() != a1.Peer.IPv4 || nmB.Filter[0].Proto != "tcp" || nmB.Filter[0].PortLo != 22 || nmB.Filter[1].PortHi != 90 {
+	if len(nmB.Filter) != 2 || nmB.Filter[0].Src.String() != a1.Peer.IPv4 || nmB.Filter[0].Proto != "tcp" || nmB.Filter[0].PortLo != 22 || nmB.Filter[1].PortHi != 90 {
 		t.Fatalf("bob's filter: %+v", nmB.Filter)
 	}
 	nmA, err := b.Build(ctx, a1.Peer.ID)

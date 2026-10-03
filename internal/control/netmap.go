@@ -42,12 +42,15 @@ type Endpoint struct {
 
 // NetPeer is one visible peer as delivered to a client.
 type NetPeer struct {
-	ID         string
-	Name       string
-	Kind       string
-	Owner      string
-	PublicKey  string
-	IPv4       netip.Addr
+	ID        string
+	Name      string
+	Kind      string
+	Owner     string
+	PublicKey string
+	IPv4      netip.Addr
+	// IPv6 is set when both this peer and the receiver handle IPv6
+	// (spec 015); its /128 is then in AllowedIPs too.
+	IPv6       netip.Addr
 	Online     bool
 	Endpoints  []Endpoint
 	Symmetric  bool
@@ -60,7 +63,8 @@ type NetPeer struct {
 	// (spec 012).
 	Signatures []PeerSignature
 	// ExitNode marks a peer the receiver may route its internet traffic
-	// through (spec 013); the receiver adds 0.0.0.0/0 when it selects it.
+	// through (spec 013); the receiver adds 0.0.0.0/0 when it selects it,
+	// and ::/0 as well when the peer has IPv6 (spec 015).
 	ExitNode bool
 }
 
@@ -72,23 +76,23 @@ type HubPeer struct {
 	Signatures []PeerSignature
 }
 
-// FilterRule allows SrcIPv4 to reach the receiver on a port range.
+// FilterRule allows Src to reach the receiver on a port range.
 type FilterRule struct {
-	SrcIPv4 netip.Addr
-	Proto   string
-	PortLo  uint16
-	PortHi  uint16
+	Src    netip.Addr
+	Proto  string
+	PortLo uint16
+	PortHi uint16
 }
 
-// ForwardRule allows SrcIPv4 to reach Dst through the receiver on a
+// ForwardRule allows Src to reach Dst through the receiver on a
 // port range; the receiver installs it on its forwarding path as a
 // subnet router or exit node (spec 013).
 type ForwardRule struct {
-	SrcIPv4 netip.Addr
-	Dst     netip.Prefix
-	Proto   string
-	PortLo  uint16
-	PortHi  uint16
+	Src    netip.Addr
+	Dst    netip.Prefix
+	Proto  string
+	PortLo uint16
+	PortHi uint16
 }
 
 // Route is one prefix reached through the peer Via (spec 013).
@@ -123,9 +127,13 @@ type NetMap struct {
 	SelfSignatures []PeerSignature
 	SelfIPv4       netip.Addr
 	Overlay        netip.Prefix
-	Peers          []NetPeer
-	Hub            HubPeer
-	Filter         []FilterRule
+	// SelfIPv6 and Overlay6 are set only for a receiver that handles
+	// IPv6 (spec 015).
+	SelfIPv6 netip.Addr
+	Overlay6 netip.Prefix
+	Peers    []NetPeer
+	Hub      HubPeer
+	Filter   []FilterRule
 	// STUN lists the server's STUN listeners as host:port.
 	STUN []string
 	// Lock is the current signed lock record; nil while none was set.
@@ -177,6 +185,10 @@ type HubConfig struct {
 	Endpoint  string
 	Address   netip.Addr
 	Overlay   netip.Prefix
+	// Address6 and Overlay6 are the hub's IPv6 address and the IPv6
+	// overlay prefix (spec 015).
+	Address6 netip.Addr
+	Overlay6 netip.Prefix
 	// STUNAddrs are the public host:port of the STUN listeners.
 	STUNAddrs []string
 }
@@ -255,6 +267,10 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 	if err != nil {
 		return NetMap{}, err
 	}
+	// IPv6 goes only to a receiver that asked for it (an older client
+	// rejects IPv6 routes) and only for peers that asked too (an address
+	// nobody configured would blackhole traffic).
+	self6 := capableIPv6(self)
 	nm := NetMap{
 		Generation:     b.generation(),
 		SelfID:         self.ID,
@@ -275,6 +291,16 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 		Forward: append([]ForwardRule{}, routing.Forward...),
 		STUN:    append([]string{}, b.hub.STUNAddrs...),
 	}
+	if self6.IsValid() && b.hub.Overlay6.IsValid() {
+		nm.SelfIPv6, nm.Overlay6 = self6, b.hub.Overlay6
+		if b.hub.Address6.IsValid() {
+			nm.Hub.AllowedIPs = append(nm.Hub.AllowedIPs, netip.PrefixFrom(b.hub.Address6, 128))
+		}
+	} else {
+		self6 = netip.Addr{}
+		nm.Filter = ipv4Filter(nm.Filter)
+		nm.Forward = ipv4Forward(nm.Forward)
+	}
 	for _, a := range advertised {
 		if p, err := netip.ParsePrefix(a.Prefix); err == nil {
 			nm.SelfAdvertised = append(nm.SelfAdvertised, AdvertisedRoute{Prefix: p, Approved: a.Approved})
@@ -291,6 +317,10 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 		if !vis.Visible(self, p) {
 			continue
 		}
+		var ip6 netip.Addr
+		if self6.IsValid() {
+			ip6 = capableIPv6(p)
+		}
 		online := false
 		if b.presence != nil {
 			online = b.presence.Online(p.ID)
@@ -300,8 +330,11 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 		// and the receiver-side filter know them.
 		if p.Mode == store.ModeStatic {
 			nm.Hub.AllowedIPs = append(nm.Hub.AllowedIPs, netip.PrefixFrom(ip, 32))
+			if ip6.IsValid() {
+				nm.Hub.AllowedIPs = append(nm.Hub.AllowedIPs, netip.PrefixFrom(ip6, 128))
+			}
 			nm.Peers = append(nm.Peers, NetPeer{ID: p.ID, Name: p.Name, Kind: p.Kind, Owner: owners[p.OwnerID],
-				PublicKey: p.PublicKey, IPv4: ip, Online: online, ViaHub: true, Signatures: sigs[p.ID+"\x00"+p.PublicKey]})
+				PublicKey: p.PublicKey, IPv4: ip, IPv6: ip6, Online: online, ViaHub: true, Signatures: sigs[p.ID+"\x00"+p.PublicKey]})
 			continue
 		}
 		var (
@@ -311,6 +344,10 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 		if b.endpoints != nil {
 			eps, symmetric = b.endpoints.Get(p.ID)
 		}
+		allowed := []netip.Prefix{netip.PrefixFrom(ip, 32)}
+		if ip6.IsValid() {
+			allowed = append(allowed, netip.PrefixFrom(ip6, 128))
+		}
 		nm.Peers = append(nm.Peers, NetPeer{
 			ID:         p.ID,
 			Name:       p.Name,
@@ -318,15 +355,51 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 			Owner:      owners[p.OwnerID],
 			PublicKey:  p.PublicKey,
 			IPv4:       ip,
+			IPv6:       ip6,
 			Online:     online,
 			Endpoints:  eps,
 			Symmetric:  symmetric,
-			AllowedIPs: append([]netip.Prefix{netip.PrefixFrom(ip, 32)}, viaRoutes[p.ID]...),
+			AllowedIPs: append(allowed, viaRoutes[p.ID]...),
 			Signatures: sigs[p.ID+"\x00"+p.PublicKey],
 			ExitNode:   exitNodes[p.ID],
 		})
 	}
 	return nm, nil
+}
+
+// capableIPv6 is p's IPv6 address when its client handles IPv6, else
+// the zero Addr.
+func capableIPv6(p store.Peer) netip.Addr {
+	if !p.IPv6Capable || p.IPv6 == "" {
+		return netip.Addr{}
+	}
+	a, err := netip.ParseAddr(p.IPv6)
+	if err != nil || !a.Is6() {
+		return netip.Addr{}
+	}
+	return a
+}
+
+// ipv4Filter keeps the IPv4 rules, for a receiver without IPv6.
+func ipv4Filter(rules []FilterRule) []FilterRule {
+	out := rules[:0:0]
+	for _, r := range rules {
+		if r.Src.Is4() {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// ipv4Forward keeps the IPv4 forward rules, for a receiver without IPv6.
+func ipv4Forward(rules []ForwardRule) []ForwardRule {
+	out := rules[:0:0]
+	for _, r := range rules {
+		if r.Src.Is4() && r.Dst.Addr().Is4() {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // ownerNames maps user ids to names so netmaps can show owners.
