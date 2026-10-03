@@ -330,3 +330,63 @@ func TestRelayPruneAndClose(t *testing.T) {
 		t.Errorf("Serve after Close: %v", err)
 	}
 }
+
+func TestRelayAbsentPeer(t *testing.T) {
+	a, c, d := newKey(t), newKey(t), newKey(t)
+	type pair struct{ src, dst Key }
+	absent := make(chan pair, 8)
+	now := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
+	var mu sync.Mutex
+	clock := func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
+	vis := visFunc(func(src, dst Key) bool { return dst != c })
+	srv := NewServer(vis, ServerOptions{Now: clock, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Absent: func(src, dst Key) { absent <- pair{src, dst} }})
+	ca := connect(t, srv, a, true)
+
+	// d may be reached but has no session: the server asks for it once
+	// per PEER_GONE window, however often a sends.
+	for range 3 {
+		ca.send(Frame{Type: TypeSend, Key: d, Payload: wgPayload()})
+	}
+	select {
+	case p := <-absent:
+		if p.src != a || p.dst != d {
+			t.Errorf("absent %+v, want a -> d", p)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no absent report for a visible peer without a session")
+	}
+	select {
+	case p := <-absent:
+		t.Errorf("second report inside the PEER_GONE window: %+v", p)
+	case <-time.After(50 * time.Millisecond):
+	}
+	mu.Lock()
+	now = now.Add(peerGoneInterval)
+	mu.Unlock()
+	ca.send(Frame{Type: TypeSend, Key: d, Payload: wgPayload()})
+	select {
+	case <-absent:
+	case <-time.After(time.Second):
+		t.Fatal("no report after the window")
+	}
+
+	// A peer a may not reach is never asked to join.
+	ca.send(Frame{Type: TypeSend, Key: c, Payload: wgPayload()})
+	// The sends to d left their PEER_GONE frames unread; skip those.
+	for {
+		got, ok := ca.recv(time.Second)
+		if ok && got.Type == TypePeerGone && got.Key == d {
+			continue
+		}
+		if !ok || got.Type != TypePeerGone || got.Key != c {
+			t.Fatalf("expected PEER_GONE for c, got %+v ok=%v", got, ok)
+		}
+		break
+	}
+	select {
+	case p := <-absent:
+		t.Errorf("invisible peer reported absent: %+v", p)
+	case <-time.After(50 * time.Millisecond):
+	}
+}

@@ -233,3 +233,29 @@ func TestRelayClientReconnect(t *testing.T) {
 		t.Fatalf("after reconnect: ok=%v from %v", ok, from)
 	}
 }
+
+// TestRelayClientQueuesUntilConnected: the first datagram WireGuard
+// sends to a new proxy, usually the handshake that opened the relay
+// path, leaves once the connection is up instead of being dropped.
+func TestRelayClientQueuesUntilConnected(t *testing.T) {
+	host := startHost(t, "sa", "sb")
+	wgA, wgB := newFakeWG(t), newFakeWG(t)
+	a := newClient(t, host, "sa", wgA.port, nil)
+	b := newClient(t, host, "sb", wgB.port, nil)
+	ctx := context.Background()
+	if _, err := b.Endpoint(ctx, host.keys["sa"]); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "b connected", func() bool { return b.Connected() && host.srv.Stats().Sessions == 1 })
+
+	proxyAB, err := a.Endpoint(ctx, host.keys["sb"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte{1, 0, 0, 0, 7}
+	wgA.send(t, net.UDPAddrFromAddrPort(proxyAB), payload) // once, before a is connected
+	got, _, ok := wgB.recv(3 * time.Second)
+	if !ok || string(got) != string(payload) {
+		t.Fatalf("first datagram lost: ok=%v got %v", ok, got)
+	}
+}

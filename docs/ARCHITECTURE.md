@@ -308,8 +308,21 @@ seconds. If the list is exhausted (10 seconds at most) the path is
 `relay` (§4.5), re-probed from there as described below. A
 `direct` path with queued traffic but no handshake for 3 minutes is
 re-probed. Path states are reported to the server (`ReportPath`) and
-shown in the admin UI. No userspace packet multiplexing: the kernel or
-`wireguard-go` device is always the one sending. Spec 004.
+shown in the admin UI. A peer B with no traffic of its own learns that
+A wants it from the server: a `probing` or `relay` report from A (and a
+relay send to B without a session, §4.5) records the request in the
+hub for 30 s and wakes only B's stream; B's netmap flags A `wanted`,
+and B takes a newly flagged peer as traffic intent and starts its round
+toward A. The hub records requests only for peers with an open stream,
+and a netmap flags only peers the receiver may see. Two sides probing
+each other start within milliseconds, so the one with the larger public
+key lengthens the first window of each round by 1 s: their candidate
+switches (each a re-add) then never land on the other's fresh
+handshake, which a re-add would throw away. A probe or relay step is
+also skipped when the device shows a handshake, received bytes or a
+moved endpoint for the peer since the tick read its stats. No userspace
+packet multiplexing: the kernel or `wireguard-go` device is always the
+one sending. Spec 004.
 
 ### 4.5 Relay fallback
 
@@ -355,7 +368,12 @@ failed retry costs at most one window of loss; a candidate change (new
 netmap on both sides at once) starts a full simultaneous round, which
 is what upgrades a relayed pair to `direct` after a network change. A
 handshake arriving from a public address while relayed also upgrades
-the path (roaming). Spec 005.
+the path (roaming). Any upgrade releases the peer's proxy after 10 s. A peer with no traffic of its own would never
+join: when a visible peer sends to a key without a session, the relay
+tells the hub, which marks the sender `wanted` for that peer (§4.4), so
+the peer's own probe round ends on the relay too. Datagrams a proxy
+receives while the relay connection is still opening wait in its
+queue. Spec 005.
 
 ### 4.6 Policy evaluation
 

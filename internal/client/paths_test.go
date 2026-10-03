@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/sira-labs/thawr/internal/control"
+	"github.com/sira-labs/thawr/internal/control/path"
+	"github.com/sira-labs/thawr/internal/relay"
 	"github.com/sira-labs/thawr/internal/wg"
 	"github.com/sira-labs/thawr/internal/wg/wgtest"
 )
@@ -225,6 +227,35 @@ func TestDaemonSymmetricPeersUseRelay(t *testing.T) {
 	})
 }
 
+// TestDaemonRelayRetryReleasesProxy: a retry from the relay that ends
+// direct goes relay -> probing -> direct and must still release the
+// relay proxy (spec 005).
+func TestDaemonRelayRetryReleasesProxy(t *testing.T) {
+	cp := newControlPlane(t)
+	dirA, _, _, keyB := twoPeers(t, cp, []control.Endpoint{{Addr: candRefl, Kind: control.EndpointReflexive}}, false)
+	d, fake, stop := startDaemon(t, dirA, func(o *DaemonOptions) {
+		// A window long enough to answer the retry while it is open.
+		o.Path.ProbeWindow = time.Second
+	})
+	defer stop()
+	waitApplied(t, d, func(nm NetMap) bool { return len(nm.Peers) == 1 })
+	lc := NewLocalClient(d.opts.Socket)
+	if res, err := lc.Ping(context.Background(), "b"); err != nil || res.State != "relay" {
+		t.Fatalf("ping: %+v err=%v", res, err)
+	}
+	waitFor(t, "relay proxy open", func() bool { st, _ := lc.Status(context.Background()); return st.Relay.Peers == 1 })
+	waitFor(t, "retry from the relay", func() bool {
+		st, _ := lc.Status(context.Background())
+		return len(st.Peers) == 1 && st.Peers[0].Path == "probing"
+	})
+	fake.SetStats(wg.PeerStats{PublicKey: keyB, Endpoint: candRefl, LastHandshake: time.Now()})
+	waitFor(t, "direct after the retry", func() bool {
+		st, _ := lc.Status(context.Background())
+		return len(st.Peers) == 1 && st.Peers[0].Path == "direct"
+	})
+	waitFor(t, "proxy released", func() bool { st, _ := lc.Status(context.Background()); return st.Relay.Peers == 0 })
+}
+
 func TestEndpointReportDedup(t *testing.T) {
 	t0 := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
 	a := endpointReport{ListenPort: 1, Endpoints: []control.Endpoint{{Addr: candLAN1, Kind: control.EndpointLocal}}}
@@ -252,3 +283,71 @@ func TestEndpointReportDedup(t *testing.T) {
 }
 
 func itoa(n int) string { return netip.AddrPortFrom(netip.IPv4Unspecified(), uint16(n)).String()[8:] }
+
+// TestSyncPathsWanted: a peer the netmap newly flags as waiting on
+// the relay becomes traffic intent once, as `client ping` would make it
+// (spec 005); the flag staying set does not repeat it.
+func TestSyncPathsWanted(t *testing.T) {
+	key, err := wg.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := &Daemon{paths: map[string]*peerPath{}, pathWake: make(chan struct{}, 1), relay: relay.NewClient(relay.ClientOptions{})}
+	t.Cleanup(d.closeSinks)
+	peer := Peer{ID: "p1", Name: "gw", PublicKey: key.PublicKey().String(), IPv4: "100.64.0.3"}
+	apply := func(wanted bool) *peerPath {
+		t.Helper()
+		peer.Wanted = wanted
+		if err := d.syncPaths(context.Background(), NetMap{Peers: []Peer{peer}}, wg.Config{}); err != nil {
+			t.Fatal(err)
+		}
+		return d.paths["p1"]
+	}
+	if pp := apply(false); pp.ping {
+		t.Fatal("intent without a request")
+	}
+	pp := apply(true)
+	if !pp.ping {
+		t.Fatal("a new relay request did not become intent")
+	}
+	pp.ping = false // the prober consumed it
+	if apply(true).ping {
+		t.Error("an unchanged request became intent again")
+	}
+	apply(false)
+	pp = apply(true)
+	if !pp.ping {
+		t.Error("a request after the previous one expired did not become intent")
+	}
+	pp.ping = false
+	// A key rotation replaces the machine, which starts idle: the
+	// standing request must count again.
+	rotated, err := wg.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer.PublicKey = rotated.PublicKey().String()
+	if !apply(true).ping {
+		t.Error("a standing request was lost with the key rotation")
+	}
+}
+
+func TestReachedSince(t *testing.T) {
+	read := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
+	in := path.Input{Handshake: read, Endpoint: candLAN1, Rx: 100}
+	for _, tc := range []struct {
+		name  string
+		stats wg.PeerStats
+		want  bool
+	}{
+		{"nothing new", wg.PeerStats{LastHandshake: read, Endpoint: candLAN1, RxBytes: 100}, false},
+		{"later handshake", wg.PeerStats{LastHandshake: read.Add(time.Millisecond), Endpoint: candLAN1, RxBytes: 100}, true},
+		{"initiation from the configured endpoint", wg.PeerStats{LastHandshake: read, Endpoint: candLAN1, RxBytes: 248}, true},
+		{"initiation moved the endpoint", wg.PeerStats{LastHandshake: read, Endpoint: candRefl, RxBytes: 100}, true},
+		{"loopback sink is not the peer", wg.PeerStats{LastHandshake: read, Endpoint: netip.MustParseAddrPort("127.0.0.1:4000"), RxBytes: 100}, false},
+	} {
+		if got := reachedSince(tc.stats, in); got != tc.want {
+			t.Errorf("%s: %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

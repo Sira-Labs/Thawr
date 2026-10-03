@@ -647,7 +647,12 @@ type NetPeer struct {
 	ExitNode bool `protobuf:"varint,14,opt,name=exit_node,json=exitNode,proto3" json:"exit_node,omitempty"`
 	// ipv6 is set when both this peer and the receiver handle IPv6; its
 	// /128 is then in allowed_ips as well.
-	Ipv6          string `protobuf:"bytes,15,opt,name=ipv6,proto3" json:"ipv6,omitempty"`
+	Ipv6 string `protobuf:"bytes,15,opt,name=ipv6,proto3" json:"ipv6,omitempty"`
+	// wanted marks a peer that is trying to reach the receiver, by
+	// probing its candidates or on the relay: the receiver treats it as
+	// traffic intent and probes back, so both sides punch at once and
+	// meet on the relay when nothing direct works (specs 004, 005).
+	Wanted        bool `protobuf:"varint,16,opt,name=wanted,proto3" json:"wanted,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -785,6 +790,13 @@ func (x *NetPeer) GetIpv6() string {
 		return x.Ipv6
 	}
 	return ""
+}
+
+func (x *NetPeer) GetWanted() bool {
+	if x != nil {
+		return x.Wanted
+	}
+	return false
 }
 
 // Endpoint is one ip:port candidate.
@@ -2090,7 +2102,7 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"advertised\x12\x12\n" +
 	"\x04ipv6\x18\t \x01(\tR\x04ipv6\x12!\n" +
 	"\foverlay_ipv6\x18\n" +
-	" \x01(\tR\voverlayIpv6\"\xb4\x03\n" +
+	" \x01(\tR\voverlayIpv6\"\xcc\x03\n" +
 	"\aNetPeer\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -2111,7 +2123,8 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"signatures\x18\r \x03(\v2\x17.thawr.v1.PeerSignatureR\n" +
 	"signatures\x12\x1b\n" +
 	"\texit_node\x18\x0e \x01(\bR\bexitNode\x12\x12\n" +
-	"\x04ipv6\x18\x0f \x01(\tR\x04ipv6\"J\n" +
+	"\x04ipv6\x18\x0f \x01(\tR\x04ipv6\x12\x16\n" +
+	"\x06wanted\x18\x10 \x01(\bR\x06wanted\"J\n" +
 	"\bEndpoint\x12\x12\n" +
 	"\x04addr\x18\x01 \x01(\tR\x04addr\x12*\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x16.thawr.v1.EndpointKindR\x04kind\"\x9e\x01\n" +

@@ -216,9 +216,10 @@ func (c *Client) readProxy(p *proxy) {
 		if n > MaxPayload || !IsWireGuard(buf[:n]) {
 			continue
 		}
-		if !c.connected.Load() {
-			continue // UDP semantics: nothing to queue for later
-		}
+		// Frames wait in the bounded queue while the connection is still
+		// being set up and leave once it is up: the first one is
+		// usually the handshake that opened the relay path, and dropping
+		// it cost a 5 s WireGuard retry. A full queue drops, as UDP does.
 		f := Frame{Type: TypeSend, Key: p.key, Payload: append([]byte(nil), buf[:n]...)}
 		select {
 		case c.out <- f:

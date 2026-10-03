@@ -109,6 +109,34 @@ func TestPathStateMachine(t *testing.T) {
 		}
 	})
 
+	t.Run("stagger lengthens only the first window of a round", func(t *testing.T) {
+		m := New(Options{})
+		m.SetStagger(true)
+		m.SetCandidates([]netip.AddrPort{c1, c2})
+		m.Step(Input{Now: t0})
+		if out := m.Step(Input{Now: t0, Intent: true}); out.Action != ActProbe || out.Endpoint != c1 {
+			t.Fatalf("probe 1: %+v", out)
+		}
+		if out := m.Step(Input{Now: at(2500 * time.Millisecond)}); out.Action != ActNone || out.Endpoint != c1 {
+			t.Fatalf("first window ended without the stagger: %+v", out)
+		}
+		if out := m.Step(Input{Now: at(3 * time.Second)}); out.Action != ActProbe || out.Endpoint != c2 {
+			t.Fatalf("probe 2 after 3 s: %+v", out)
+		}
+		if out := m.Step(Input{Now: at(5 * time.Second)}); out.State != Unreachable {
+			t.Fatalf("second window is a plain 2 s: %+v", out)
+		}
+		m2 := New(Options{})
+		m2.SetStagger(true)
+		m2.SetStagger(false)
+		m2.SetCandidates([]netip.AddrPort{c1, c2})
+		m2.Step(Input{Now: t0})
+		m2.Step(Input{Now: t0, Intent: true})
+		if out := m2.Step(Input{Now: at(2 * time.Second)}); out.Endpoint != c2 {
+			t.Fatalf("stagger switched off still lags: %+v", out)
+		}
+	})
+
 	t.Run("exhaustion and retry", func(t *testing.T) {
 		m := New(Options{})
 		m.SetCandidates([]netip.AddrPort{c1, c2})

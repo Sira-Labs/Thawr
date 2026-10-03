@@ -173,6 +173,34 @@ batches).
       - Visibility for the relay is `control.KeyVisibility` (peers by
         public key, cached per netmap generation); the registry-follow
         loop also prunes sessions of deleted peers.
+      - Fix (2026-10-03, found by the new CI integration job): a peer
+        without traffic of its own never joined the relay, so a relayed
+        pair worked only when both sides wanted to talk; nor did it
+        punch back, so "both sides punch at once" (spec 004) happened
+        only by chance. The server now records "A wants B" in the hub
+        when A reports `probing` or `relay` toward B, or when the relay
+        gets a send for B without a session (`Absent`, once per
+        PEER_GONE window); the hub keeps it 30 s, only for peers with a
+        stream (client-reported ids cannot grow the table), and wakes
+        only B, whose netmap flags A `wanted`. B takes a new flag as
+        traffic intent. A server push was chosen over keeping every
+        symmetric client on the relay, which would hold connections
+        nobody uses.
+      - The relay client queues datagrams while it connects instead of
+        dropping them: the first one is the handshake that opened the
+        relay path, and losing it cost a 5 s WireGuard retry. First
+        echo between two symmetric NATs: about 4 s.
+      - Probing back made both sides switch candidates on the same tick:
+        a re-add within a round trip of the other side's initiation
+        dropped the session it had just answered, and full cone against
+        symmetric fell to the relay in half the runs. The larger public
+        key staggers its rounds by half a window (both sides derive the
+        same order, no coordination needed), and a step is skipped when
+        fresh stats show the peer got through since the tick's read.
+      - A retry from the relay that succeeds goes relay -> probing ->
+        direct; the proxy was released only on a direct relay -> X
+        step, so upgraded peers kept it (and the relay connection)
+        forever. It is now released on any settled non-relay state.
       - `relay.max_bytes_per_second` is a per-session token bucket with a
         one-second burst; queue overflow and violations are counted and
         all counters sit under `relay` in `/api/v1/status`.

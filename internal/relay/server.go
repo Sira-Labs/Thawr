@@ -33,8 +33,12 @@ type ServerOptions struct {
 	// MaxViolationsPerMinute closes a session that keeps addressing
 	// peers it may not see (10).
 	MaxViolationsPerMinute int
-	Now                    func() time.Time
-	Logger                 *slog.Logger
+	// Absent is told, at most once per second per pair, that src sent
+	// to dst, a peer it may reach, while dst has no session; the server
+	// asks dst to join the relay (spec 005). Nil does nothing.
+	Absent func(src, dst Key)
+	Now    func() time.Time
+	Logger *slog.Logger
 }
 
 func (o ServerOptions) withDefaults() ServerOptions {
@@ -213,7 +217,9 @@ func (sess *session) forward(f Frame) error {
 	dst := srv.sessions[f.Key]
 	srv.mu.Unlock()
 	if dst == nil {
-		sess.peerGone(f.Key)
+		if sess.peerGone(f.Key) && srv.opts.Absent != nil {
+			srv.opts.Absent(sess.key, f.Key)
+		}
 		return nil
 	}
 	payload := append([]byte(nil), f.Payload...)
@@ -245,18 +251,20 @@ func (sess *session) allowBytes(n int) bool {
 	return true
 }
 
-// peerGone tells the client, at most once per second per destination.
-func (sess *session) peerGone(dst Key) {
+// peerGone tells the client, at most once per second per destination,
+// and reports whether it did.
+func (sess *session) peerGone(dst Key) bool {
 	now := sess.srv.opts.Now()
 	sess.mu.Lock()
 	last, seen := sess.gone[dst]
 	if seen && now.Sub(last) < peerGoneInterval {
 		sess.mu.Unlock()
-		return
+		return false
 	}
 	sess.gone[dst] = now
 	sess.mu.Unlock()
 	sess.enqueue(Frame{Type: TypePeerGone, Key: dst})
+	return true
 }
 
 // violation records one and reports whether the session must close.

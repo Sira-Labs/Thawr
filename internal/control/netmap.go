@@ -66,6 +66,9 @@ type NetPeer struct {
 	// through (spec 013); the receiver adds 0.0.0.0/0 when it selects it,
 	// and ::/0 as well when the peer has IPv6 (spec 015).
 	ExitNode bool
+	// Wanted marks a peer that is trying to reach the receiver, by
+	// probing or on the relay (specs 004, 005).
+	Wanted bool
 }
 
 // HubPeer is the server's own WireGuard interface as seen by a peer.
@@ -198,6 +201,12 @@ type Presence interface {
 	Online(peerID string) bool
 }
 
+// Wants tells whether peer from recently tried to reach peer to;
+// control.Hub implements it.
+type Wants interface {
+	Wanted(to, from string) bool
+}
+
 // NetMapBuilder computes per-peer netmaps from the store and the
 // in-memory tables.
 type NetMapBuilder struct {
@@ -207,12 +216,20 @@ type NetMapBuilder struct {
 	presence   Presence
 	hub        HubConfig
 	generation func() int64
+	wants      Wants
 }
 
 // NewNetMapBuilder builds the netmap builder. generation supplies the
 // current sequence number.
 func NewNetMapBuilder(st *store.Store, vis Visibility, ep *EndpointTable, pr Presence, hub HubConfig, generation func() int64) *NetMapBuilder {
 	return &NetMapBuilder{store: st, visibility: vis, endpoints: ep, presence: pr, hub: hub, generation: generation}
+}
+
+// WithWants makes netmaps flag the peers that are trying to reach the
+// receiver.
+func (b *NetMapBuilder) WithWants(rw Wants) *NetMapBuilder {
+	b.wants = rw
+	return b
 }
 
 // Build returns the netmap for peerID or ErrNotFound when it no longer
@@ -362,6 +379,7 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 			AllowedIPs: append(allowed, viaRoutes[p.ID]...),
 			Signatures: sigs[p.ID+"\x00"+p.PublicKey],
 			ExitNode:   exitNodes[p.ID],
+			Wanted:     b.wants != nil && b.wants.Wanted(peerID, p.ID),
 		})
 	}
 	return nm, nil
