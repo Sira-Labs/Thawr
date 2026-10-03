@@ -2,6 +2,7 @@ package api
 
 import (
 	"testing"
+	"time"
 
 	thawrv1 "github.com/sira-labs/thawr/internal/api/proto/thawr/v1"
 )
@@ -32,7 +33,11 @@ func TestReportPathWantsPeer(t *testing.T) {
 	if _, err := env.client.ReportPath(authCtx(aSecret), &thawrv1.PathReport{Paths: []*thawrv1.PathState{{PeerId: bID, State: "probing", Endpoint: "1.2.3.4:5"}}}); err != nil {
 		t.Fatal(err)
 	}
-	for {
+	// Keepalive maps keep arriving, so bound the wait overall.
+	for deadline := time.Now().Add(2 * time.Second); ; {
+		if time.Now().After(deadline) {
+			t.Fatal("b's netmap never flagged a wanted")
+		}
 		nm, err = recvMap(t, stream)
 		if err != nil {
 			t.Fatal(err)

@@ -373,8 +373,16 @@ func TestRelayAbsentPeer(t *testing.T) {
 
 	// A peer a may not reach is never asked to join.
 	ca.send(Frame{Type: TypeSend, Key: c, Payload: wgPayload()})
-	if got, ok := ca.recv(time.Second); !ok || got.Type != TypePeerGone {
-		t.Fatalf("expected PEER_GONE for c, got %+v ok=%v", got, ok)
+	// The sends to d left their PEER_GONE frames unread; skip those.
+	for {
+		got, ok := ca.recv(time.Second)
+		if ok && got.Type == TypePeerGone && got.Key == d {
+			continue
+		}
+		if !ok || got.Type != TypePeerGone || got.Key != c {
+			t.Fatalf("expected PEER_GONE for c, got %+v ok=%v", got, ok)
+		}
+		break
 	}
 	select {
 	case p := <-absent:
