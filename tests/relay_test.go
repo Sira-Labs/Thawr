@@ -30,6 +30,16 @@ func TestRelaySymmetricNATs(t *testing.T) {
 		t.Errorf("relay status: %+v", st.Relay)
 	}
 	peerIP := st.Peers[0].IPv4
+	// client-2 joins the relay once the server tells it client-1 waits
+	// there: within 10 s of both being online (spec 005), so allow 20 s
+	// for the first echo.
+	deadline := time.Now().Add(20 * time.Second)
+	for sites[0].client.cmd(context.Background(), "ping", "-c", "1", "-W", "1", peerIP).Run() != nil {
+		if time.Now().After(deadline) {
+			t.Fatalf("no echo from %s through the relay within %s", peerIP, time.Since(start).Round(time.Second))
+		}
+	}
+	t.Logf("first echo through the relay %s after the clients were up", time.Since(start).Round(100*time.Millisecond))
 	if out, err := sites[0].client.cmd(context.Background(), "ping", "-c", "3", "-W", "2", peerIP).CombinedOutput(); err != nil {
 		t.Fatalf("ping %s through the relay: %v\n%s", peerIP, err, out)
 	}

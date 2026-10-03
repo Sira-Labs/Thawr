@@ -102,8 +102,10 @@ func newStarMesh(t *testing.T, policy string, withPhone bool) *mobileMesh {
 		return srvNs.cmd(ctx, bin, append([]string{"admin", "--socket", socket}, args...)...).CombinedOutput()
 	}
 	writeFile(t, filepath.Join(dir, "pw"), "integrationpassword\n")
-	for _, user := range []string{"alice", "bob"} {
-		c := srvNs.cmd(ctx, bin, "admin", "--socket", socket, "user", "create", user, "--role", "member")
+	// alice is an admin: the first network-lock record must come from a
+	// device an admin owns (spec 012); bob is a member.
+	for user, role := range map[string]string{"alice": "admin", "bob": "member"} {
+		c := srvNs.cmd(ctx, bin, "admin", "--socket", socket, "user", "create", user, "--role", role)
 		c.Env = append(c.Environ(), "THAWR_PASSWORD_FILE="+filepath.Join(dir, "pw"))
 		if out, err := c.CombinedOutput(); err != nil {
 			t.Fatalf("user create: %v\n%s", err, out)

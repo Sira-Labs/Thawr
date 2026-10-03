@@ -44,7 +44,7 @@ type natSite struct {
 	wanIP       string // NAT address on the server-facing link
 }
 
-// serverIP is the server's address on the first link; every NAT
+// serverIP is the server's address on the "internet" segment; every NAT
 // namespace routes to it by default, so it is the public address.
 const serverIP = "10.8.0.1"
 
@@ -55,7 +55,14 @@ const serverIP = "10.8.0.1"
 func natTopology(t *testing.T, kinds []natKind, sameLAN bool) (*netns, []natSite) {
 	t.Helper()
 	srv := newNetns(t, "srv")
-	srv.ipForward(t)
+	// The "internet" is one segment: a bridge in the server namespace
+	// that every NAT's WAN side joins. The server is single-homed on it,
+	// as a real one is: with an address per NAT link it would answer UDP
+	// (STUN, WireGuard) from the address of the outgoing link, which no
+	// NAT's conntrack entry expects.
+	srv.ip(t, "link", "add", "inet0", "type", "bridge")
+	srv.ip(t, "addr", "add", serverIP+"/16", "dev", "inet0")
+	srv.ip(t, "link", "set", "inet0", "up")
 	var sites []natSite
 	for i, kind := range kinds {
 		client := newNetns(t, fmt.Sprintf("c%d", i))
@@ -67,16 +74,16 @@ func natTopology(t *testing.T, kinds []natKind, sameLAN bool) (*netns, []natSite
 		} else {
 			nat = newNetns(t, fmt.Sprintf("n%d", i))
 			nat.ipForward(t)
-			// NAT <-> server link.
+			// NAT <-> internet link.
 			ps, pn := fmt.Sprintf("p%ds", i), fmt.Sprintf("p%dn", i)
 			ip(t, "link", "add", ps, "type", "veth", "peer", "name", pn)
 			ip(t, "link", "set", ps, "netns", srv.name)
 			ip(t, "link", "set", pn, "netns", nat.name)
-			srv.ip(t, "addr", "add", fmt.Sprintf("10.8.%d.1/24", i), "dev", ps)
+			srv.ip(t, "link", "set", ps, "master", "inet0")
 			srv.ip(t, "link", "set", ps, "up")
-			nat.ip(t, "addr", "add", fmt.Sprintf("10.8.%d.2/24", i), "dev", pn)
+			nat.ip(t, "addr", "add", fmt.Sprintf("10.8.%d.2/16", i), "dev", pn)
 			nat.ip(t, "link", "set", pn, "up")
-			nat.ip(t, "route", "add", "default", "via", fmt.Sprintf("10.8.%d.1", i))
+			nat.ip(t, "route", "add", "default", "via", serverIP)
 			if sameLAN {
 				nat.ip(t, "link", "add", "br0", "type", "bridge")
 				nat.ip(t, "addr", "add", lan+".1/24", "dev", "br0")
