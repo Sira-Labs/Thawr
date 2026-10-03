@@ -16,6 +16,7 @@
         "name": { "type": "string" },
         "peer_id": { "type": "string" },
         "ipv4": { "type": "string", "description": "Overlay address." },
+        "ipv6": { "type": "string", "description": "IPv6 overlay address; absent without one (spec 015)." },
         "kind": { "$ref": "#/$defs/kind" }
       }
     },
@@ -184,6 +185,7 @@
       "properties": {
         "name": { "type": "string" },
         "ipv4": { "type": "string" },
+        "ipv6": { "type": "string", "description": "IPv6 overlay address; absent unless this device and the peer both have the IPv6 overlay (spec 015)." },
         "kind": { "$ref": "#/$defs/kind" },
         "owner": { "type": "string", "description": "Owning user's name; empty when unowned." },
         "online": { "type": "boolean", "description": "The server currently has a sync stream from this peer." },

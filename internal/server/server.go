@@ -230,7 +230,12 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 	if err != nil {
 		return err
 	}
-	cfg.Overlay.IPv6 = prefix6.String()
+	// Written only when it changes: a restarted Server (tests) finds
+	// the recorded prefix here already, and hub goroutines of its
+	// previous Run may still be reading the config.
+	if cfg.Overlay.IPv6 != prefix6.String() {
+		cfg.Overlay.IPv6 = prefix6.String()
+	}
 	filled, err := backfillIPv6(ctx, s.st.Peers(), prefix6)
 	if err != nil {
 		return err
@@ -734,7 +739,7 @@ func (s *Server) buildServices(ctx context.Context) error {
 		Overlay6:  s.overlay6(),
 		STUNAddrs: s.cfg.STUNEndpoints(),
 	}, hub.Generation)
-	s.dnsSource = newRegistrySource(s.st, visibility, hub.Generation, s.cfg.HubAddr().Addr())
+	s.dnsSource = newRegistrySource(s.st, visibility, hub.Generation, s.cfg.HubAddr().Addr(), s.hubAddr6())
 	return nil
 }
 

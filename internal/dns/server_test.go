@@ -13,25 +13,34 @@ import (
 	"golang.org/x/net/dns/dnsmessage"
 )
 
-// mapSource is a Source over fixed names; it records who asked.
+// mapSource is a Source over fixed names, with optional IPv6
+// addresses in names6; it records who asked.
 type mapSource struct {
-	names map[string]netip.Addr
-	mu    sync.Mutex
-	from  []netip.Addr
+	names  map[string]netip.Addr
+	names6 map[string]netip.Addr
+	mu     sync.Mutex
+	from   []netip.Addr
 }
 
-func (m *mapSource) Lookup(_ context.Context, from netip.Addr, name string) (netip.Addr, bool) {
+func (m *mapSource) Lookup(_ context.Context, from netip.Addr, name string) ([]netip.Addr, bool) {
 	m.mu.Lock()
 	m.from = append(m.from, from)
 	m.mu.Unlock()
-	a, ok := m.names[name]
-	return a, ok
+	var out []netip.Addr
+	for _, names := range []map[string]netip.Addr{m.names, m.names6} {
+		if a, ok := names[name]; ok {
+			out = append(out, a)
+		}
+	}
+	return out, len(out) > 0
 }
 
 func (m *mapSource) Reverse(_ context.Context, _ netip.Addr, addr netip.Addr) (string, bool) {
-	for n, a := range m.names {
-		if a == addr {
-			return n, true
+	for _, names := range []map[string]netip.Addr{m.names, m.names6} {
+		for n, a := range names {
+			if a == addr {
+				return n, true
+			}
 		}
 	}
 	return "", false
@@ -454,5 +463,70 @@ func checkNegativeSOA(t *testing.T, qname string, rcode dnsmessage.RCode, r repl
 	soa, ok := r.authority[0].Body.(*dnsmessage.SOAResource)
 	if !ok || r.authority[0].Header.Name.String() != "thawr." || soa.MinTTL != uint32(TTL.Seconds()) || r.authority[0].Header.TTL != uint32(TTL.Seconds()) {
 		t.Errorf("SOA = %+v %+v", r.authority[0].Header, r.authority[0].Body)
+	}
+}
+
+func TestHandleZoneIPv6(t *testing.T) {
+	src := testSource()
+	src.names6 = map[string]netip.Addr{"nas": netip.MustParseAddr("fd00:1:2:3::6440:3")}
+	overlay6 := netip.MustParsePrefix("fd00:1:2:3::/64")
+	s := NewServer(Options{Source: src, Allow: overlay, Reverse6: overlay6})
+	from := netip.MustParseAddr("100.64.0.9")
+	ask := func(name string, typ dnsmessage.Type) reply {
+		t.Helper()
+		resp, err := s.Handle(context.Background(), mkQuery(t, 7, name, typ, false), from, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return parseReply(t, resp)
+	}
+
+	r := ask("nas.thawr.", dnsmessage.TypeAAAA)
+	if r.header.RCode != dnsmessage.RCodeSuccess || len(r.answers) != 1 {
+		t.Fatalf("AAAA: %v %v", r.header.RCode, r.answers)
+	}
+	if body, ok := r.answers[0].Body.(*dnsmessage.AAAAResource); !ok || netip.AddrFrom16(body.AAAA).String() != "fd00:1:2:3::6440:3" {
+		t.Errorf("AAAA answer %+v", r.answers[0])
+	}
+	if r := ask("nas.thawr.", dnsmessage.TypeA); len(r.answers) != 1 || r.answers[0].Header.Type != dnsmessage.TypeA {
+		t.Errorf("A next to AAAA: %v", r.answers)
+	}
+	if r := ask("nas.thawr.", dnsmessage.TypeALL); len(r.answers) != 2 {
+		t.Errorf("ANY: %d answers, want both families", len(r.answers))
+	}
+	// A peer without the IPv6 overlay has no AAAA: NODATA, not NXDOMAIN.
+	if r := ask("alice-laptop.thawr.", dnsmessage.TypeAAAA); r.header.RCode != dnsmessage.RCodeSuccess || len(r.answers) != 0 {
+		t.Errorf("AAAA of an IPv4-only peer: %v %v", r.header.RCode, r.answers)
+	}
+
+	ptr := "3.0.0.0.0.4.4.6.0.0.0.0.0.0.0.0.3.0.0.0.2.0.0.0.1.0.0.0.0.0.d.f.ip6.arpa."
+	r = ask(ptr, dnsmessage.TypePTR)
+	if r.header.RCode != dnsmessage.RCodeSuccess || len(r.answers) != 1 {
+		t.Fatalf("ip6.arpa PTR: %v %v", r.header.RCode, r.answers)
+	}
+	if body, ok := r.answers[0].Body.(*dnsmessage.PTRResource); !ok || body.PTR.String() != "nas.thawr." {
+		t.Errorf("PTR answer %+v", r.answers[0])
+	}
+	unknown := "9.0.0.0.0.4.4.6.0.0.0.0.0.0.0.0.3.0.0.0.2.0.0.0.1.0.0.0.0.0.d.f.ip6.arpa."
+	if r := ask(unknown, dnsmessage.TypePTR); r.header.RCode != dnsmessage.RCodeNameError {
+		t.Errorf("unknown overlay PTR: %v", r.header.RCode)
+	}
+	outside := "1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa."
+	if r := ask(outside, dnsmessage.TypePTR); r.header.RCode != dnsmessage.RCodeRefused {
+		t.Errorf("PTR outside the IPv6 overlay: %v, want refused", r.header.RCode)
+	}
+
+	for _, tc := range []struct {
+		name string
+		ok   bool
+	}{
+		{"3.0.0.0.0.4.4.6.0.0.0.0.0.0.0.0.3.0.0.0.2.0.0.0.1.0.0.0.0.0.d.f.ip6.arpa", true},
+		{"3.0.0.0.ip6.arpa", false},
+		{"g.0.0.0.0.4.4.6.0.0.0.0.0.0.0.0.3.0.0.0.2.0.0.0.1.0.0.0.0.0.d.f.ip6.arpa", false},
+		{"30.0.0.0.4.4.6.0.0.0.0.0.0.0.0.3.0.0.0.2.0.0.0.1.0.0.0.0.0.d.f.ip6.arpa", false},
+	} {
+		if a, ok := reverseAddr(tc.name); ok != tc.ok || (ok && a.String() != "fd00:1:2:3::6440:3") {
+			t.Errorf("reverseAddr(%s) = %s %v", tc.name, a, ok)
+		}
 	}
 }

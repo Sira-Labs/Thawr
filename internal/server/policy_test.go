@@ -38,11 +38,11 @@ func TestPolicyChangesNetmaps(t *testing.T) {
 	if err := json.Unmarshal(body, &tokB); err != nil {
 		t.Fatal(err)
 	}
-	a, err := client.Enroll(ctx, client.Options{Server: server, Token: tokA, Fingerprint: h.srv.tlsFingerprint, StateDir: t.TempDir(), Hostname: "alice-laptop", Version: "0.1.0"})
+	a, err := client.Enroll(ctx, client.Options{Server: server, Token: tokA, Fingerprint: h.srv.tlsFingerprint, StateDir: t.TempDir(), Hostname: "alice-laptop", Version: "0.1.0", IPv6: func() bool { return true }})
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := client.Enroll(ctx, client.Options{Server: server, Token: tokB.Secret, Fingerprint: h.srv.tlsFingerprint, StateDir: t.TempDir(), Hostname: "bob-box", Version: "0.1.0"})
+	b, err := client.Enroll(ctx, client.Options{Server: server, Token: tokB.Secret, Fingerprint: h.srv.tlsFingerprint, StateDir: t.TempDir(), Hostname: "bob-box", Version: "0.1.0", IPv6: func() bool { return true }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,8 @@ func TestPolicyChangesNetmaps(t *testing.T) {
 	}
 	waitUntil(t, "alice sees bob", func() bool { n, _ := peersOf(a.PeerID); return n == 1 })
 	nb, filter := peersOf(b.PeerID)
-	if nb != 1 || len(filter) != 1 || filter[0].Src.String() != a.IPv4 || filter[0].Proto != "tcp" || filter[0].PortLo != 22 {
+	// Both enrolled IPv6 capable: one rule per address of alice's.
+	if nb != 1 || len(filter) != 2 || filter[0].Src.String() != a.IPv4 || filter[1].Src.String() != a.IPv6 || filter[0].Proto != "tcp" || filter[0].PortLo != 22 {
 		t.Fatalf("bob's netmap: peers %d filter %+v", nb, filter)
 	}
 	if _, fa := peersOf(a.PeerID); len(fa) != 0 {
@@ -112,9 +113,10 @@ func TestPolicyChangesNetmaps(t *testing.T) {
 	if !h.srv.policySvc.TagAllowed("alice", "tag:prod") || h.srv.policySvc.TagAllowed("bob", "tag:prod") {
 		t.Error("tagOwners not in effect")
 	}
-	// The hub device got a forward-hook filter with every peer visible.
+	// The hub device got a forward-hook filter with every peer visible,
+	// by both addresses.
 	set, ok := h.fake.LastFilter()
-	if !ok || set.Hook != 1 || len(set.Visible) != 2 {
+	if !ok || set.Hook != 1 || len(set.Visible) != 4 {
 		t.Errorf("hub filter: %+v ok=%v", set, ok)
 	}
 }

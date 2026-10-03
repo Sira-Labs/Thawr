@@ -73,7 +73,8 @@ Holds a valid node key, node secret, and receives a netmap.
 | Threat | Mitigation |
 |---|---|
 | Reach peers or ports the policy forbids | Key distribution only includes visible peers; receiver-side stateful filter enforces ports; hub-side filter for static peers. Default deny |
-| Spoof another peer's overlay IP | WireGuard cryptokey routing drops packets whose source is not in the sender's AllowedIPs (`/32` per peer). Filter matches on that verified source |
+| Spoof another peer's overlay IP | WireGuard cryptokey routing drops packets whose source is not in the sender's AllowedIPs (`/32` and, with the IPv6 overlay, `/128` per peer). Filter matches on that verified source in both families |
+| Reach a peer over IPv6 around the IPv4 policy | Filter and forward rules are compiled per address family from the same policy; a peer gets IPv6 rules and addresses only when both ends are IPv6 capable, and the overlay prefix is a ULA reachable only inside the tunnel (spec 015) |
 | Learn keys, IPs, endpoints of peers it cannot reach | Netmap is per-peer and contains only visible peers |
 | Enrol additional devices | Requires a token; members can create tokens only for themselves, admins for anyone. Token creation is audited in the server log with token id |
 | Modify policy or other peers | Node secret grants only `Sync`, `ReportEndpoints`, `ReportPath`, `RotateKey`, `Leave` for its own peer. No admin API on the gRPC channel |
@@ -181,6 +182,11 @@ These are checked by tests where possible.
     forwards only prefixes it advertised itself, whatever the netmap
     says (tests: `TestDaemonRoutes`,
     `TestFilterSetForServesOnlyAdvertised`, `TestCompileForwardRules`).
+14. The IPv6 overlay enforces the same policy as IPv4: every source
+    gets a rule per address family, an incapable peer receives the
+    pre-015 netmap unchanged, and a router masquerades IPv6 only for
+    the overlay's `/64` (tests: `TestNetMapIPv6`, `TestFilterSetForIPv6`,
+    `TestUserspaceFilterIPv6`, `TestHubIPv6`).
 
 ## Explicitly out of scope for v1
 

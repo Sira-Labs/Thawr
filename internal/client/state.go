@@ -31,12 +31,18 @@ var (
 // State is what the client persists after enrollment. NodeSecret is the
 // bearer credential for the control channel and must stay in a 0600 file.
 type State struct {
-	Server       string    `json:"server"`
-	Fingerprint  string    `json:"fingerprint"`
-	PeerID       string    `json:"peer_id"`
-	Name         string    `json:"name"`
-	IPv4         string    `json:"ipv4"`
-	OverlayCIDR  string    `json:"overlay_cidr"`
+	Server      string `json:"server"`
+	Fingerprint string `json:"fingerprint"`
+	PeerID      string `json:"peer_id"`
+	Name        string `json:"name"`
+	IPv4        string `json:"ipv4"`
+	OverlayCIDR string `json:"overlay_cidr"`
+	// IPv6 and OverlayIPv6 are this device's IPv6 overlay address and
+	// the overlay's /64 (spec 015). They are empty until the server
+	// sends them, which it does once this device says it is IPv6
+	// capable; a device enrolled earlier fills them from its netmap.
+	IPv6         string    `json:"ipv6,omitempty"`
+	OverlayIPv6  string    `json:"overlay_ipv6,omitempty"`
 	NodeSecret   string    `json:"node_secret"`
 	HubPublicKey string    `json:"hub_public_key"`
 	HubEndpoint  string    `json:"hub_endpoint"`
@@ -71,6 +77,16 @@ func adoptSelfName(st *State, nm NetMap) (string, bool) {
 	old := st.Name
 	st.Name = nm.SelfName
 	return old, true
+}
+
+// adoptSelfIPv6 takes this device's IPv6 overlay address and prefix
+// from nm and reports whether st changed.
+func adoptSelfIPv6(st *State, nm NetMap) bool {
+	if nm.SelfIPv6 == st.IPv6 && nm.Overlay6 == st.OverlayIPv6 {
+		return false
+	}
+	st.IPv6, st.OverlayIPv6 = nm.SelfIPv6, nm.Overlay6
+	return true
 }
 
 // followExitNode keeps st's exit-node choice on the same peer: it

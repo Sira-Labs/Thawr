@@ -138,6 +138,7 @@ func applyNAT(t *testing.T, nat *netns, kind natKind, wanIface, lanClient string
 type clientStatus struct {
 	Self struct {
 		IPv4 string `json:"ipv4"`
+		IPv6 string `json:"ipv6"`
 	} `json:"self"`
 	Server struct {
 		State string `json:"state"`
@@ -169,6 +170,7 @@ type clientStatus struct {
 	Peers []struct {
 		Name               string `json:"name"`
 		IPv4               string `json:"ipv4"`
+		IPv6               string `json:"ipv6"`
 		PublicKey          string `json:"public_key"`
 		Path               string `json:"path"`
 		PathEndpoint       string `json:"path_endpoint"`

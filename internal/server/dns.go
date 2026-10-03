@@ -21,12 +21,14 @@ const dnsPort = 53
 // registry, cached per hub generation, and shows a requesting peer only
 // the peers the policy makes visible to it. The hub's own name is
 // visible to everyone on the overlay; an unknown requester sees nothing
-// else.
+// else. IPv6 addresses (spec 015) are answered only between peers that
+// are both IPv6 capable, as the netmap lists them.
 type registrySource struct {
 	st         *store.Store
 	visibility control.Visibility
 	generation func() int64
 	hub        netip.Addr
+	hub6       netip.Addr
 
 	mu     sync.Mutex
 	gen    int64
@@ -34,34 +36,64 @@ type registrySource struct {
 	byAddr map[netip.Addr]store.Peer
 }
 
-func newRegistrySource(st *store.Store, vis control.Visibility, generation func() int64, hub netip.Addr) *registrySource {
-	return &registrySource{st: st, visibility: vis, generation: generation, hub: hub, gen: -1}
+// newRegistrySource answers for the hub at hub and, with the IPv6
+// overlay, hub6 (zero without it).
+func newRegistrySource(st *store.Store, vis control.Visibility, generation func() int64, hub, hub6 netip.Addr) *registrySource {
+	return &registrySource{st: st, visibility: vis, generation: generation, hub: hub, hub6: hub6, gen: -1}
 }
 
 // Lookup implements dns.Source.
-func (r *registrySource) Lookup(ctx context.Context, from netip.Addr, name string) (netip.Addr, bool) {
-	if name == client.HubName {
-		return r.hub, true
-	}
+func (r *registrySource) Lookup(ctx context.Context, from netip.Addr, name string) ([]netip.Addr, bool) {
 	if err := r.refresh(ctx); err != nil {
-		return netip.Addr{}, false
+		return nil, false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	v6 := r.ipv6CapableLocked(from)
+	if name == client.HubName {
+		out := []netip.Addr{r.hub}
+		if v6 && r.hub6.IsValid() {
+			out = append(out, r.hub6)
+		}
+		return out, true
+	}
 	target, ok := r.byName[strings.ToLower(name)]
 	if !ok || !r.visibleLocked(from, target) {
-		return netip.Addr{}, false
+		return nil, false
 	}
 	addr, err := netip.ParseAddr(target.IPv4)
 	if err != nil {
+		return nil, false
+	}
+	out := []netip.Addr{addr}
+	if a6, ok := peerIPv6(target); ok && v6 {
+		out = append(out, a6)
+	}
+	return out, true
+}
+
+// ipv6CapableLocked reports whether the requester at from may be told
+// IPv6 addresses: the server itself, or a peer that is IPv6 capable.
+func (r *registrySource) ipv6CapableLocked(from netip.Addr) bool {
+	if from == r.hub || from == r.hub6 || from.IsLoopback() {
+		return true
+	}
+	requester, ok := r.byAddr[from]
+	return ok && requester.IPv6Capable
+}
+
+// peerIPv6 is p's IPv6 overlay address when p is IPv6 capable.
+func peerIPv6(p store.Peer) (netip.Addr, bool) {
+	if !p.IPv6Capable {
 		return netip.Addr{}, false
 	}
-	return addr, true
+	a, err := netip.ParseAddr(p.IPv6)
+	return a, err == nil && a.Is6()
 }
 
 // Reverse implements dns.Source.
 func (r *registrySource) Reverse(ctx context.Context, from, addr netip.Addr) (string, bool) {
-	if addr == r.hub {
+	if addr == r.hub || (r.hub6.IsValid() && addr == r.hub6) {
 		return client.HubName, true
 	}
 	if err := r.refresh(ctx); err != nil {
@@ -110,6 +142,9 @@ func (r *registrySource) refresh(ctx context.Context) error {
 		if a, err := netip.ParseAddr(p.IPv4); err == nil {
 			byAddr[a] = p
 		}
+		if a, ok := peerIPv6(p); ok {
+			byAddr[a] = p
+		}
 	}
 	r.mu.Lock()
 	r.gen, r.byName, r.byAddr = gen, byName, byAddr
@@ -133,7 +168,7 @@ func (s *Server) startDNS(ctx context.Context) (stop func(), err error) {
 	if err != nil {
 		return nil, fmt.Errorf("server: dns: %w (set dns.enabled: false to run without names)", err)
 	}
-	srv := dns.NewServer(dns.Options{Source: s.dnsSource, Upstreams: upstreams, Allow: s.cfg.OverlayPrefix(), Logger: s.log})
+	srv := dns.NewServer(dns.Options{Source: s.dnsSource, Upstreams: upstreams, Allow: s.cfg.OverlayPrefix(), Reverse6: s.overlay6(), Logger: s.log})
 	serveCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	listen := addr.String()

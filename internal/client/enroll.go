@@ -44,6 +44,9 @@ type Options struct {
 	Timeout  time.Duration
 	// Now is injectable for tests.
 	Now func() time.Time
+	// IPv6 reports whether this host can carry the IPv6 overlay (spec
+	// 015); defaults to wg.IPv6Available.
+	IPv6 func() bool
 }
 
 // FingerprintError is returned when no fingerprint was given and the
@@ -80,6 +83,9 @@ func Enroll(ctx context.Context, opts Options) (State, error) {
 	}
 	if opts.Version == "" {
 		opts.Version = "dev"
+	}
+	if opts.IPv6 == nil {
+		opts.IPv6 = wg.IPv6Available
 	}
 	addr, err := ServerAddr(opts.Server)
 	if err != nil {
@@ -138,6 +144,7 @@ func Enroll(ctx context.Context, opts Options) (State, error) {
 		Arch:          runtime.GOARCH,
 		ClientVersion: opts.Version,
 		Name:          opts.Name,
+		Ipv6:          opts.IPv6(),
 	})
 	if err != nil {
 		return State{}, fmt.Errorf("client: enroll: %w", err)
@@ -153,6 +160,8 @@ func Enroll(ctx context.Context, opts Options) (State, error) {
 		NodeSecret:   resp.GetNodeSecret(),
 		HubPublicKey: resp.GetHubPublicKey(),
 		HubEndpoint:  resp.GetHubEndpoint(),
+		IPv6:         resp.GetIpv6(),
+		OverlayIPv6:  resp.GetOverlayIpv6(),
 		EnrolledAt:   opts.Now(),
 		LockSigner:   strings.TrimSpace(opts.LockSigner),
 	}

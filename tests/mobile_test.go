@@ -176,12 +176,36 @@ func newStarMesh(t *testing.T, policy string, withPhone bool) *mobileMesh {
 	// wg-quick would hand the DNS line to resolvconf, which the harness
 	// host may not have; the DNS test queries the hub resolver directly.
 	m.phoneDNS, fixed = stripDNSLine(fixed)
+	if !hostIPv6() {
+		// wg-quick cannot add the IPv6 address on a kernel without IPv6.
+		fixed = stripIPv6(fixed)
+	}
 	writeFile(t, conf, fixed)
 	if out, err := phone.cmd(ctx, "wg-quick", "up", conf).CombinedOutput(); err != nil {
 		t.Fatalf("wg-quick up: %v\n%s", err, out)
 	}
 	t.Cleanup(func() { _ = phone.cmd(context.Background(), "wg-quick", "down", conf).Run() })
 	return m
+}
+
+// stripIPv6 removes the IPv6 address and prefix from a WireGuard
+// config's Address and AllowedIPs lines (spec 015).
+func stripIPv6(conf string) string {
+	lines := strings.Split(conf, "\n")
+	for i, line := range lines {
+		key, value, ok := strings.Cut(line, " = ")
+		if !ok || (key != "Address" && key != "AllowedIPs") {
+			continue
+		}
+		var kept []string
+		for _, v := range strings.Split(value, ", ") {
+			if !strings.Contains(v, ":") {
+				kept = append(kept, v)
+			}
+		}
+		lines[i] = key + " = " + strings.Join(kept, ", ")
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m *mobileMesh) phonePing(ctx context.Context, ip string) error {

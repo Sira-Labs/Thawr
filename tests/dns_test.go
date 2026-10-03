@@ -15,7 +15,7 @@ import (
 
 // dnsQuery resolves name against server:53 from inside ns by re-running
 // this test binary there (TestHelperDNSQuery), since the namespaces have
-// no resolver tools of their own. kind is "a" or "ptr". It returns the
+// no resolver tools of their own. kind is "a", "aaaa" or "ptr". It returns the
 // answers sorted, or the helper's error.
 func dnsQuery(ctx context.Context, ns *netns, server, name, kind string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -60,6 +60,15 @@ func TestHelperDNSQuery(t *testing.T) {
 	switch kind {
 	case "a":
 		ips, err := r.LookupNetIP(ctx, "ip4", name)
+		if err != nil {
+			fmt.Println("ERR", err)
+			return
+		}
+		for _, ip := range ips {
+			fmt.Println("ANS", ip.String())
+		}
+	case "aaaa":
+		ips, err := r.LookupNetIP(ctx, "ip6", name)
 		if err != nil {
 			fmt.Println("ERR", err)
 			return

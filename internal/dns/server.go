@@ -30,9 +30,10 @@ const maxUDP = 512
 const maxMessage = 65535
 
 // Source answers name and address lookups for the peer at from. Names
-// carry no zone suffix. Unknown names and addresses return false.
+// carry no zone suffix. Lookup returns every address of the name, of
+// either family (spec 015). Unknown names and addresses return false.
 type Source interface {
-	Lookup(ctx context.Context, from netip.Addr, name string) (netip.Addr, bool)
+	Lookup(ctx context.Context, from netip.Addr, name string) ([]netip.Addr, bool)
 	Reverse(ctx context.Context, from netip.Addr, addr netip.Addr) (string, bool)
 }
 
@@ -50,6 +51,9 @@ type Options struct {
 	// defaults to Allow. The client sets the whole overlay here while
 	// answering only itself.
 	Reverse netip.Prefix
+	// Reverse6 is the IPv6 range answered under ip6.arpa (spec 015);
+	// zero answers none, unless Reverse is zero as well.
+	Reverse6 netip.Prefix
 	// Timeout bounds each upstream attempt (2 s).
 	Timeout time.Duration
 	Logger  *slog.Logger
@@ -290,7 +294,7 @@ func (s *Server) Handle(ctx context.Context, req []byte, from netip.Addr, tcp bo
 	if name == s.zone || strings.HasSuffix(name, "."+s.zone) {
 		return s.answerZone(ctx, q, from, name, tcp)
 	}
-	if addr, ok := reverseAddr(name); ok && (!s.opts.Reverse.IsValid() || s.opts.Reverse.Contains(addr)) {
+	if addr, ok := reverseAddr(name); ok && s.reverseInScope(addr) {
 		return s.answerReverse(ctx, q, from, addr, tcp)
 	}
 	if len(s.opts.Upstreams) == 0 {
@@ -302,6 +306,18 @@ func (s *Server) Handle(ctx context.Context, req []byte, from netip.Addr, tcp bo
 		return s.respond(q, dnsmessage.RCodeServerFailure, nil, tcp)
 	}
 	return resp, nil
+}
+
+// reverseInScope reports whether PTR queries for addr are answered
+// here rather than forwarded.
+func (s *Server) reverseInScope(addr netip.Addr) bool {
+	if !s.opts.Reverse.IsValid() && !s.opts.Reverse6.IsValid() {
+		return true
+	}
+	if addr.Is4() {
+		return s.opts.Reverse.Contains(addr)
+	}
+	return s.opts.Reverse6.IsValid() && s.opts.Reverse6.Contains(addr)
 }
 
 // allowed accepts sources inside Allow and the local host itself (a
@@ -375,24 +391,32 @@ func (s *Server) answerZone(ctx context.Context, q query, from netip.Addr, name 
 	if strings.Contains(label, ".") {
 		return s.respondNegative(q, dnsmessage.RCodeNameError, tcp)
 	}
-	addr, ok := s.opts.Source.Lookup(ctx, from, label)
+	addrs, ok := s.opts.Source.Lookup(ctx, from, label)
 	if !ok {
 		return s.respondNegative(q, dnsmessage.RCodeNameError, tcp)
 	}
-	if q.question.Type != dnsmessage.TypeA && q.question.Type != dnsmessage.TypeALL {
+	qt := q.question.Type
+	var answers []dnsmessage.Resource
+	for _, addr := range addrs {
+		hdr := dnsmessage.ResourceHeader{Name: q.question.Name, Class: dnsmessage.ClassINET, TTL: uint32(TTL.Seconds())}
+		switch {
+		case addr.Is4() && (qt == dnsmessage.TypeA || qt == dnsmessage.TypeALL):
+			hdr.Type = dnsmessage.TypeA
+			answers = append(answers, dnsmessage.Resource{Header: hdr, Body: &dnsmessage.AResource{A: addr.As4()}})
+		case addr.Is6() && !addr.Is4In6() && (qt == dnsmessage.TypeAAAA || qt == dnsmessage.TypeALL):
+			hdr.Type = dnsmessage.TypeAAAA
+			answers = append(answers, dnsmessage.Resource{Header: hdr, Body: &dnsmessage.AAAAResource{AAAA: addr.As16()}})
+		}
+	}
+	if len(answers) == 0 {
+		// The name exists without an address of the asked type: NODATA.
 		return s.respondNegative(q, dnsmessage.RCodeSuccess, tcp)
 	}
-	if !addr.Is4() {
-		return s.respondNegative(q, dnsmessage.RCodeSuccess, tcp)
-	}
-	rr := dnsmessage.Resource{
-		Header: dnsmessage.ResourceHeader{Name: q.question.Name, Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET, TTL: uint32(TTL.Seconds())},
-		Body:   &dnsmessage.AResource{A: addr.As4()},
-	}
-	return s.respond(q, dnsmessage.RCodeSuccess, []dnsmessage.Resource{rr}, tcp)
+	return s.respond(q, dnsmessage.RCodeSuccess, answers, tcp)
 }
 
-// answerReverse handles in-addr.arpa for an overlay address.
+// answerReverse handles in-addr.arpa and ip6.arpa for an overlay
+// address.
 func (s *Server) answerReverse(ctx context.Context, q query, from, addr netip.Addr, tcp bool) ([]byte, error) {
 	name, ok := s.opts.Source.Reverse(ctx, from, addr)
 	if !ok {
@@ -492,6 +516,8 @@ func (s *Server) build(q query, rcode dnsmessage.RCode, answers, authority []dns
 			switch body := rr.Body.(type) {
 			case *dnsmessage.AResource:
 				err = b.AResource(rr.Header, *body)
+			case *dnsmessage.AAAAResource:
+				err = b.AAAAResource(rr.Header, *body)
 			case *dnsmessage.PTRResource:
 				err = b.PTRResource(rr.Header, *body)
 			case *dnsmessage.SOAResource:
@@ -536,6 +562,9 @@ func (s *Server) build(q query, rcode dnsmessage.RCode, answers, authority []dns
 
 // reverseAddr parses w.z.y.x.in-addr.arpa into the IPv4 address.
 func reverseAddr(name string) (netip.Addr, bool) {
+	if a, ok := reverseAddr6(name); ok {
+		return a, true
+	}
 	const suffix = ".in-addr.arpa"
 	if !strings.HasSuffix(name, suffix) {
 		return netip.Addr{}, false
@@ -553,4 +582,34 @@ func reverseAddr(name string) (netip.Addr, bool) {
 		b[3-i] = byte(n)
 	}
 	return netip.AddrFrom4(b), true
+}
+
+// reverseAddr6 parses <32 nibbles, least significant first>.ip6.arpa.
+func reverseAddr6(name string) (netip.Addr, bool) {
+	const suffix = ".ip6.arpa"
+	if !strings.HasSuffix(name, suffix) {
+		return netip.Addr{}, false
+	}
+	parts := strings.Split(strings.TrimSuffix(name, suffix), ".")
+	if len(parts) != 32 {
+		return netip.Addr{}, false
+	}
+	var b [16]byte
+	for i, p := range parts {
+		if len(p) != 1 {
+			return netip.Addr{}, false
+		}
+		n, err := strconv.ParseUint(p, 16, 4)
+		if err != nil {
+			return netip.Addr{}, false
+		}
+		// parts[0] is the low nibble of the last byte.
+		j := 31 - i
+		if j%2 == 0 {
+			b[j/2] |= byte(n) << 4
+		} else {
+			b[j/2] |= byte(n)
+		}
+	}
+	return netip.AddrFrom16(b), true
 }

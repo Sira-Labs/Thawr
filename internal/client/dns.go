@@ -105,13 +105,14 @@ type dnsState struct {
 // asking address needs no further check.
 type netmapSource struct{ d *Daemon }
 
-func (s netmapSource) Lookup(_ context.Context, _ netip.Addr, name string) (netip.Addr, bool) {
+func (s netmapSource) Lookup(_ context.Context, _ netip.Addr, name string) ([]netip.Addr, bool) {
+	var out []netip.Addr
 	for _, e := range s.d.dnsEntries() {
 		if e.Name == name {
-			return e.Addr, true
+			out = append(out, e.Addr)
 		}
 	}
-	return netip.Addr{}, false
+	return out, len(out) > 0
 }
 
 func (s netmapSource) Reverse(_ context.Context, _ netip.Addr, addr netip.Addr) (string, bool) {
@@ -123,23 +124,49 @@ func (s netmapSource) Reverse(_ context.Context, _ netip.Addr, addr netip.Addr) 
 	return "", false
 }
 
-// dnsEntries lists self, the hub and every netmap peer, sorted by name.
+// dnsEntries lists self, the hub and every netmap peer, sorted by name,
+// one entry per address: IPv4, then IPv6 where the netmap carries one
+// (spec 015).
 func (d *Daemon) dnsEntries() []dns.Entry {
 	d.mu.Lock()
-	nm, self := d.netmap, d.state.Name
+	nm, self, self6 := d.netmap, d.state.Name, d.state.IPv6
 	d.mu.Unlock()
 	out := []dns.Entry{{Name: strings.ToLower(self), Addr: d.selfIP}, {Name: HubName, Addr: d.overlay.Addr().Next()}}
+	if a, err := netip.ParseAddr(self6); err == nil && a.Is6() {
+		out = append(out, dns.Entry{Name: strings.ToLower(self), Addr: a})
+	}
 	if nm != nil {
+		if a, ok := hubAddr6(*nm); ok {
+			out = append(out, dns.Entry{Name: HubName, Addr: a})
+		}
 		for _, p := range nm.Peers {
-			ip, err := netip.ParseAddr(p.IPv4)
-			if err != nil || p.Name == "" {
+			if p.Name == "" {
 				continue
 			}
-			out = append(out, dns.Entry{Name: strings.ToLower(p.Name), Addr: ip})
+			for _, addr := range []string{p.IPv4, p.IPv6} {
+				if ip, err := netip.ParseAddr(addr); err == nil {
+					out = append(out, dns.Entry{Name: strings.ToLower(p.Name), Addr: ip})
+				}
+			}
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+// hubAddr6 is the hub's IPv6 overlay address: the /128 the netmap
+// routes to it inside this device's IPv6 overlay.
+func hubAddr6(nm NetMap) (netip.Addr, bool) {
+	_, ov6, ok := nm.selfIPv6()
+	if !ok {
+		return netip.Addr{}, false
+	}
+	for _, a := range nm.Hub.AllowedIPs {
+		if p, err := netip.ParsePrefix(a); err == nil && p.Bits() == 128 && ov6.Contains(p.Addr()) {
+			return p.Addr(), true
+		}
+	}
+	return netip.Addr{}, false
 }
 
 // startDNS binds the resolver on the overlay address once the interface
@@ -183,10 +210,16 @@ func (d *Daemon) startDNS(ctx context.Context) {
 // dnsServerOptions restricts the client resolver to the local host: the
 // overlay address it listens on and loopback. Another peer that the
 // policy lets reach port 53 gets no answer, so this device's netmap
-// (which peers it may see) is never disclosed through names.
+// (which peers it may see) is never disclosed through names. Reverse
+// lookups cover the IPv4 overlay and the unique local range the IPv6
+// overlay lies in, whose /64 may arrive only after the resolver starts.
 func (d *Daemon) dnsServerOptions() dns.Options {
-	return dns.Options{Source: netmapSource{d}, Allow: netip.PrefixFrom(d.selfIP, d.selfIP.BitLen()), Reverse: d.overlay, Logger: d.log}
+	return dns.Options{Source: netmapSource{d}, Allow: netip.PrefixFrom(d.selfIP, d.selfIP.BitLen()), Reverse: d.overlay,
+		Reverse6: ulaRange, Logger: d.log}
 }
+
+// ulaRange is fd00::/8, where every IPv6 overlay prefix lies.
+var ulaRange = netip.MustParsePrefix("fd00::/8")
 
 // registerDNS routes the zone to the resolver once it serves and a
 // netmap has been applied, after clearing what a crashed instance may

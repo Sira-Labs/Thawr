@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -44,7 +45,7 @@ func TestHubResolverHonoursVisibility(t *testing.T) {
 
 	tok := createTokenLocal(t, cfg.AdminSocket)
 	laptop, err := client.Enroll(ctx, client.Options{Server: "https://" + h.srv.HTTPSAddr(), Token: tok, Fingerprint: h.srv.tlsFingerprint,
-		StateDir: t.TempDir(), Hostname: "alice-laptop", Version: "0.1.0"})
+		StateDir: t.TempDir(), Hostname: "alice-laptop", Version: "0.1.0", IPv6: func() bool { return false }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,23 +63,38 @@ func TestHubResolverHonoursVisibility(t *testing.T) {
 	phoneIP, laptopIP, bobIP := netip.MustParseAddr(phone.Peer.IPv4), netip.MustParseAddr(laptop.IPv4), netip.MustParseAddr(bobPhone.Peer.IPv4)
 	src := h.srv.dnsSource
 
-	if a, ok := src.Lookup(ctx, phoneIP, "alice-laptop"); !ok || a != laptopIP {
+	// The laptop is not IPv6 capable: IPv4 only.
+	if a, ok := src.Lookup(ctx, phoneIP, "alice-laptop"); !ok || !slices.Equal(a, []netip.Addr{laptopIP}) {
 		t.Errorf("phone -> alice-laptop: %v %v", a, ok)
 	}
-	if a, ok := src.Lookup(ctx, phoneIP, "Alice-Laptop"); !ok || a != laptopIP {
+	if a, ok := src.Lookup(ctx, phoneIP, "Alice-Laptop"); !ok || !slices.Equal(a, []netip.Addr{laptopIP}) {
 		t.Errorf("case-insensitive lookup: %v %v", a, ok)
 	}
 	if _, ok := src.Lookup(ctx, phoneIP, "bob-phone"); ok {
 		t.Error("phone learned bob-phone, which the policy hides")
 	}
-	if a, ok := src.Lookup(ctx, bobIP, "bob-phone"); !ok || a != bobIP {
+	// Phones are IPv6 capable: a capable requester learns both addresses.
+	bob6 := netip.MustParseAddr(bobPhone.Peer.IPv6)
+	if a, ok := src.Lookup(ctx, bobIP, "bob-phone"); !ok || !slices.Equal(a, []netip.Addr{bobIP, bob6}) {
 		t.Errorf("a peer resolves itself: %v %v", a, ok)
 	}
 	if _, ok := src.Lookup(ctx, netip.MustParseAddr("100.64.9.9"), "alice-laptop"); ok {
 		t.Error("unknown requester learned a peer")
 	}
-	if a, ok := src.Lookup(ctx, netip.MustParseAddr("100.64.9.9"), "hub"); !ok || a.String() != "100.64.0.1" {
+	if a, ok := src.Lookup(ctx, netip.MustParseAddr("100.64.9.9"), "hub"); !ok || len(a) != 1 || a[0].String() != "100.64.0.1" {
 		t.Errorf("hub for anyone: %v %v", a, ok)
+	}
+	if a, ok := src.Lookup(ctx, phoneIP, "hub"); !ok || len(a) != 2 || a[1] != h.srv.hubAddr6() {
+		t.Errorf("hub for a capable phone: %v %v", a, ok)
+	}
+	if n, ok := src.Reverse(ctx, phoneIP, bob6); ok {
+		t.Errorf("reverse of a hidden peer's IPv6 answered: %q", n)
+	}
+	if n, ok := src.Reverse(ctx, bobIP, bob6); !ok || n != "bob-phone" {
+		t.Errorf("reverse of its own IPv6: %q %v", n, ok)
+	}
+	if n, ok := src.Reverse(ctx, phoneIP, h.srv.hubAddr6()); !ok || n != "hub" {
+		t.Errorf("reverse hub IPv6: %q %v", n, ok)
 	}
 	if n, ok := src.Reverse(ctx, phoneIP, laptopIP); !ok || n != "alice-laptop" {
 		t.Errorf("reverse laptop: %q %v", n, ok)
@@ -90,7 +106,7 @@ func TestHubResolverHonoursVisibility(t *testing.T) {
 		t.Errorf("reverse hub: %q %v", n, ok)
 	}
 	// The server host itself (loopback) sees every name.
-	if a, ok := src.Lookup(ctx, netip.MustParseAddr("127.0.0.1"), "bob-phone"); !ok || a != bobIP {
+	if a, ok := src.Lookup(ctx, netip.MustParseAddr("127.0.0.1"), "bob-phone"); !ok || a[0] != bobIP {
 		t.Errorf("local host lookup: %v %v", a, ok)
 	}
 
