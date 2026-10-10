@@ -11,7 +11,7 @@ require (
 	github.com/vishvananda/netlink v1.3.1
 	golang.org/x/crypto v0.57.0
 	golang.org/x/net v0.59.0
-	golang.org/x/sys v0.48.0
+	golang.org/x/sys v0.49.0
 	golang.org/x/term v0.46.0
 	golang.zx2c4.com/wireguard v0.0.0-20260522210424-ecfc5a8d5446
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20241231184526-a9ab2273dd10
