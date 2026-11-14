@@ -887,6 +887,15 @@ tree that followed. One commit each, highest severity first.
         `TestIPv6PhoneViaHub`) and the TESTING 015 checklist are the
         owner's to run; there is no netns exit-node IPv6 test.
 
+## Open owner items (nightly runs, ADR 0007)
+
+- Owner: make every `ci` job a required check in the branch rule on
+  `main` (lint, the three test jobs, integration, the five cross-builds,
+  reproducible, vulncheck, site). Needed because auto-merge waits only
+  for required checks and a run cannot read or change the rule; until
+  then a run turns auto-merge off by hand when another check is red,
+  which fails if the merge happens first. Blocks nothing.
+
 ## Phase 2 candidates (scheduled as specs 014–021 in `docs/roadmap/`)
 
 - OIDC identity provider plugin (ADR 0006).

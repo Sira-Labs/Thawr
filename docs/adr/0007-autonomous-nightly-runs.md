@@ -29,7 +29,11 @@ autonomous runs. For these runs, and only for them:
    is left for the owner as a blocked item.
 3. The run merges its own pull requests through auto-merge, or directly
    once every required check is green and every review thread is
-   resolved. Never with a red or pending check.
+   resolved. Never with a red or pending check: that means every
+   check on the pull request, not only the ones the branch rule on
+   `main` requires. Auto-merge waits for the required set alone, so a
+   run that sees a red or pending check outside that set turns
+   auto-merge off on its pull request until the check is green.
 4. One story per run, in the priority order of `TASKS.md` and then
    `docs/roadmap/sprints.md`. A story that needs something only the
    owner can give (a secret, an account, a server, a signing key, a
