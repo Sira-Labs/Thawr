@@ -887,6 +887,30 @@ tree that followed. One commit each, highest severity first.
         `TestIPv6PhoneViaHub`) and the TESTING 015 checklist are the
         owner's to run; there is no netns exit-node IPv6 test.
 
+## Sprint 8 — separate relay nodes
+
+- [~] **016 Separate relay nodes** — `docs/specs/016-separate-relay-nodes.md`
+      S8-1 done (spec, 2026-11-15). Open: S8-2 server side, S8-3
+      `thawr relay`, S8-4 client; the next run takes S8-2.
+      - A relay node is not a peer: no WireGuard key, no address, not
+        in the policy, not under the lock. Its tokens are a kind and a
+        table of their own, so the peer `kind` check stays as it is.
+      - Devices never show a relay their node secret. The server issues
+        a random ticket per device and relay in the netmap; the relay
+        has the server check it. Nothing is signed, so no new
+        cryptography.
+      - The relay gets visibility pushed per admitted session instead
+        of asking per frame, and fails closed without the server (no
+        admissions, sessions end after a 5 min grace period).
+      - Relays do not mesh. Each device has a home relay and a sender
+        uses the destination's home, as DERP does; the server's relay
+        is the fallback and what older clients keep using.
+      - The server does not order relays: it cannot know what is near
+        a device, so the device measures (the sprint plan said "ordered
+        by measured latency" without saying who measures).
+      - Relay nodes pin nothing but the fingerprint in the netmap; no
+        ACME for them.
+
 ## Nightly runs (ADR 0007)
 
 - [x] 2026-11-14: CI on `main` could not go green (PR #63).
