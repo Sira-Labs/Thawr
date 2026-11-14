@@ -887,6 +887,19 @@ tree that followed. One commit each, highest severity first.
         `TestIPv6PhoneViaHub`) and the TESTING 015 checklist are the
         owner's to run; there is no netns exit-node IPv6 test.
 
+## Nightly runs (ADR 0007)
+
+- [x] 2026-11-14: CI on `main` could not go green (PR #63).
+      - `ubuntu-latest` became Ubuntu 26.04, where `wg-quick` as root
+        is refused a config outside `/etc/wireguard`; the phone tests
+        write theirs there under a unique name instead of pinning the
+        runner to an older image.
+      - `TestRelayClientIdleClose` failing on macOS was a product race
+        (a proxy requested while the run loop idled out got no
+        connection), fixed in `internal/relay`; the DNS failure was the
+        test reading the status before the daemon cleared it.
+      - Next story: S8-1, spec 016 (separate relay nodes).
+
 ## Open owner items (nightly runs, ADR 0007)
 
 - Owner: make every `ci` job a required check in the branch rule on
