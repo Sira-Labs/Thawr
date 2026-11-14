@@ -51,6 +51,11 @@ when one exists, and GitHub's generated notes otherwise.
 
 ### Fixed
 
+- Relay client: a peer that needed the relay at the moment the idle
+  relay connection was being closed could stay without a connection
+  until another relayed peer appeared. The decision to close and the
+  bookkeeping that lets the next peer reopen it are now one step.
+
 - Paths: a device with no traffic of its own neither punched back nor
   joined the relay, so two devices behind symmetric NATs could reach
   each other only when both started talking (specs 004, 005). The

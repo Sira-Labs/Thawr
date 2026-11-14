@@ -20,6 +20,9 @@ sudo make integration
 CI runs them with the nftables tests of `internal/wg` in the
 `integration` job on GitHub's Ubuntu runner, which has the WireGuard
 module, IPv6 and systemd; the job's log lists any test that skipped.
+The phone tests write their config to `/etc/wireguard/thit<n>.conf`
+for `wg-quick` and remove it afterwards: Ubuntu 26.04 confines
+`wg-quick` to that directory.
 
 ## Manual checklist for the WireGuard adapters
 

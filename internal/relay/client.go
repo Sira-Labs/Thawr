@@ -140,7 +140,7 @@ func (c *Client) Endpoint(ctx context.Context, key Key) (netip.AddrPort, error) 
 		c.running = true
 		runCtx, cancel := context.WithCancel(context.Background())
 		c.cancel, c.done = cancel, make(chan struct{})
-		go c.run(runCtx)
+		go c.run(runCtx, cancel, c.done)
 	}
 	return p.addr, nil
 }
@@ -229,16 +229,22 @@ func (c *Client) readProxy(p *proxy) {
 }
 
 // run keeps the connection alive until the client closes or idles out.
-func (c *Client) run(ctx context.Context) {
+// It owns cancel and done: by the time it returns after idling out,
+// Endpoint may already have started the next run with its own pair.
+func (c *Client) run(ctx context.Context, cancel context.CancelFunc, done chan struct{}) {
+	idledOut := false
 	defer func() {
-		c.mu.Lock()
-		c.running = false
-		c.mu.Unlock()
-		close(c.done)
+		if !idledOut {
+			c.mu.Lock()
+			c.running = false
+			c.mu.Unlock()
+		}
+		cancel()
+		close(done)
 	}()
 	attempt := 0
 	for {
-		if c.idle() {
+		if idledOut = c.stopIfIdle(); idledOut {
 			c.log.Info("relay connection closed: no relayed peers")
 			return
 		}
@@ -276,7 +282,26 @@ func (c *Client) run(ctx context.Context) {
 func (c *Client) idle() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.idleLocked()
+}
+
+// idleLocked is idle for callers that hold mu.
+func (c *Client) idleLocked() bool {
 	return len(c.proxies) == 0 && !c.idleSince.IsZero() && c.opts.Now().Sub(c.idleSince) >= c.opts.IdleTimeout
+}
+
+// stopIfIdle decides that run ends and marks the client as not running
+// in one step under the lock. Decided apart, an Endpoint call between
+// the two saw a run that was about to exit, started none, and its proxy
+// stayed without a connection.
+func (c *Client) stopIfIdle() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.idleLocked() {
+		return false
+	}
+	c.running = false
+	return true
 }
 
 // serve runs one connection: writer, pinger, idle check and the reader
