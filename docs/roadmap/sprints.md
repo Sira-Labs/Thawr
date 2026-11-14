@@ -177,6 +177,9 @@ can leave the host, and `v1.0.0` ships.
 - Budget check at ~70 % and ~90 %: at 70 % stop starting stories that
   need a new spec; at 90 % stop, push, write the sprint's line in the
   progress log of `docs/roadmap/roadmap.md`, and roll the rest forward.
+- Since 14 Nov 2026 stories also land in nightly runs without the owner
+  (ADR 0007): no plan approval, pull requests merge themselves once CI
+  is green, releases and the manual checklists stay with the owner.
 - Rolled-over stories keep their ID and move to the top of the next
   sprint. Manual checklists that the owner has not run yet stay open in
   `docs/TESTING.md` and block the release, never the merge.
