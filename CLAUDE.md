@@ -28,6 +28,13 @@ specs; only the one you implement plus any it references.
    in `docs/ARCHITECTURE.md`. If a spec contradicts an ADR, stop and ask.
 8. Never commit debug code, `fmt.Println` debugging, or commented-out code.
 
+Nightly autonomous runs (ADR 0007, owner decision of 2026-11-14): steps
+2 and 7 are waived. Plan, then implement; a deviation from a spec or an
+ADR needs a new ADR in the same pull request instead of a question; a
+change that would weaken the security model in `docs/THREAT_MODEL.md`
+is left for the owner as an `Owner:` line in `TASKS.md`. The run merges
+its own green pull requests and never creates a release or a tag.
+
 ## Commands
 
 ```
