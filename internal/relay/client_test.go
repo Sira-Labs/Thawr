@@ -9,6 +9,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -213,6 +215,55 @@ func TestRelayClientIdleClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, "reconnected", a.Connected)
+}
+
+// endpointOnIdleClose asks the client for a proxy at the moment its run
+// loop reports that it idled out, the point where a run that had decided
+// to exit used to still count as running.
+type endpointOnIdleClose struct {
+	slog.Handler
+	ask  func()
+	once sync.Once
+}
+
+func (h *endpointOnIdleClose) Handle(ctx context.Context, r slog.Record) error {
+	if strings.Contains(r.Message, "no relayed peers") {
+		h.once.Do(h.ask)
+	}
+	return h.Handler.Handle(ctx, r)
+}
+
+// TestRelayClientEndpointWhileIdlingOut: a proxy requested while the
+// run loop is ending for idleness still gets a relay connection.
+func TestRelayClientEndpointWhileIdlingOut(t *testing.T) {
+	host := startHost(t, "sa")
+	wgA := newFakeWG(t)
+	var a *relay.Client
+	var first, second relay.Key
+	first[0], second[0] = 1, 2
+	asked := make(chan error, 1)
+	h := &endpointOnIdleClose{Handler: slog.NewTextHandler(io.Discard, nil), ask: func() {
+		_, err := a.Endpoint(context.Background(), second)
+		asked <- err
+	}}
+	a = newClient(t, host, "sa", wgA.port, func(o *relay.ClientOptions) {
+		o.IdleTimeout = 100 * time.Millisecond
+		o.Logger = slog.New(h)
+	})
+	if _, err := a.Endpoint(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "connected", a.Connected)
+	a.Release(first)
+	select {
+	case err := <-asked:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the connection never idled out")
+	}
+	waitFor(t, "reconnected for the new proxy", func() bool { return a.Connected() && host.srv.Stats().Sessions == 1 })
 }
 
 func TestRelayClientReconnect(t *testing.T) {
