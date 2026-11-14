@@ -339,8 +339,8 @@ func TestDNSDeadListenerUnregisters(t *testing.T) {
 	waitCalls(t, reg, "unregister after the listener died", func(c []string) bool {
 		return len(c) >= 3 && c[len(c)-1] == "unregister thawr0"
 	})
-	st := d.Status(context.Background())
-	if st.DNS == nil || st.DNS.State != DNSError || st.DNS.Method != dns.MethodNone {
+	st := waitDNSUnregistered(t, d)
+	if st.DNS.State != DNSError {
 		t.Errorf("status after the resolver died: %+v", st.DNS)
 	}
 	if st.Server.State == "" {
@@ -374,9 +374,20 @@ func TestDNSCleanupNotBlockedByRegistrar(t *testing.T) {
 	if d := time.Since(start); d > 3*time.Second {
 		t.Errorf("cleanup took %s behind a hanging registrar call", d)
 	}
-	if st := d.Status(context.Background()); st.DNS == nil || st.DNS.Method != dns.MethodNone {
-		t.Errorf("status after cleanup: %+v", st.DNS)
-	}
+	waitDNSUnregistered(t, d)
+}
+
+// waitDNSUnregistered waits for the status to report no registration.
+// The daemon clears the method after the registrar's Unregister returns,
+// so the recorded call alone does not mean the status has caught up.
+func waitDNSUnregistered(t *testing.T, d *Daemon) Status {
+	t.Helper()
+	var st Status
+	waitFor(t, "dns status without a registration", func() bool {
+		st = d.Status(context.Background())
+		return st.DNS != nil && st.DNS.Method == dns.MethodNone
+	})
+	return st
 }
 
 func TestStripZone(t *testing.T) {
