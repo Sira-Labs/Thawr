@@ -187,11 +187,37 @@ func newStarMesh(t *testing.T, policy string, withPhone bool) *mobileMesh {
 		fixed = stripIPv6(fixed)
 	}
 	writeFile(t, conf, fixed)
-	if out, err := phone.cmd(ctx, "wg-quick", "up", conf).CombinedOutput(); err != nil {
+	quick := wgQuickConfig(t, fixed)
+	if out, err := phone.cmd(ctx, "wg-quick", "up", quick).CombinedOutput(); err != nil {
 		t.Fatalf("wg-quick up: %v\n%s", err, out)
 	}
-	t.Cleanup(func() { _ = phone.cmd(context.Background(), "wg-quick", "down", conf).Run() })
+	t.Cleanup(func() { _ = phone.cmd(context.Background(), "wg-quick", "down", quick).Run() })
 	return m
+}
+
+// wgQuickConfig stores a phone config where wg-quick looks for one,
+// under a name no other run uses, and returns that name; the file is
+// removed with the test. A path elsewhere is refused on hosts whose
+// AppArmor profile confines wg-quick to /etc/wireguard (Ubuntu 26.04).
+// The name is also the interface name, so it stays under 15 bytes.
+func wgQuickConfig(t *testing.T, content string) string {
+	t.Helper()
+	const dir = "/etc/wireguard"
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.CreateTemp(dir, "thit*.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(f.Name()) })
+	if _, err := f.WriteString(content); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSuffix(filepath.Base(f.Name()), ".conf")
 }
 
 // stripIPv6 removes the IPv6 address and prefix from a WireGuard
