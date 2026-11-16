@@ -910,6 +910,14 @@ tree that followed. One commit each, highest severity first.
         the generation.
       - S8-2a: a refused registration (bad URL, name taken) does not
         use up the relay token.
+      - S8-2a: a liveness change writes the generation first and is
+        applied in memory only when that worked, so a failed write is
+        tried again by the next heartbeat or sweep (review of #67).
+      - S8-2a: `relay_tickets.expires_at` is stored with all nine
+        fractional digits because it is compared as text in SQL; the
+        trimmed format the other tables use orders wrongly inside one
+        second (review of #67). The other tables are left as they are:
+        not this story's code.
       - A relay node is not a peer: no WireGuard key, no address, not
         in the policy, not under the lock. Its tokens are a kind and a
         table of their own, so the peer `kind` check stays as it is.

@@ -122,8 +122,15 @@ type Relays struct {
 	notify    Notifier
 	ticketTTL time.Duration
 
-	mu        sync.Mutex
-	live      map[string]*liveRelay
+	// mu guards live.
+	mu   sync.Mutex
+	live map[string]*liveRelay
+
+	// ticketMu guards tickets and lastPrune. It is held across the
+	// write of a new ticket's row, so ForgetPeer, which runs after the
+	// transaction that deleted a peer's rows, cannot slip in between
+	// the row and its cache entry and leave a dead ticket cached.
+	ticketMu  sync.Mutex
 	tickets   map[ticketKey]cachedTicket
 	lastPrune time.Time
 }
@@ -349,17 +356,27 @@ func (r *Relays) Heartbeat(ctx context.Context, relayID string, stats RelayStats
 		r.mu.Unlock()
 		return fmt.Errorf("relay %s is not attached: %w", relayID, ErrNotFound)
 	}
-	back := !l.online
-	l.lastBeat, l.stats = now, stats
-	if back {
-		l.online, l.since = true, now
+	// Not usable covers both a relay the sweep took offline and one
+	// whose heartbeats stopped for longer than the window without a
+	// sweep in between: Online left it out either way.
+	back := !l.usable(now)
+	if !back {
+		l.lastBeat, l.stats = now, stats
 	}
 	r.mu.Unlock()
 	if !back {
 		return nil
 	}
+	err := r.publish(ctx, func() {
+		if l, ok := r.live[relayID]; ok {
+			l.online, l.since, l.lastBeat, l.stats = true, now, now, stats
+		}
+	})
+	if err != nil {
+		return err
+	}
 	r.log.Info("relay online again", "relay_id", relayID)
-	return r.bump(ctx)
+	return nil
 }
 
 // Detach marks a relay offline when its control stream ends.
@@ -368,18 +385,23 @@ func (r *Relays) Detach(ctx context.Context, relayID string) error {
 	r.mu.Lock()
 	l, ok := r.live[relayID]
 	wasOnline := ok && l.online
-	if wasOnline {
-		l.online, l.since = false, now
-	}
 	r.mu.Unlock()
 	if !wasOnline {
 		return nil
 	}
-	if err := r.store.Relays().Touch(ctx, relayID, now); err != nil && !errors.Is(err, store.ErrNotFound) {
+	err := r.publish(ctx, func() {
+		if l, ok := r.live[relayID]; ok {
+			l.online, l.since = false, now
+		}
+	})
+	if err != nil {
 		return err
 	}
 	r.log.Info("relay offline", "relay_id", relayID, "reason", "stream closed")
-	return r.bump(ctx)
+	if err := r.store.Relays().Touch(ctx, relayID, now); err != nil && !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	return nil
 }
 
 // Sweep takes relays offline whose last heartbeat is older than
@@ -387,23 +409,35 @@ func (r *Relays) Detach(ctx context.Context, relayID string) error {
 // timer; Online already leaves such relays out in between.
 func (r *Relays) Sweep(ctx context.Context) (int, error) {
 	now := r.now()
-	var stale []string
+	stale := func(l *liveRelay) bool { return l.online && now.Sub(l.lastBeat) > RelayOnlineWindow }
 	r.mu.Lock()
-	for id, l := range r.live {
-		if l.online && now.Sub(l.lastBeat) > RelayOnlineWindow {
-			l.online, l.since = false, now
-			stale = append(stale, id)
+	pending := 0
+	for _, l := range r.live {
+		if stale(l) {
+			pending++
 		}
 	}
 	r.mu.Unlock()
-	if len(stale) == 0 {
+	if pending == 0 {
 		return 0, nil
 	}
-	sort.Strings(stale)
-	for _, id := range stale {
+	var swept []string
+	err := r.publish(ctx, func() {
+		for id, l := range r.live {
+			if stale(l) {
+				l.online, l.since = false, now
+				swept = append(swept, id)
+			}
+		}
+	})
+	if err != nil {
+		return 0, err
+	}
+	sort.Strings(swept)
+	for _, id := range swept {
 		r.log.Warn("relay offline", "relay_id", id, "reason", "no heartbeat")
 	}
-	return len(stale), r.bump(ctx)
+	return len(swept), nil
 }
 
 // List returns every relay with its liveness, ordered by name. Admins
@@ -476,12 +510,14 @@ func (r *Relays) Delete(ctx context.Context, by Principal, name string) (store.R
 	}
 	r.mu.Lock()
 	delete(r.live, relay.ID)
+	r.mu.Unlock()
+	r.ticketMu.Lock()
 	for k := range r.tickets {
 		if k.relayID == relay.ID {
 			delete(r.tickets, k)
 		}
 	}
-	r.mu.Unlock()
+	r.ticketMu.Unlock()
 	r.changed()
 	r.log.Info("relay deleted", "relay", relay.Name, "relay_id", relay.ID, "by", by.Name)
 	return relay, nil
@@ -525,17 +561,17 @@ func (r *Relays) Tickets(ctx context.Context, peerID string) ([]RelayTicketGrant
 		return nil, err
 	}
 	now := r.now()
-	if err := r.pruneTickets(ctx, now); err != nil {
+	r.ticketMu.Lock()
+	defer r.ticketMu.Unlock()
+	if err := r.pruneTicketsLocked(ctx, now); err != nil {
 		return nil, err
 	}
 	out := make([]RelayTicketGrant, 0, len(relays))
 	for _, relay := range relays {
 		key := ticketKey{peerID: peerID, relayID: relay.ID}
-		r.mu.Lock()
 		c, ok := r.tickets[key]
-		r.mu.Unlock()
 		if !ok || !now.Before(c.issued.Add(r.ticketTTL/2)) {
-			c, err = r.issueTicket(ctx, key, now)
+			c, err = r.issueTicketLocked(ctx, key, now)
 			if err != nil {
 				return nil, err
 			}
@@ -545,7 +581,9 @@ func (r *Relays) Tickets(ctx context.Context, peerID string) ([]RelayTicketGrant
 	return out, nil
 }
 
-func (r *Relays) issueTicket(ctx context.Context, key ticketKey, now time.Time) (cachedTicket, error) {
+// issueTicketLocked stores a new ticket's hash and caches the ticket;
+// the caller holds ticketMu.
+func (r *Relays) issueTicketLocked(ctx context.Context, key ticketKey, now time.Time) (cachedTicket, error) {
 	ticket := make([]byte, TicketLen)
 	if _, err := rand.Read(ticket); err != nil {
 		return cachedTicket{}, fmt.Errorf("control: random ticket: %w", err)
@@ -556,31 +594,26 @@ func (r *Relays) issueTicket(ctx context.Context, key ticketKey, now time.Time) 
 	if err != nil {
 		return cachedTicket{}, fmt.Errorf("control: ticket for peer %s at relay %s: %w", key.peerID, key.relayID, err)
 	}
-	r.mu.Lock()
 	r.tickets[key] = c
-	r.mu.Unlock()
 	return c, nil
 }
 
-// pruneTickets drops expired rows and cache entries, at most once per
-// ticketPruneEvery.
-func (r *Relays) pruneTickets(ctx context.Context, now time.Time) error {
-	r.mu.Lock()
-	due := now.Sub(r.lastPrune) >= ticketPruneEvery
-	if due {
-		r.lastPrune = now
-		for k, c := range r.tickets {
-			if !now.Before(c.expires) {
-				delete(r.tickets, k)
-			}
-		}
-	}
-	r.mu.Unlock()
-	if !due {
+// pruneTicketsLocked drops expired rows and cache entries, at most once
+// per ticketPruneEvery; the caller holds ticketMu.
+func (r *Relays) pruneTicketsLocked(ctx context.Context, now time.Time) error {
+	if now.Sub(r.lastPrune) < ticketPruneEvery {
 		return nil
 	}
-	_, err := r.store.RelayTickets().DeleteExpired(ctx, now)
-	return err
+	if _, err := r.store.RelayTickets().DeleteExpired(ctx, now); err != nil {
+		return err
+	}
+	r.lastPrune = now
+	for k, c := range r.tickets {
+		if !now.Before(c.expires) {
+			delete(r.tickets, k)
+		}
+	}
+	return nil
 }
 
 // Admit answers a relay's question whether ticket opens a session
@@ -612,8 +645,8 @@ func (r *Relays) Admit(ctx context.Context, relayID string, ticket []byte) (stor
 // rotated its key; their rows are already gone, and the next netmap
 // issues new ones.
 func (r *Relays) ForgetPeer(peerID string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.ticketMu.Lock()
+	defer r.ticketMu.Unlock()
 	for k := range r.tickets {
 		if k.peerID == peerID {
 			delete(r.tickets, k)
@@ -621,11 +654,18 @@ func (r *Relays) ForgetPeer(peerID string) {
 	}
 }
 
-// bump moves the netmap generation and wakes the streams.
-func (r *Relays) bump(ctx context.Context) error {
+// publish makes a liveness change visible: it moves the netmap
+// generation, then applies the change under mu, then wakes the streams.
+// When the generation cannot be written nothing changes in memory, so
+// the next heartbeat or sweep finds the same condition and tries again
+// instead of leaving devices with a netmap that disagrees with Online.
+func (r *Relays) publish(ctx context.Context, apply func()) error {
 	if _, err := r.store.Meta().IncrementGeneration(ctx); err != nil {
 		return err
 	}
+	r.mu.Lock()
+	apply()
+	r.mu.Unlock()
 	r.changed()
 	return nil
 }

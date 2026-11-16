@@ -569,3 +569,106 @@ func TestTicketTTLBounds(t *testing.T) {
 		t.Errorf("grant with the shortest lifetime: %+v %v", g, err)
 	}
 }
+
+// TestRelayHeartbeatAfterStaleGap: a relay whose heartbeats paused for
+// longer than the window is left out by Online at once. When it beats
+// again before any sweep ran, devices must hear of it: the heartbeat
+// moves the generation although no sweep ever took the relay offline.
+func TestRelayHeartbeatAfterStaleGap(t *testing.T) {
+	env := newRelayEnv(t)
+	ctx := context.Background()
+	relay := env.online(t, "riyadh-1")
+	gen, woke := env.generation(t), env.notify.n
+	env.clk.Advance(RelayOnlineWindow + time.Second)
+	if on, _ := env.relays.Online(ctx); len(on) != 0 {
+		t.Fatal("relay listed after the window")
+	}
+	if err := env.relays.Heartbeat(ctx, relay.ID, RelayStats{Sessions: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if on, _ := env.relays.Online(ctx); len(on) != 1 {
+		t.Error("relay not back after its heartbeat")
+	}
+	if env.generation(t) != gen+1 || env.notify.n != woke+1 {
+		t.Errorf("generation %d (was %d), notified %d (was %d)", env.generation(t), gen, env.notify.n, woke)
+	}
+	// The sweep that follows has nothing left to do.
+	if n, err := env.relays.Sweep(ctx); err != nil || n != 0 {
+		t.Errorf("sweep after the recovery: %d %v", n, err)
+	}
+	st, _ := env.relays.Get(ctx, env.admin, "riyadh-1")
+	if !st.Online || st.Stats.Sessions != 1 || !st.Since.Equal(env.clk.Now()) {
+		t.Errorf("status: %+v", st)
+	}
+}
+
+// TestRelayLivenessRetriesAfterFailedWrite: when the generation cannot
+// be written, a liveness change is not applied in memory either, so the
+// next call finds the same condition and publishes it.
+func TestRelayLivenessRetriesAfterFailedWrite(t *testing.T) {
+	env := newRelayEnv(t)
+	ctx := context.Background()
+	dead, cancel := context.WithCancel(ctx)
+	cancel()
+	relay := env.online(t, "riyadh-1")
+	listed := func() bool {
+		st, err := env.relays.Get(ctx, env.admin, "riyadh-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st.Online
+	}
+
+	// Sweep: the failed attempt leaves the relay for the next sweep.
+	env.clk.Advance(RelayOnlineWindow + time.Second)
+	gen := env.generation(t)
+	if n, err := env.relays.Sweep(dead); err == nil || n != 0 {
+		t.Fatalf("sweep with a failing store: %d %v", n, err)
+	}
+	if env.generation(t) != gen {
+		t.Fatalf("generation moved to %d on a failed sweep", env.generation(t))
+	}
+	if n, err := env.relays.Sweep(ctx); err != nil || n != 1 || env.generation(t) != gen+1 {
+		t.Fatalf("retried sweep: %d %v, generation %d", n, err, env.generation(t))
+	}
+
+	// Heartbeat: the failed recovery is tried again by the next beat.
+	if err := env.relays.Heartbeat(dead, relay.ID, RelayStats{}); err == nil {
+		t.Fatal("heartbeat with a failing store reported success")
+	}
+	if listed() || env.generation(t) != gen+1 {
+		t.Fatalf("after the failed recovery: online %v, generation %d", listed(), env.generation(t))
+	}
+	if err := env.relays.Heartbeat(ctx, relay.ID, RelayStats{}); err != nil || !listed() || env.generation(t) != gen+2 {
+		t.Fatalf("retried recovery: %v, online %v, generation %d", err, listed(), env.generation(t))
+	}
+
+	// Detach: the failed attempt leaves the relay online for a retry.
+	if err := env.relays.Detach(dead, relay.ID); err == nil {
+		t.Fatal("detach with a failing store reported success")
+	}
+	if !listed() || env.generation(t) != gen+2 {
+		t.Fatalf("after the failed detach: online %v, generation %d", listed(), env.generation(t))
+	}
+	if err := env.relays.Detach(ctx, relay.ID); err != nil || listed() || env.generation(t) != gen+3 {
+		t.Fatalf("retried detach: %v, online %v, generation %d", err, listed(), env.generation(t))
+	}
+}
+
+// TestTicketsFailedPruneIsRetried: a prune that could not run is due
+// again at the next call, not a minute later.
+func TestTicketsFailedPruneIsRetried(t *testing.T) {
+	env := newRelayEnv(t)
+	ctx := context.Background()
+	dead, cancel := context.WithCancel(ctx)
+	cancel()
+	env.online(t, "riyadh-1")
+	p := env.peer(t, "box")
+	if _, err := env.relays.Tickets(dead, p.ID); err == nil {
+		t.Fatal("tickets with a failing store reported success")
+	}
+	g, err := env.relays.Tickets(ctx, p.ID)
+	if err != nil || len(g) != 1 {
+		t.Fatalf("tickets after the failure: %v %v", g, err)
+	}
+}
