@@ -28,6 +28,26 @@ type Registry struct {
 	audit      *Auditor
 	lock       *LockService
 	peerRefs   PeerRefs
+	tickets    TicketForgetter
+}
+
+// TicketForgetter is told when a peer's relay tickets stopped being
+// valid (its key was rotated or it was deleted), so none is handed out
+// again from memory (spec 016).
+type TicketForgetter interface {
+	ForgetPeer(peerID string)
+}
+
+// WithTicketForgetter sets who is told that a peer's tickets are gone.
+func (r *Registry) WithTicketForgetter(f TicketForgetter) *Registry {
+	r.tickets = f
+	return r
+}
+
+func (r *Registry) forgetTickets(peerID string) {
+	if r.tickets != nil {
+		r.tickets.ForgetPeer(peerID)
+	}
 }
 
 // WithPeerRefs makes Rename refuse to move a name the policy selects.
@@ -196,6 +216,7 @@ func (r *Registry) deletePeer(ctx context.Context, id string, by Principal, acti
 	if err != nil {
 		return err
 	}
+	r.forgetTickets(id)
 	r.changed()
 	return nil
 }
@@ -256,6 +277,10 @@ func (r *Registry) RotateKey(ctx context.Context, peerID, newPublicKey string, s
 				return err
 			}
 		}
+		// A ticket admits its holder at a relay under the old key.
+		if _, err := tx.RelayTickets().DeletePeer(ctx, peerID); err != nil {
+			return err
+		}
 		gen, err = tx.Meta().IncrementGeneration(ctx)
 		if err != nil {
 			return err
@@ -267,6 +292,7 @@ func (r *Registry) RotateKey(ctx context.Context, peerID, newPublicKey string, s
 	if err != nil {
 		return 0, err
 	}
+	r.forgetTickets(peerID)
 	r.changed()
 	r.log.Info("peer key rotated", "peer_id", peerID, "generation", gen)
 	return gen, nil

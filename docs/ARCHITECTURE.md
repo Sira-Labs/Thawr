@@ -658,7 +658,16 @@ JSON; appended inside the mutation's transaction, pruned after
 peer's old key stop matching after a rotation and go with the peer on
 delete), `peer_routes` (`peer_id`, `prefix`, `advertised_at`,
 `approved_at`, `approved_by`; foreign key on `peers` with cascade, so
-the rows go with the peer). Endpoints, relay sessions and path state are ephemeral
+the rows go with the peer), and for relay nodes (spec 016) `relays`
+(`name`, `url`, `tls_fingerprint`, the hash of the relay secret,
+`last_seen_at`), `relay_tokens` (one-time registration tokens, a table
+of their own so the `kind` check on peers and enrollment tokens stays
+as it is) and `relay_tickets` (the hash of a ticket, `peer_id`,
+`relay_id`, `expires_at`; cascading from both, so a deleted peer or
+relay takes its tickets along). Which relays are online, and the
+tickets themselves, are held in memory by `control.Relays`: a restart
+waits for relays to attach again and issues new tickets.
+Endpoints, relay sessions and path state are ephemeral
 and kept in memory in `control.EndpointTable`; a restart simply waits for
 clients to re-report. Migrations are `NNNN_name.sql` files embedded and
 applied in a transaction with the version recorded in `meta`.
