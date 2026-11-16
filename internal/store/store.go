@@ -70,3 +70,13 @@ func (s *Store) Signatures() *Signatures { return &Signatures{q: s.q()} }
 
 // Routes returns the advertised-routes accessor (spec 013).
 func (s *Store) Routes() *Routes { return &Routes{q: s.q()} }
+
+// Relays returns the relay node accessor (spec 016).
+func (s *Store) Relays() *Relays { return &Relays{q: s.q()} }
+
+// RelayTokens returns the relay registration token accessor.
+func (s *Store) RelayTokens() *RelayTokens { return &RelayTokens{q: s.q()} }
+
+// RelayTickets returns the accessor for the tickets devices present to
+// relay nodes.
+func (s *Store) RelayTickets() *RelayTickets { return &RelayTickets{q: s.q()} }
