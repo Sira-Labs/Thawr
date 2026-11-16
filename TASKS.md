@@ -890,8 +890,26 @@ tree that followed. One commit each, highest severity first.
 ## Sprint 8 — separate relay nodes
 
 - [~] **016 Separate relay nodes** — `docs/specs/016-separate-relay-nodes.md`
-      S8-1 done (spec, 2026-11-15). Open: S8-2 server side, S8-3
-      `thawr relay`, S8-4 client; the next run takes S8-2.
+      S8-1 done (spec, 2026-11-15). S8-2 is split in two because the
+      whole of it does not fit one run: S8-2a done (2026-11-17: store
+      and `control.Relays`), S8-2b open (`RelayControl` over gRPC, the
+      netmap fields and capability flag, `relay.ticket_ttl` in the
+      config, `admin relay`, REST, UI table, metrics, the sweep timer
+      in `internal/server`). Then S8-3 `thawr relay`, S8-4 client. The
+      next run takes S8-2b.
+      - S8-2a: nothing calls `control.Relays` yet, so no behaviour
+        changes; migration 0008 adds three empty tables.
+      - S8-2a: the server keeps issued tickets in memory so a device
+        sees the same one in every netmap until half its lifetime; the
+        database holds hashes only, and a restart issues new ones.
+      - S8-2a: a key rotation deletes the peer's tickets in the same
+        transaction (the spec lists it under revocation); the registry
+        tells `control.Relays` through a one-method interface.
+      - S8-2a: `Online` leaves out a relay whose heartbeat is older
+        than 30 s even before the sweep runs; the sweep is what moves
+        the generation.
+      - S8-2a: a refused registration (bad URL, name taken) does not
+        use up the relay token.
       - A relay node is not a peer: no WireGuard key, no address, not
         in the policy, not under the lock. Its tokens are a kind and a
         table of their own, so the peer `kind` check stays as it is.
