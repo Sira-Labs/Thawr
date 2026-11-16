@@ -49,6 +49,14 @@ when one exists, and GitHub's generated notes otherwise.
   audit rows, uptime. Counts only, never a name, address or key; no
   new dependency.
 
+- Groundwork for standalone relay nodes (spec 016): the database
+  moves to schema version 8 with tables for relays, their one-time
+  registration tokens and the tickets devices will present to them.
+  Nothing uses them yet and no command changes. As with every schema
+  change, a database this version has opened is refused by an older
+  binary, and a backup taken from it restores only on this version or
+  newer.
+
 ### Fixed
 
 - Relay client: a peer that needed the relay at the moment the idle
