@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -142,6 +143,59 @@ func TestRelayTicketsExpire(t *testing.T) {
 	}
 	if _, err := s.RelayTickets().GetByHash(ctx, "b"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("expired ticket still there: %v", err)
+	}
+}
+
+// TestRelayTicketsExpireWithinASecond: expiry is compared as text in
+// SQL, so it must order correctly inside one second whatever the number
+// of fractional digits. With the trimmed format, 12:00:05.5 sorted
+// before 12:00:05 and such a ticket was deleted half a second early.
+func TestRelayTicketsExpireWithinASecond(t *testing.T) {
+	s, ctx := relayFixture(t)
+	base := now().Add(5 * time.Second)
+	for hash, d := range map[string]time.Duration{
+		"whole":   0,
+		"half":    500 * time.Millisecond,
+		"nanos":   500*time.Millisecond + 10*time.Microsecond,
+		"quarter": 250 * time.Millisecond,
+	} {
+		if err := s.RelayTickets().Put(ctx, RelayTicket{TicketHash: hash, PeerID: "p1", RelayID: "r1", CreatedAt: now(), ExpiresAt: base.Add(d)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	left := func() []string {
+		var out []string
+		for _, h := range []string{"whole", "quarter", "half", "nanos"} {
+			if _, err := s.RelayTickets().GetByHash(ctx, h); err == nil {
+				out = append(out, h)
+			}
+		}
+		return out
+	}
+	steps := []struct {
+		at   time.Duration
+		want string
+	}{
+		{0, "quarter half nanos"},
+		{250 * time.Millisecond, "half nanos"},
+		{400 * time.Millisecond, "half nanos"},
+		{500 * time.Millisecond, "nanos"},
+		{500*time.Millisecond + 10*time.Microsecond, ""},
+	}
+	for _, step := range steps {
+		if _, err := s.RelayTickets().DeleteExpired(ctx, base.Add(step.at)); err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Join(left(), " "); got != step.want {
+			t.Fatalf("after pruning at +%s: %q left, want %q", step.at, got, step.want)
+		}
+	}
+	// The stored expiry reads back exactly.
+	if err := s.RelayTickets().Put(ctx, RelayTicket{TicketHash: "x", PeerID: "p1", RelayID: "r1", CreatedAt: now(), ExpiresAt: base.Add(time.Hour + 500*time.Millisecond)}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.RelayTickets().GetByHash(ctx, "x"); err != nil || !got.ExpiresAt.Equal(base.Add(time.Hour+500*time.Millisecond)) {
+		t.Errorf("read back: %+v %v", got, err)
 	}
 }
 

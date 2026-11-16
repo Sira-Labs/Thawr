@@ -233,11 +233,19 @@ func (s *RelayTokens) MarkUsed(ctx context.Context, id, relayID string, now time
 	return nil
 }
 
+// sortableTimeLayout is RFC 3339 in UTC with all nine fractional
+// digits, so the text orders as the times do. formatTime drops trailing
+// zeros, which is fine to read back but not to compare in SQL:
+// "…:05.5Z" sorts before "…:05Z".
+const sortableTimeLayout = "2006-01-02T15:04:05.000000000Z"
+
+func formatSortableTime(t time.Time) string { return t.UTC().Format(sortableTimeLayout) }
+
 // Put stores t.
 func (s *RelayTickets) Put(ctx context.Context, t RelayTicket) error {
 	_, err := s.q.ExecContext(ctx,
 		`INSERT INTO relay_tickets (ticket_hash, peer_id, relay_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`,
-		t.TicketHash, t.PeerID, t.RelayID, formatTime(t.CreatedAt), formatTime(t.ExpiresAt))
+		t.TicketHash, t.PeerID, t.RelayID, formatTime(t.CreatedAt), formatSortableTime(t.ExpiresAt))
 	if isUniqueViolation(err) {
 		return fmt.Errorf("relay ticket: %w", ErrConflict)
 	}
@@ -276,7 +284,7 @@ func (s *RelayTickets) DeletePeer(ctx context.Context, peerID string) (int64, er
 
 // DeleteExpired removes the tickets that expired at or before now.
 func (s *RelayTickets) DeleteExpired(ctx context.Context, now time.Time) (int64, error) {
-	return s.deleteWhere(ctx, `expires_at <= ?`, formatTime(now))
+	return s.deleteWhere(ctx, `expires_at <= ?`, formatSortableTime(now))
 }
 
 func (s *RelayTickets) deleteWhere(ctx context.Context, where, arg string) (int64, error) {
