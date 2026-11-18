@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -256,6 +257,9 @@ func (h *rest) handleRevokeToken(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// maxTTLDays is the largest day count whose duration fits time.Duration.
+const maxTTLDays = int(math.MaxInt64 / (24 * time.Hour))
+
 // ParseTTL accepts Go durations plus a "d" suffix for days; empty means
 // the default.
 func ParseTTL(s string) (time.Duration, error) {
@@ -265,7 +269,9 @@ func ParseTTL(s string) (time.Duration, error) {
 	}
 	if days, ok := strings.CutSuffix(s, "d"); ok {
 		n, err := strconv.Atoi(days)
-		if err != nil || n <= 0 {
+		// More days than a time.Duration holds would wrap around, possibly
+		// into a short positive lifetime nobody asked for.
+		if err != nil || n <= 0 || n > maxTTLDays {
 			return 0, fmt.Errorf("expires %q: use a duration like 1h, 30m or 7d", s)
 		}
 		return time.Duration(n) * 24 * time.Hour, nil
