@@ -20,11 +20,11 @@ func newAdminCmd() *cobra.Command {
 	var flags adminFlags
 	cmd := &cobra.Command{
 		Use:   "admin",
-		Short: "Manage users, tokens, peers, policy and the audit log over the local admin socket",
+		Short: "Manage users, tokens, peers, relay nodes, policy and the audit log over the local admin socket",
 	}
 	cmd.PersistentFlags().StringVar(&flags.socket, "socket", defaultAdminSocket(), "admin socket path ($"+envAdminSocket+")")
 	cmd.PersistentFlags().BoolVar(&flags.json, "json", false, "print JSON instead of a table")
-	cmd.AddCommand(newAdminUserCmd(&flags), newAdminTokenCmd(&flags), newAdminPeerCmd(&flags), newAdminPolicyCmd(&flags), newAdminAuditCmd(&flags), newAdminLockCmd(&flags), newAdminBackupCmd(&flags))
+	cmd.AddCommand(newAdminUserCmd(&flags), newAdminTokenCmd(&flags), newAdminPeerCmd(&flags), newAdminPolicyCmd(&flags), newAdminAuditCmd(&flags), newAdminLockCmd(&flags), newAdminBackupCmd(&flags), newAdminRelayCmd(&flags))
 	return cmd
 }
 
