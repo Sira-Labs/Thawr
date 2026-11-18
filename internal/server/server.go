@@ -109,6 +109,8 @@ type Server struct {
 	paths     *control.PathTable
 	netmaps   *control.NetMapBuilder
 	relay     *relay.Server
+	// relays is the registry of standalone relay nodes (spec 016).
+	relays    *control.Relays
 	dnsSource *registrySource
 	// dnsListen is the hub resolver's address for status, empty when off
 	// or stopped.
@@ -301,7 +303,7 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 		Status: s, UI: s.deps.UI, Logger: s.log,
 		Users: s.users, Auth: s.users, Tokens: s.tokens, Peers: s.registry, Presence: s, Paths: s.paths, Endpoints: s.endpoints,
 		Join: s.JoinInfo(), Sessions: s.sessions, NodeAuth: s.registry, Relay: s.relay, Policy: s.policySvc, Audit: s.st.Audit(), Now: s.deps.Now,
-		Lock: s.lockSvc, Hub: hubInfo, Routes: s.routesSvc,
+		Lock: s.lockSvc, Hub: hubInfo, Routes: s.routesSvc, Relays: s.relays,
 	}
 	webHandler, err := api.NewREST(restDeps)
 	if err != nil {
@@ -351,6 +353,7 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 	go s.followRegistry(hubCtx)
 	go s.observeHub(hubCtx)
 	go s.pruneAudit(hubCtx)
+	go s.sweepRelays(hubCtx)
 
 	errCh := make(chan error, 3)
 	go func() {
@@ -697,6 +700,27 @@ func listenPort(addr string) (int, error) {
 	return port, nil
 }
 
+// relaySweepInterval is how often relay nodes without a heartbeat are
+// taken offline. Netmaps leave such a relay out as soon as its window
+// has passed; the sweep is what tells devices.
+const relaySweepInterval = 10 * time.Second
+
+// sweepRelays runs the relay registry's sweep until ctx ends.
+func (s *Server) sweepRelays(ctx context.Context) {
+	t := time.NewTicker(relaySweepInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if _, err := s.relays.Sweep(ctx); err != nil && ctx.Err() == nil {
+				s.log.Warn("relay sweep failed; retrying", "err", err)
+			}
+		}
+	}
+}
+
 // buildServices wires the control-plane services on the open store.
 func (s *Server) buildServices(ctx context.Context) error {
 	users, err := control.NewUsers(s.st, s.deps.Now, s.log)
@@ -726,6 +750,12 @@ func (s *Server) buildServices(ctx context.Context) error {
 	s.routesSvc = control.NewRoutesService(s.st, s.log, s.deps.Now, s.cfg.OverlayPrefix()).WithNotifier(hub).WithAuditor(auditor)
 	s.registry = control.NewRegistry(s.st, s.log).WithNotifier(hub).WithClock(s.deps.Now).
 		WithOverlay(s.cfg.OverlayPrefix()).WithOverlay6(s.overlay6()).WithTagAllowed(s.policySvc.TagAllowed).WithAuditor(auditor).WithLock(s.lockSvc).WithPeerRefs(s.policySvc.PeerRefs)
+	relays, err := control.NewRelays(s.st, s.deps.Now, s.log).WithAuditor(auditor).WithNotifier(hub).WithTicketTTL(s.cfg.RelayTicketTTL())
+	if err != nil {
+		return err
+	}
+	s.relays = relays
+	s.registry.WithTicketForgetter(relays)
 	s.staticSeen = map[string]time.Time{}
 	s.sessions = api.NewSessions(s.deps.Now)
 	keyVis := control.NewKeyVisibility(s.st, visibility, hub.Generation)

@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ValidationError lists every problem found in a Config, one per field,
@@ -113,6 +114,11 @@ func (c *Config) Validate() error {
 	}
 	if c.Relay.MaxBytesPerSecond < 0 {
 		add("relay.max_bytes_per_second: must not be negative")
+	}
+	if d, err := time.ParseDuration(c.Relay.TicketTTL); err != nil {
+		add("relay.ticket_ttl: %q is not a duration like 1h or 30m", c.Relay.TicketTTL)
+	} else if d < MinRelayTicketTTL || d > MaxRelayTicketTTL {
+		add("relay.ticket_ttl: %s must be between %s and %s", c.Relay.TicketTTL, MinRelayTicketTTL, MaxRelayTicketTTL)
 	}
 	if c.Audit.RetentionDays < 0 {
 		add("audit.retention_days: must not be negative (0 keeps entries forever)")

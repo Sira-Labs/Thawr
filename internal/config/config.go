@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"path/filepath"
 	"runtime"
+	"time"
 )
 
 // Config is the complete server configuration. Every field has a default
@@ -69,6 +70,26 @@ type Relay struct {
 	// MaxBytesPerSecond limits what one peer may send through the
 	// relay; 0 means unlimited.
 	MaxBytesPerSecond int `yaml:"max_bytes_per_second"`
+	// TicketTTL is how long a device's ticket for a relay node is
+	// valid, as a Go duration between 5m and 24h (spec 016).
+	TicketTTL string `yaml:"ticket_ttl"`
+}
+
+// Relay ticket lifetime: the default and its bounds.
+const (
+	DefaultRelayTicketTTL = time.Hour
+	MinRelayTicketTTL     = 5 * time.Minute
+	MaxRelayTicketTTL     = 24 * time.Hour
+)
+
+// RelayTicketTTL is relay.ticket_ttl as a duration. Validate has
+// checked it; an unparsable value yields the default.
+func (c *Config) RelayTicketTTL() time.Duration {
+	d, err := time.ParseDuration(c.Relay.TicketTTL)
+	if err != nil {
+		return DefaultRelayTicketTTL
+	}
+	return d
 }
 
 // Listen holds the listener addresses.
@@ -158,6 +179,7 @@ func Default() *Config {
 		TLS:         TLS{Mode: TLSModeSelfSigned},
 		DNS:         DNS{Enabled: true},
 		Audit:       Audit{RetentionDays: DefaultAuditRetentionDays},
+		Relay:       Relay{TicketTTL: DefaultRelayTicketTTL.String()},
 		PolicyFile:  "/etc/thawr/policy.yaml",
 		AdminSocket: filepath.Join(DefaultDataDir, "admin.sock"),
 		Log:         Log{Level: "info", Format: "text"},

@@ -25,6 +25,11 @@ func TestMetricsScrape(t *testing.T) {
 		PublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", IPv4: "100.64.0.77", CreatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
+	const relayName, relayHost = "secret-relay-name", "relay-secret.example"
+	if err := h.srv.st.Relays().Create(ctx, store.Relay{ID: "rl_secretid", Name: relayName, URL: "https://" + relayHost + ":443",
+		TLSFingerprint: "sha256:feedfacefeedface", SecretHash: "relay-secret-hash", CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := h.srv.users.Authenticate(ctx, "nobody", "wrong password"); err == nil {
 		t.Fatal("login with a wrong password succeeded")
 	}
@@ -41,6 +46,8 @@ func TestMetricsScrape(t *testing.T) {
 		`thawr_peers{kind="server"} 0`,
 		"thawr_peers_online 0",
 		"# TYPE thawr_netmap_generation gauge",
+		`thawr_relay_nodes{state="online"} 0`,
+		`thawr_relay_nodes{state="offline"} 1`,
 		"thawr_relay_sessions 0",
 		"# TYPE thawr_relay_bytes_total counter",
 		`thawr_stun_requests_total{result="ok"} 0`,
@@ -54,7 +61,8 @@ func TestMetricsScrape(t *testing.T) {
 			t.Errorf("scrape lacks %q", want)
 		}
 	}
-	for _, leak := range []string{secret, "100.64.0.77", "AAAAAAAA", "nobody", h.srv.tlsFingerprint, h.srv.hubKey.PublicKey().String()} {
+	for _, leak := range []string{secret, "100.64.0.77", "AAAAAAAA", "nobody", h.srv.tlsFingerprint, h.srv.hubKey.PublicKey().String(),
+		relayName, relayHost, "rl_secretid", "feedface", "relay-secret-hash"} {
 		if strings.Contains(scrape, leak) {
 			t.Errorf("scrape leaks %q", leak)
 		}

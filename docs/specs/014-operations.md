@@ -180,6 +180,7 @@ paths are learnt again from the clients, as after any restart.
   | `thawr_peers` | gauge | `kind` | store |
   | `thawr_peers_online` | gauge | | hub and static peers |
   | `thawr_netmap_generation` | gauge | | hub |
+  | `thawr_relay_nodes` | gauge | `state`: `online`, `offline` | relay registry (spec 016) |
   | `thawr_relay_sessions` | gauge | | relay |
   | `thawr_relay_frames_total`, `_bytes_total`, `_drops_total`, `_violations_total` | counter | | relay |
   | `thawr_stun_requests_total` | counter | `result`: `ok`, `ratelimited`, `malformed` | STUN server |
@@ -187,7 +188,8 @@ paths are learnt again from the clients, as after any restart.
   | `thawr_audit_rows` | gauge | | store |
 
 - Label values come from fixed sets (`kind`: `human`, `server`,
-  `agent`; `result` as above; `version` is the build string). No
+  `agent`; `result` and `state` as above; `version` is the build
+  string). No
   metric carries a peer name, user name, key, fingerprint, address or
   token, and a test enrols a peer with a distinctive name and asserts
   it does not appear in the scrape.

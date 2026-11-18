@@ -896,7 +896,13 @@ tree that followed. One commit each, highest severity first.
       netmap fields and capability flag, `relay.ticket_ttl` in the
       config, `admin relay`, REST, UI table, metrics, the sweep timer
       in `internal/server`). Then S8-3 `thawr relay`, S8-4 client. The
-      next run takes S8-2b.
+      next run took S8-2b in two parts as well: S8-2b1 done
+      (2026-11-19: `relay.ticket_ttl`, the registry wired into the
+      server with its sweep timer, REST, `admin relay`, the
+      `thawr_relay_nodes` metric). Open: S8-2b2 (`RelayControl` over
+      gRPC with `make proto`, the netmap fields and capability flag,
+      closing a deleted relay's stream, the `relay` label on the relay
+      counters, the UI table).
       - S8-2a: nothing calls `control.Relays` yet, so no behaviour
         changes; migration 0008 adds three empty tables.
       - S8-2a: the server keeps issued tickets in memory so a device
@@ -910,6 +916,18 @@ tree that followed. One commit each, highest severity first.
         the generation.
       - S8-2a: a refused registration (bad URL, name taken) does not
         use up the relay token.
+      - S8-2b1: `DELETE /api/v1/relays/{id}` takes the id as the spec
+        says while `admin relay delete` takes the name and looks the id
+        up, as a person types names; `admin relay show` filters the
+        list instead of a route of its own (the spec lists three).
+      - S8-2b1: `relay.ticket_ttl` is a duration string, the first in
+        the config; an empty value is refused rather than defaulted.
+      - S8-2b1: `admin relay token` prints the token but no command to
+        run, because `thawr relay up` does not exist before S8-3. The
+        README and the TESTING checklist for 016 wait for the same
+        reason: nothing a user can complete yet.
+      - S8-2b1: the sweep runs every 10 s (window 30 s), so devices
+        hear of a dead relay within 40 s at worst.
       - S8-2a: a liveness change writes the generation first and is
         applied in memory only when that worked, so a failed write is
         tried again by the next heartbeat or sweep (review of #67).

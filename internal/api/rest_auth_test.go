@@ -315,13 +315,17 @@ func TestPeersCRUD(t *testing.T) {
 }
 
 func TestParseTTL(t *testing.T) {
-	good := map[string]time.Duration{"": 0, "1h": time.Hour, "30m": 30 * time.Minute, "7d": 7 * 24 * time.Hour}
+	good := map[string]time.Duration{"": 0, "1h": time.Hour, "30m": 30 * time.Minute, "7d": 7 * 24 * time.Hour,
+		// The largest day count a time.Duration holds.
+		"106751d": 106751 * 24 * time.Hour}
 	for in, want := range good {
 		if got, err := ParseTTL(in); err != nil || got != want {
 			t.Errorf("ParseTTL(%q) = %v, %v", in, got, err)
 		}
 	}
-	for _, bad := range []string{"soon", "-1h", "0d", "1w"} {
+	// One day more than fits, a count that wraps around to a positive
+	// duration of a few hours, and one that does not fit an int.
+	for _, bad := range []string{"soon", "-1h", "0d", "1w", "106752d", "213504d", "99999999999999999999d"} {
 		if _, err := ParseTTL(bad); err == nil {
 			t.Errorf("ParseTTL(%q) accepted", bad)
 		}
