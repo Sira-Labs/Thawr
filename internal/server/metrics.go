@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/sira-labs/thawr/internal/control"
 	"github.com/sira-labs/thawr/internal/metrics"
 	"github.com/sira-labs/thawr/internal/store"
 )
@@ -31,6 +32,19 @@ func (s *Server) collectMetrics(ctx context.Context) ([]metrics.Family, error) {
 		peers = append(peers, metrics.Sample{Labels: []metrics.Label{{Name: "kind", Value: k}}, Value: float64(byKind[k])})
 	}
 	rs := s.relay.Stats()
+	relayNodes, err := s.relays.List(ctx, control.LocalAdmin)
+	if err != nil {
+		return nil, err
+	}
+	nodesOnline := 0
+	for _, n := range relayNodes {
+		if n.Online {
+			nodesOnline++
+		}
+	}
+	nodeState := func(state string, n int) metrics.Sample {
+		return metrics.Sample{Labels: []metrics.Label{{Name: "state", Value: state}}, Value: float64(n)}
+	}
 	one := func(v float64) []metrics.Sample { return []metrics.Sample{{Value: v}} }
 	stun := func(result string, n uint64) metrics.Sample {
 		return metrics.Sample{Labels: []metrics.Label{{Name: "result", Value: result}}, Value: float64(n)}
@@ -45,6 +59,8 @@ func (s *Server) collectMetrics(ctx context.Context) ([]metrics.Family, error) {
 			Samples: one(float64(s.hub.OnlineCount() + s.staticOnlineCount()))},
 		{Name: "thawr_netmap_generation", Help: "Netmap generation; it grows with every change peers must learn about.", Type: metrics.Gauge,
 			Samples: one(float64(s.hub.Generation()))},
+		{Name: "thawr_relay_nodes", Help: "Standalone relay nodes registered with this server, by state.", Type: metrics.Gauge,
+			Samples: []metrics.Sample{nodeState("online", nodesOnline), nodeState("offline", len(relayNodes)-nodesOnline)}},
 		{Name: "thawr_relay_sessions", Help: "Relay sessions open now.", Type: metrics.Gauge, Samples: one(float64(rs.Sessions))},
 		{Name: "thawr_relay_frames_total", Help: "Frames forwarded by the relay since start.", Type: metrics.Counter, Samples: one(float64(rs.Frames))},
 		{Name: "thawr_relay_bytes_total", Help: "Bytes forwarded by the relay since start.", Type: metrics.Counter, Samples: one(float64(rs.Bytes))},
