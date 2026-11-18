@@ -49,6 +49,15 @@ when one exists, and GitHub's generated notes otherwise.
   audit rows, uptime. Counts only, never a name, address or key; no
   new dependency.
 
+- Relay nodes, server side (spec 016, still without the relay node
+  itself): `thawr admin relay token|list|show|delete` and the matching
+  admin API (`GET /api/v1/relays`, `POST /api/v1/relays/tokens`,
+  `DELETE /api/v1/relays/{id}`, admins only), `relay.ticket_ttl` in
+  the config (default `1h`, 5m to 24h), and the metric
+  `thawr_relay_nodes{state="online|offline"}`. A token can be created
+  and a relay deleted, but nothing can register yet: `thawr relay`
+  comes with a later change.
+
 - Groundwork for standalone relay nodes (spec 016): the database
   moves to schema version 8 with tables for relays, their one-time
   registration tokens and the tickets devices will present to them.
