@@ -39,6 +39,8 @@ type RESTDeps struct {
 	Lock LockView
 	// Routes enables the advertised-route endpoints (spec 013).
 	Routes RoutesOps
+	// Relays enables the relay node endpoints, admins only (spec 016).
+	Relays RelaysService
 	// Now is the clock for relative audit queries; defaults to time.Now.
 	Now  func() time.Time
 	Join JoinInfo
@@ -123,6 +125,11 @@ func NewREST(deps RESTDeps) (http.Handler, error) {
 		if deps.Routes != nil {
 			mux.HandleFunc("GET /api/v1/peers/{name}/routes", h.requireAuth(h.handleListRoutes))
 			mux.HandleFunc("PUT /api/v1/peers/{name}/routes/{prefix...}", h.requireAdmin(h.handleSetRoute))
+		}
+		if deps.Relays != nil {
+			mux.HandleFunc("GET /api/v1/relays", h.requireAdmin(h.handleListRelays))
+			mux.HandleFunc("POST /api/v1/relays/tokens", h.requireAdmin(h.handleCreateRelayToken))
+			mux.HandleFunc("DELETE /api/v1/relays/{id}", h.requireAdmin(h.handleDeleteRelay))
 		}
 	}
 	if deps.Local && deps.Metrics != nil {
