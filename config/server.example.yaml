@@ -34,6 +34,7 @@ min_client_version: ""           # default: the server's own major.minor
 
 relay:
   max_bytes_per_second: 0        # per-peer relay rate limit; 0 = unlimited
+  ticket_ttl: 1h                 # how long a device's ticket for a relay node is valid (5m to 24h)
 
 dns:
   enabled: true                  # <name>.thawr resolver on the hub address, port 53 (phones ask it)

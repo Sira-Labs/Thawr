@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func noEnv(string) string { return "" }
@@ -93,6 +94,10 @@ func TestValidate(t *testing.T) {
 		{"bad metrics listen", "public_addr: a\nmetrics:\n  listen: localhost\n", []string{"metrics.listen"}},
 		{"no stun", "public_addr: a\nlisten:\n  stun: []\n", []string{"listen.stun: at least one"}},
 		{"negative relay limit", "public_addr: a\nrelay:\n  max_bytes_per_second: -1\n", []string{"relay.max_bytes_per_second"}},
+		{"ticket ttl not a duration", "public_addr: a\nrelay:\n  ticket_ttl: soon\n", []string{"relay.ticket_ttl"}},
+		{"ticket ttl empty", "public_addr: a\nrelay:\n  ticket_ttl: ''\n", []string{"relay.ticket_ttl"}},
+		{"ticket ttl too short", "public_addr: a\nrelay:\n  ticket_ttl: 4m59s\n", []string{"relay.ticket_ttl", "between"}},
+		{"ticket ttl too long", "public_addr: a\nrelay:\n  ticket_ttl: 24h1s\n", []string{"relay.ticket_ttl", "between"}},
 		{"three stun", "public_addr: a\nlisten:\n  stun: [':1', ':2', ':3']\n", []string{"at most two"}},
 		{"tls file without files", "public_addr: a\ntls:\n  mode: file\n", []string{"tls.cert_file", "tls.key_file"}},
 		{"tls bad mode", "public_addr: a\ntls:\n  mode: letsencrypt\n", []string{"tls.mode"}},
@@ -285,5 +290,24 @@ func TestOverlayPrefix6(t *testing.T) {
 	}
 	if p, ok := cfg.OverlayPrefix6(); !ok || p.String() != "fd3a:9c1e:44b0::/64" {
 		t.Errorf("OverlayPrefix6 = %v %v", p, ok)
+	}
+}
+
+func TestRelayTicketTTL(t *testing.T) {
+	for in, want := range map[string]time.Duration{
+		"public_addr: a\n": DefaultRelayTicketTTL,
+		"public_addr: a\nrelay:\n  max_bytes_per_second: 9\n": DefaultRelayTicketTTL,
+		"public_addr: a\nrelay:\n  ticket_ttl: 5m\n":          MinRelayTicketTTL,
+		"public_addr: a\nrelay:\n  ticket_ttl: 24h\n":         MaxRelayTicketTTL,
+		"public_addr: a\nrelay:\n  ticket_ttl: 90m\n":         90 * time.Minute,
+	} {
+		cfg, err := Parse([]byte(in), noEnv)
+		if err != nil {
+			t.Errorf("%q: %v", in, err)
+			continue
+		}
+		if got := cfg.RelayTicketTTL(); got != want {
+			t.Errorf("%q: ticket ttl %s, want %s", in, got, want)
+		}
 	}
 }
