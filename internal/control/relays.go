@@ -123,8 +123,9 @@ type Relays struct {
 	ticketTTL time.Duration
 
 	// mu guards live.
-	mu   sync.Mutex
-	live map[string]*liveRelay
+	mu        sync.Mutex
+	live      map[string]*liveRelay
+	lastEpoch uint64
 
 	// ticketMu guards tickets and lastPrune. It is held across the
 	// write of a new ticket's row, so ForgetPeer, which runs after the
@@ -136,6 +137,9 @@ type Relays struct {
 }
 
 type liveRelay struct {
+	// epoch numbers the control stream that owns this entry, so the
+	// end of a stream a newer one replaced changes nothing.
+	epoch    uint64
 	online   bool
 	lastBeat time.Time
 	since    time.Time
@@ -307,10 +311,12 @@ func (r *Relays) Authenticate(ctx context.Context, secret string) (store.Relay, 
 // Attach marks a relay online when its control stream opens. A URL,
 // fingerprint or version that differs from the stored one replaces it,
 // so a relay whose certificate was regenerated is usable again without
-// registering anew.
-func (r *Relays) Attach(ctx context.Context, relayID string, hello RelayHello) error {
+// registering anew. The returned epoch names this attachment: a later
+// Attach for the same relay replaces it, and Detach and Current tell
+// the two apart.
+func (r *Relays) Attach(ctx context.Context, relayID string, hello RelayHello) (uint64, error) {
 	if err := validateRelayEndpoint(hello.URL, hello.Fingerprint); err != nil {
-		return err
+		return 0, err
 	}
 	now := r.now()
 	err := r.store.InTx(ctx, func(tx *store.Store) error {
@@ -335,14 +341,25 @@ func (r *Relays) Attach(ctx context.Context, relayID string, hello RelayHello) e
 		return err
 	})
 	if err != nil {
-		return err
+		return 0, err
 	}
 	r.mu.Lock()
-	r.live[relayID] = &liveRelay{online: true, lastBeat: now, since: now}
+	r.lastEpoch++
+	epoch := r.lastEpoch
+	r.live[relayID] = &liveRelay{epoch: epoch, online: true, lastBeat: now, since: now}
 	r.mu.Unlock()
 	r.changed()
 	r.log.Info("relay online", "relay_id", relayID, "url", hello.URL, "version", hello.Version)
-	return nil
+	return epoch, nil
+}
+
+// Current reports whether epoch is still the relay's attachment: false
+// once a newer stream attached or the relay was deleted.
+func (r *Relays) Current(relayID string, epoch uint64) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	l, ok := r.live[relayID]
+	return ok && l.epoch == epoch
 }
 
 // Heartbeat records that an attached relay is alive and what it
@@ -379,18 +396,20 @@ func (r *Relays) Heartbeat(ctx context.Context, relayID string, stats RelayStats
 	return nil
 }
 
-// Detach marks a relay offline when its control stream ends.
-func (r *Relays) Detach(ctx context.Context, relayID string) error {
+// Detach marks a relay offline when the control stream that attached
+// with epoch ends. The end of a stream that a newer one has replaced
+// is ignored: the relay is still attached.
+func (r *Relays) Detach(ctx context.Context, relayID string, epoch uint64) error {
 	now := r.now()
 	r.mu.Lock()
 	l, ok := r.live[relayID]
-	wasOnline := ok && l.online
+	wasOnline := ok && l.epoch == epoch && l.online
 	r.mu.Unlock()
 	if !wasOnline {
 		return nil
 	}
 	err := r.publish(ctx, func() {
-		if l, ok := r.live[relayID]; ok {
+		if l, ok := r.live[relayID]; ok && l.epoch == epoch {
 			l.online, l.since = false, now
 		}
 	})
@@ -637,6 +656,17 @@ func (r *Relays) Admit(ctx context.Context, relayID string, ticket []byte) (stor
 	p, err := r.store.Peers().GetByID(ctx, t.PeerID)
 	if errors.Is(err, store.ErrNotFound) {
 		return store.Peer{}, ErrForbidden
+	}
+	return p, err
+}
+
+// SessionPeer returns the peer behind an admitted session as it is
+// now, or ErrNotFound once it was deleted. The caller compares the key
+// with the one it admitted to notice a rotation.
+func (r *Relays) SessionPeer(ctx context.Context, peerID string) (store.Peer, error) {
+	p, err := r.store.Peers().GetByID(ctx, peerID)
+	if errors.Is(err, store.ErrNotFound) {
+		return store.Peer{}, fmt.Errorf("peer %s: %w", peerID, ErrNotFound)
 	}
 	return p, err
 }

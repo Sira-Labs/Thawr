@@ -36,7 +36,7 @@ func TestRelayRegistryWired(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.srv.relays.Attach(ctx, reg.Relay.ID, control.RelayHello{URL: url, Fingerprint: fp}); err != nil {
+	if _, err := h.srv.relays.Attach(ctx, reg.Relay.ID, control.RelayHello{URL: url, Fingerprint: fp}); err != nil {
 		t.Fatal(err)
 	}
 	code, body = adminGet(t, cfg.AdminSocket, "/api/v1/relays")

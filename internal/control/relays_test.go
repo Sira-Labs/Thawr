@@ -22,6 +22,8 @@ type relayEnv struct {
 	relays *Relays
 	notify *countNotifier
 	member Principal
+	// epochs holds the attachment epoch of every relay online() attached.
+	epochs map[string]uint64
 }
 
 func newRelayEnv(t *testing.T) *relayEnv {
@@ -30,7 +32,7 @@ func newRelayEnv(t *testing.T) *relayEnv {
 	n := &countNotifier{}
 	relays := NewRelays(env.st, env.clk.Now, quietLogger()).WithAuditor(NewAuditor(env.clk.Now)).WithNotifier(n)
 	env.registry.WithTicketForgetter(relays)
-	return &relayEnv{enrollEnv: env, relays: relays, notify: n,
+	return &relayEnv{enrollEnv: env, relays: relays, notify: n, epochs: map[string]uint64{},
 		member: asPrincipal(mustUser(t, env.users, "lena", store.RoleMember))}
 }
 
@@ -53,9 +55,11 @@ func (e *relayEnv) register(t *testing.T, name string) RegisteredRelay {
 func (e *relayEnv) online(t *testing.T, name string) store.Relay {
 	t.Helper()
 	reg := e.register(t, name)
-	if err := e.relays.Attach(context.Background(), reg.Relay.ID, RelayHello{URL: testRelayURL, Fingerprint: testRelayFP, Version: "0.2.0"}); err != nil {
+	epoch, err := e.relays.Attach(context.Background(), reg.Relay.ID, RelayHello{URL: testRelayURL, Fingerprint: testRelayFP, Version: "0.2.0"})
+	if err != nil {
 		t.Fatalf("attach %s: %v", name, err)
 	}
+	e.epochs[reg.Relay.ID] = epoch
 	return reg.Relay
 }
 
@@ -251,7 +255,8 @@ func TestRelayOnlineOffline(t *testing.T) {
 	if err := env.relays.Heartbeat(ctx, id, RelayStats{}); !errors.Is(err, ErrNotFound) {
 		t.Errorf("heartbeat before attach: %v", err)
 	}
-	if err := env.relays.Attach(ctx, id, RelayHello{URL: testRelayURL, Fingerprint: testRelayFP, Version: "0.2.0"}); err != nil {
+	epoch, err := env.relays.Attach(ctx, id, RelayHello{URL: testRelayURL, Fingerprint: testRelayFP, Version: "0.2.0"})
+	if err != nil {
 		t.Fatal(err)
 	}
 	if env.generation(t) != gen+1 || env.notify.n != woke+1 {
@@ -309,13 +314,13 @@ func TestRelayOnlineOffline(t *testing.T) {
 	if on, _ := env.relays.Online(ctx); len(on) != 1 || env.generation(t) != gen+3 {
 		t.Errorf("after the returning heartbeat: online %d generation %d", len(on), env.generation(t))
 	}
-	if err := env.relays.Detach(ctx, id); err != nil {
+	if err := env.relays.Detach(ctx, id, epoch); err != nil {
 		t.Fatal(err)
 	}
 	if on, _ := env.relays.Online(ctx); len(on) != 0 || env.generation(t) != gen+4 {
 		t.Errorf("after detach: online %d generation %d", len(on), env.generation(t))
 	}
-	if err := env.relays.Detach(ctx, id); err != nil || env.generation(t) != gen+4 {
+	if err := env.relays.Detach(ctx, id, epoch); err != nil || env.generation(t) != gen+4 {
 		t.Errorf("second detach: %v, generation %d", err, env.generation(t))
 	}
 	stored, err := env.st.Relays().GetByID(ctx, id)
@@ -329,17 +334,17 @@ func TestRelayAttachReplacesEndpoint(t *testing.T) {
 	ctx := context.Background()
 	reg := env.register(t, "riyadh-1")
 	hello := RelayHello{URL: "https://moved.example.com:8443", Fingerprint: otherRelayFP, Version: "0.2.1"}
-	if err := env.relays.Attach(ctx, reg.Relay.ID, hello); err != nil {
+	if _, err := env.relays.Attach(ctx, reg.Relay.ID, hello); err != nil {
 		t.Fatal(err)
 	}
 	on, err := env.relays.Online(ctx)
 	if err != nil || len(on) != 1 || on[0].URL != hello.URL || on[0].TLSFingerprint != otherRelayFP || on[0].Version != "0.2.1" {
 		t.Errorf("after attach with a new endpoint: %+v %v", on, err)
 	}
-	if err := env.relays.Attach(ctx, reg.Relay.ID, RelayHello{URL: "http://x:1", Fingerprint: otherRelayFP}); !errors.Is(err, ErrValidation) {
+	if _, err := env.relays.Attach(ctx, reg.Relay.ID, RelayHello{URL: "http://x:1", Fingerprint: otherRelayFP}); !errors.Is(err, ErrValidation) {
 		t.Errorf("attach with a bad url: %v", err)
 	}
-	if err := env.relays.Attach(ctx, "rl_missing", hello); !errors.Is(err, ErrNotFound) {
+	if _, err := env.relays.Attach(ctx, "rl_missing", hello); !errors.Is(err, ErrNotFound) {
 		t.Errorf("attach of an unknown relay: %v", err)
 	}
 }
@@ -644,13 +649,13 @@ func TestRelayLivenessRetriesAfterFailedWrite(t *testing.T) {
 	}
 
 	// Detach: the failed attempt leaves the relay online for a retry.
-	if err := env.relays.Detach(dead, relay.ID); err == nil {
+	if err := env.relays.Detach(dead, relay.ID, env.epochs[relay.ID]); err == nil {
 		t.Fatal("detach with a failing store reported success")
 	}
 	if !listed() || env.generation(t) != gen+2 {
 		t.Fatalf("after the failed detach: online %v, generation %d", listed(), env.generation(t))
 	}
-	if err := env.relays.Detach(ctx, relay.ID); err != nil || listed() || env.generation(t) != gen+3 {
+	if err := env.relays.Detach(ctx, relay.ID, env.epochs[relay.ID]); err != nil || listed() || env.generation(t) != gen+3 {
 		t.Fatalf("retried detach: %v, online %v, generation %d", err, listed(), env.generation(t))
 	}
 }
@@ -670,5 +675,69 @@ func TestTicketsFailedPruneIsRetried(t *testing.T) {
 	g, err := env.relays.Tickets(ctx, p.ID)
 	if err != nil || len(g) != 1 {
 		t.Fatalf("tickets after the failure: %v %v", g, err)
+	}
+}
+
+// TestRelayReattachReplaces: a relay that reconnects before its old
+// stream is noticed dead stays online when that old stream ends, and
+// the old stream can tell it was replaced.
+func TestRelayReattachReplaces(t *testing.T) {
+	env := newRelayEnv(t)
+	ctx := context.Background()
+	relay := env.online(t, "riyadh-1")
+	first := env.epochs[relay.ID]
+	hello := RelayHello{URL: testRelayURL, Fingerprint: testRelayFP, Version: "0.2.0"}
+	second, err := env.relays.Attach(ctx, relay.ID, hello)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second == first {
+		t.Fatal("two attachments share an epoch")
+	}
+	if env.relays.Current(relay.ID, first) || !env.relays.Current(relay.ID, second) {
+		t.Errorf("current: first=%v second=%v", env.relays.Current(relay.ID, first), env.relays.Current(relay.ID, second))
+	}
+	gen := env.generation(t)
+	if err := env.relays.Detach(ctx, relay.ID, first); err != nil {
+		t.Fatal(err)
+	}
+	if on, _ := env.relays.Online(ctx); len(on) != 1 || env.generation(t) != gen {
+		t.Errorf("the replaced stream's end took the relay offline: online %d, generation %d (was %d)", len(on), env.generation(t), gen)
+	}
+	if err := env.relays.Detach(ctx, relay.ID, second); err != nil {
+		t.Fatal(err)
+	}
+	if on, _ := env.relays.Online(ctx); len(on) != 0 || env.generation(t) != gen+1 {
+		t.Errorf("after the current stream ended: online %d, generation %d", len(on), env.generation(t))
+	}
+	// A deleted relay has no current attachment.
+	if _, err := env.relays.Delete(ctx, env.admin, "riyadh-1"); err != nil {
+		t.Fatal(err)
+	}
+	if env.relays.Current(relay.ID, second) {
+		t.Error("an attachment of a deleted relay still counts as current")
+	}
+}
+
+func TestRelaySessionPeer(t *testing.T) {
+	env := newRelayEnv(t)
+	ctx := context.Background()
+	alice := env.peer(t, "alice")
+	p, err := env.relays.SessionPeer(ctx, alice.ID)
+	if err != nil || p.PublicKey != alice.PublicKey {
+		t.Fatalf("session peer: %+v %v", p, err)
+	}
+	newKey := newPubKey(t)
+	if _, err := env.registry.RotateKey(ctx, alice.ID, newKey, nil); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := env.relays.SessionPeer(ctx, alice.ID); err != nil || p.PublicKey != newKey {
+		t.Errorf("after rotation: %+v %v", p, err)
+	}
+	if err := env.registry.Delete(ctx, env.admin, alice.Name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.relays.SessionPeer(ctx, alice.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("after delete: %v", err)
 	}
 }

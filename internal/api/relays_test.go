@@ -104,7 +104,7 @@ func TestRESTRelays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := relays.Attach(ctx, reg.Relay.ID, control.RelayHello{URL: restRelayURL, Fingerprint: restRelayFP, Version: "0.2.0"}); err != nil {
+	if _, err := relays.Attach(ctx, reg.Relay.ID, control.RelayHello{URL: restRelayURL, Fingerprint: restRelayFP, Version: "0.2.0"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := relays.Heartbeat(ctx, reg.Relay.ID, control.RelayStats{Sessions: 3, Frames: 10, Bytes: 4096, Drops: 1}); err != nil {
