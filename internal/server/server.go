@@ -295,6 +295,8 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 		Paths:     s.paths,
 		Lock:      s.lockSvc,
 		Routes:    s.routesSvc,
+		Relay: &api.RelayDeps{Relays: s.relays, NetMaps: s.netmaps, Sync: s.hub,
+			MaxBytesPerSecond: s.cfg.Relay.MaxBytesPerSecond, Version: s.deps.Version},
 	})
 	if err != nil {
 		return err

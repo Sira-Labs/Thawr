@@ -1,0 +1,129 @@
+syntax = "proto3";
+
+package thawr.v1;
+
+option go_package = "github.com/sira-labs/thawr/internal/api/proto/thawr/v1;thawrv1";
+
+// RelayControl is the channel between a standalone relay node and the
+// server (spec 016). Register carries a one-time relay token; Attach
+// carries the relay secret as "authorization: Bearer <secret>". A node
+// secret is no credential here, and a relay secret is none for Control.
+service RelayControl {
+  // Register consumes a relay token and returns the relay's id and
+  // secret; the secret is never shown again.
+  rpc Register(RegisterRelayRequest) returns (RegisterRelayResponse);
+  // Attach is the relay's one long-lived stream. The first event must
+  // be hello. While it is open and heartbeats arrive, the relay is
+  // online and listed in netmaps.
+  rpc Attach(stream RelayEvent) returns (stream RelayDirective);
+}
+
+// RegisterRelayRequest registers one relay node.
+message RegisterRelayRequest {
+  // token is the one-time relay token (thawr_relay_...).
+  string token = 1;
+  // name is the relay's name; a token issued for a name fixes it.
+  string name = 2;
+  // public_url is what devices dial: https with a host and a port.
+  string public_url = 3;
+  // tls_fingerprint is sha256:<hex> of the relay's certificate.
+  string tls_fingerprint = 4;
+  string version = 5;
+}
+
+// RegisterRelayResponse is returned once.
+message RegisterRelayResponse {
+  string relay_id = 1;
+  string name = 2;
+  string relay_secret = 3;
+  string server_version = 4;
+}
+
+// RelayEvent is one message from the relay.
+message RelayEvent {
+  oneof event {
+    RelayHello hello = 1;
+    RelayHeartbeat heartbeat = 2;
+    RelayAdmit admit = 3;
+    RelayClosed closed = 4;
+    RelayAbsent absent = 5;
+  }
+}
+
+// RelayHello opens the stream. A URL or fingerprint that differs from
+// the registered one replaces it.
+message RelayHello {
+  string version = 1;
+  string public_url = 2;
+  string tls_fingerprint = 3;
+}
+
+// RelayHeartbeat is sent every 10 s with the relay's counters.
+message RelayHeartbeat {
+  uint32 sessions = 1;
+  uint64 frames = 2;
+  uint64 bytes = 3;
+  uint64 drops = 4;
+}
+
+// RelayAdmit asks whether ticket opens a session at this relay.
+message RelayAdmit {
+  // request_id is echoed in the answer.
+  uint64 request_id = 1;
+  bytes ticket = 2;
+}
+
+// RelayClosed reports that a device's session ended.
+message RelayClosed {
+  // peer_key is the device's WireGuard public key, 32 bytes.
+  bytes peer_key = 1;
+}
+
+// RelayAbsent reports that src sent to dst, a peer it may reach, while
+// dst has no session at this relay.
+message RelayAbsent {
+  bytes src = 1;
+  bytes dst = 2;
+}
+
+// RelayDirective is one message from the server.
+message RelayDirective {
+  oneof directive {
+    RelayAdmitted admitted = 1;
+    RelayRefused refused = 2;
+    RelayVisibility visibility = 3;
+    RelayRevoke revoke = 4;
+  }
+}
+
+// RelayAdmitted answers an admit: the ticket's device and the keys it
+// may exchange packets with.
+message RelayAdmitted {
+  uint64 request_id = 1;
+  bytes peer_key = 2;
+  repeated bytes visible_keys = 3;
+  int64 generation = 4;
+  // max_bytes_per_second is the server's relay.max_bytes_per_second;
+  // 0 is unlimited.
+  uint64 max_bytes_per_second = 5;
+}
+
+// RelayRefused answers an admit whose ticket opens nothing. The reason
+// is not told.
+message RelayRefused {
+  uint64 request_id = 1;
+}
+
+// RelayVisibility replaces the visible keys of an admitted session
+// after a netmap generation changed them.
+message RelayVisibility {
+  bytes peer_key = 1;
+  repeated bytes visible_keys = 2;
+  int64 generation = 3;
+}
+
+// RelayRevoke tells the relay to close a device's session: the peer was
+// deleted or rotated its key.
+message RelayRevoke {
+  bytes peer_key = 1;
+}

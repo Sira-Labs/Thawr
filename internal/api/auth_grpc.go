@@ -19,7 +19,7 @@ type NodeAuth interface {
 
 type peerKey struct{}
 
-// enrollMethod is the only RPC that runs without a node secret.
+// enrollMethod is the only Control RPC that runs without a node secret.
 const enrollMethod = "/thawr.v1.Control/Enroll"
 
 // peerFromContext returns the authenticated peer.
@@ -49,7 +49,7 @@ func authenticate(ctx context.Context, auth NodeAuth) (context.Context, error) {
 
 func unaryAuth(auth NodeAuth) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		if info.FullMethod == enrollMethod {
+		if info.FullMethod == enrollMethod || strings.HasPrefix(info.FullMethod, relayServicePrefix) {
 			return handler(ctx, req)
 		}
 		ctx, err := authenticate(ctx, auth)
@@ -62,6 +62,10 @@ func unaryAuth(auth NodeAuth) grpc.UnaryServerInterceptor {
 
 func streamAuth(auth NodeAuth) grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		// The relay service checks a relay secret in its own handler.
+		if strings.HasPrefix(info.FullMethod, relayServicePrefix) {
+			return handler(srv, ss)
+		}
 		ctx, err := authenticate(ss.Context(), auth)
 		if err != nil {
 			return err
