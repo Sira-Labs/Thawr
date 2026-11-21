@@ -954,6 +954,10 @@ tree that followed. One commit each, highest severity first.
         device's own netmap, so the relay and the device can never
         disagree about who is visible; the hub's key is not among them
         (the hub is reached directly, never through a relay).
+      - S8-2b2: a heartbeat carries its attachment's epoch too, and a
+        device re-admitted under a new key gets its old key revoked in
+        the same step, because the relay knows sessions by key and the
+        netmap change may reach the stream later (review of #70).
       - S8-2b2: `absent` is accepted and dropped for now. Devices learn
         of relay nodes only with S8-2b3, and a reach request naming a
         relay they do not know would be noise.

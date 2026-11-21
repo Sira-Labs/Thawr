@@ -448,6 +448,12 @@ func TestAttachVisibilityOnGeneration(t *testing.T) {
 	// A closed session gets no more updates: the next directive is the
 	// answer to the admission that follows, not a visibility push.
 	env.send(stream, &thawrv1.RelayEvent{Event: &thawrv1.RelayEvent_Closed{Closed: &thawrv1.RelayClosed{PeerKey: aliceKey[:]}}})
+	// Events are handled in order, so the refusal of a bad ticket sent
+	// after it shows the close was processed before dave appears.
+	env.send(stream, admitEvent(99, nil))
+	if d, err := env.recv(stream); err != nil || d.GetRefused().GetRequestId() != 99 {
+		t.Fatalf("marker admission: %+v %v", d, err)
+	}
 	daveID, _ := env.peer("markus", "dave")
 	env.send(stream, admitEvent(2, env.ticket(daveID)))
 	d, err = env.recv(stream)
@@ -496,7 +502,10 @@ func TestAttachRevokeOnDelete(t *testing.T) {
 		t.Errorf("after deleting alice: revoked=%v bob's view shrunk=%v", revoked, shrunk)
 	}
 
-	// A rotated key revokes the session admitted under the old one.
+	// A rotated key revokes the session admitted under the old one,
+	// also when the device is back with its new key before the netmap
+	// change reached the stream: the relay gets the revocation and the
+	// admission in either order, and each exactly once.
 	newPriv, err := wg.GenerateKey()
 	if err != nil {
 		t.Fatal(err)
@@ -505,15 +514,29 @@ func TestAttachRevokeOnDelete(t *testing.T) {
 	if _, err := env.registry.RotateKey(ctx, bobID, newKey.String(), nil); err != nil {
 		t.Fatal(err)
 	}
-	d, err := env.recv(stream)
-	if err != nil || d.GetRevoke() == nil || !bytes.Equal(d.GetRevoke().GetPeerKey(), bobKey[:]) {
-		t.Fatalf("after bob rotated: %+v %v", d, err)
-	}
-	// His old ticket is dead; a fresh one admits him under the new key.
 	env.send(stream, admitEvent(3, env.ticket(bobID)))
-	d, err = env.recv(stream)
-	if err != nil || !bytes.Equal(d.GetAdmitted().GetPeerKey(), newKey[:]) {
-		t.Fatalf("admit bob again: %+v %v", d, err)
+	var revokedOld, admittedNew bool
+	for i := 0; i < 2; i++ {
+		d, err := env.recv(stream)
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch {
+		case d.GetRevoke() != nil && bytes.Equal(d.GetRevoke().GetPeerKey(), bobKey[:]) && !revokedOld:
+			revokedOld = true
+		case d.GetAdmitted() != nil && d.GetAdmitted().GetRequestId() == 3 && bytes.Equal(d.GetAdmitted().GetPeerKey(), newKey[:]) && !admittedNew:
+			admittedNew = true
+		default:
+			t.Errorf("unexpected directive: %+v", d)
+		}
+	}
+	if !revokedOld || !admittedNew {
+		t.Errorf("after bob rotated: old key revoked=%v admitted under the new key=%v", revokedOld, admittedNew)
+	}
+	// Nothing more follows: the next directive answers the next event.
+	env.send(stream, admitEvent(4, nil))
+	if d, err := env.recv(stream); err != nil || d.GetRefused().GetRequestId() != 4 {
+		t.Errorf("after the rotation settled: %+v %v", d, err)
 	}
 }
 

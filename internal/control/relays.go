@@ -362,16 +362,18 @@ func (r *Relays) Current(relayID string, epoch uint64) bool {
 	return ok && l.epoch == epoch
 }
 
-// Heartbeat records that an attached relay is alive and what it
-// carries. A relay that was swept offline for missing heartbeats comes
-// back online with the next one.
-func (r *Relays) Heartbeat(ctx context.Context, relayID string, stats RelayStats) error {
+// Heartbeat records that the relay attached with epoch is alive and
+// what it carries. A relay that was swept offline for missing
+// heartbeats comes back online with the next one. The heartbeat of a
+// stream that a newer one has replaced is refused with ErrNotFound and
+// changes nothing: it says nothing about the stream that is attached.
+func (r *Relays) Heartbeat(ctx context.Context, relayID string, epoch uint64, stats RelayStats) error {
 	now := r.now()
 	r.mu.Lock()
 	l, ok := r.live[relayID]
-	if !ok {
+	if !ok || l.epoch != epoch {
 		r.mu.Unlock()
-		return fmt.Errorf("relay %s is not attached: %w", relayID, ErrNotFound)
+		return fmt.Errorf("relay %s is not attached by this stream: %w", relayID, ErrNotFound)
 	}
 	// Not usable covers both a relay the sweep took offline and one
 	// whose heartbeats stopped for longer than the window without a
@@ -384,8 +386,11 @@ func (r *Relays) Heartbeat(ctx context.Context, relayID string, stats RelayStats
 	if !back {
 		return nil
 	}
+	// The lock was released for the generation write; a stream that
+	// attached meanwhile owns the entry and this heartbeat must not
+	// touch it.
 	err := r.publish(ctx, func() {
-		if l, ok := r.live[relayID]; ok {
+		if l, ok := r.live[relayID]; ok && l.epoch == epoch {
 			l.online, l.since, l.lastBeat, l.stats = true, now, now, stats
 		}
 	})

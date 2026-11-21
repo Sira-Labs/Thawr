@@ -30,7 +30,7 @@ type RelayOps interface {
 	Authenticate(ctx context.Context, secret string) (store.Relay, error)
 	Attach(ctx context.Context, relayID string, hello control.RelayHello) (uint64, error)
 	Current(relayID string, epoch uint64) bool
-	Heartbeat(ctx context.Context, relayID string, stats control.RelayStats) error
+	Heartbeat(ctx context.Context, relayID string, epoch uint64, stats control.RelayStats) error
 	Detach(ctx context.Context, relayID string, epoch uint64) error
 	Admit(ctx context.Context, relayID string, ticket []byte) (store.Peer, error)
 	SessionPeer(ctx context.Context, peerID string) (store.Peer, error)
@@ -136,7 +136,7 @@ func (s *relayControlServer) Attach(stream grpc.BidiStreamingServer[thawrv1.Rela
 			if !s.deps.Relays.Current(relay.ID, epoch) {
 				return status.Error(codes.Aborted, "relay removed or attached again elsewhere")
 			}
-			if err := s.handleEvent(ctx, stream, relay.ID, ev, sessions, log); err != nil {
+			if err := s.handleEvent(ctx, stream, relay.ID, epoch, ev, sessions, log); err != nil {
 				return err
 			}
 		case <-wake:
@@ -151,13 +151,17 @@ func (s *relayControlServer) Attach(stream grpc.BidiStreamingServer[thawrv1.Rela
 }
 
 func (s *relayControlServer) handleEvent(ctx context.Context, stream grpc.BidiStreamingServer[thawrv1.RelayEvent, thawrv1.RelayDirective],
-	relayID string, ev *thawrv1.RelayEvent, sessions map[string]*relaySession, log *slog.Logger) error {
+	relayID string, epoch uint64, ev *thawrv1.RelayEvent, sessions map[string]*relaySession, log *slog.Logger) error {
 	switch e := ev.GetEvent().(type) {
 	case *thawrv1.RelayEvent_Hello:
 		return status.Error(codes.InvalidArgument, "hello may only open the stream")
 	case *thawrv1.RelayEvent_Heartbeat:
 		hb := e.Heartbeat
-		err := s.deps.Relays.Heartbeat(ctx, relayID, control.RelayStats{Sessions: int(hb.GetSessions()), Frames: hb.GetFrames(), Bytes: hb.GetBytes(), Drops: hb.GetDrops()})
+		err := s.deps.Relays.Heartbeat(ctx, relayID, epoch, control.RelayStats{Sessions: int(hb.GetSessions()), Frames: hb.GetFrames(), Bytes: hb.GetBytes(), Drops: hb.GetDrops()})
+		if errors.Is(err, control.ErrNotFound) {
+			// Replaced or deleted between the loop's check and here.
+			return status.Error(codes.Aborted, "relay removed or attached again elsewhere")
+		}
 		if err != nil {
 			return s.toStatus(err)
 		}
@@ -204,6 +208,14 @@ func (s *relayControlServer) admit(ctx context.Context, stream grpc.BidiStreamin
 	if err != nil {
 		log.Error("relay admission: visibility failed", "peer_id", p.ID, "err", err)
 		return refuse()
+	}
+	// A device that rotated its key and came back before the netmap
+	// change reached this loop: the relay knows sessions by key only,
+	// so the session under the old key is revoked here or never.
+	if old, ok := sessions[p.ID]; ok && old.key != key {
+		if err := stream.Send(&thawrv1.RelayDirective{Directive: &thawrv1.RelayDirective_Revoke{Revoke: &thawrv1.RelayRevoke{PeerKey: old.key[:]}}}); err != nil {
+			return err
+		}
 	}
 	sessions[p.ID] = &relaySession{peerID: p.ID, key: key, visible: visible}
 	return stream.Send(&thawrv1.RelayDirective{Directive: &thawrv1.RelayDirective_Admitted{Admitted: &thawrv1.RelayAdmitted{

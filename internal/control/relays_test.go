@@ -252,13 +252,14 @@ func TestRelayOnlineOffline(t *testing.T) {
 	id := reg.Relay.ID
 	gen, woke := env.generation(t), env.notify.n
 
-	if err := env.relays.Heartbeat(ctx, id, RelayStats{}); !errors.Is(err, ErrNotFound) {
+	if err := env.relays.Heartbeat(ctx, id, env.epochs[id], RelayStats{}); !errors.Is(err, ErrNotFound) {
 		t.Errorf("heartbeat before attach: %v", err)
 	}
 	epoch, err := env.relays.Attach(ctx, id, RelayHello{URL: testRelayURL, Fingerprint: testRelayFP, Version: "0.2.0"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	env.epochs[id] = epoch
 	if env.generation(t) != gen+1 || env.notify.n != woke+1 {
 		t.Errorf("attach: generation %d (was %d), notified %d (was %d)", env.generation(t), gen, env.notify.n, woke)
 	}
@@ -269,7 +270,7 @@ func TestRelayOnlineOffline(t *testing.T) {
 
 	// Heartbeats keep it online and bump nothing.
 	env.clk.Advance(10 * time.Second)
-	if err := env.relays.Heartbeat(ctx, id, RelayStats{Sessions: 2, Bytes: 4096}); err != nil {
+	if err := env.relays.Heartbeat(ctx, id, env.epochs[id], RelayStats{Sessions: 2, Bytes: 4096}); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := env.relays.Sweep(ctx); err != nil || n != 0 {
@@ -308,7 +309,7 @@ func TestRelayOnlineOffline(t *testing.T) {
 	}
 
 	// The next heartbeat brings it back; closing the stream takes it away.
-	if err := env.relays.Heartbeat(ctx, id, RelayStats{}); err != nil {
+	if err := env.relays.Heartbeat(ctx, id, env.epochs[id], RelayStats{}); err != nil {
 		t.Fatal(err)
 	}
 	if on, _ := env.relays.Online(ctx); len(on) != 1 || env.generation(t) != gen+3 {
@@ -391,7 +392,7 @@ func TestRelayListAndDelete(t *testing.T) {
 	if _, err := env.relays.Admit(ctx, a.ID, grants[0].Ticket); !errors.Is(err, ErrForbidden) {
 		t.Errorf("ticket of a deleted relay: %v", err)
 	}
-	if err := env.relays.Heartbeat(ctx, a.ID, RelayStats{}); !errors.Is(err, ErrNotFound) {
+	if err := env.relays.Heartbeat(ctx, a.ID, env.epochs[a.ID], RelayStats{}); !errors.Is(err, ErrNotFound) {
 		t.Errorf("heartbeat of a deleted relay: %v", err)
 	}
 	if grants, err := env.relays.Tickets(ctx, p.ID); err != nil || len(grants) != 0 {
@@ -411,7 +412,7 @@ func TestTicketIssueAndRenew(t *testing.T) {
 			step := min(d, RelayOnlineWindow)
 			env.clk.Advance(step)
 			d -= step
-			if err := env.relays.Heartbeat(ctx, relay.ID, RelayStats{}); err != nil {
+			if err := env.relays.Heartbeat(ctx, relay.ID, env.epochs[relay.ID], RelayStats{}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -588,7 +589,7 @@ func TestRelayHeartbeatAfterStaleGap(t *testing.T) {
 	if on, _ := env.relays.Online(ctx); len(on) != 0 {
 		t.Fatal("relay listed after the window")
 	}
-	if err := env.relays.Heartbeat(ctx, relay.ID, RelayStats{Sessions: 1}); err != nil {
+	if err := env.relays.Heartbeat(ctx, relay.ID, env.epochs[relay.ID], RelayStats{Sessions: 1}); err != nil {
 		t.Fatal(err)
 	}
 	if on, _ := env.relays.Online(ctx); len(on) != 1 {
@@ -638,13 +639,13 @@ func TestRelayLivenessRetriesAfterFailedWrite(t *testing.T) {
 	}
 
 	// Heartbeat: the failed recovery is tried again by the next beat.
-	if err := env.relays.Heartbeat(dead, relay.ID, RelayStats{}); err == nil {
+	if err := env.relays.Heartbeat(dead, relay.ID, env.epochs[relay.ID], RelayStats{}); err == nil {
 		t.Fatal("heartbeat with a failing store reported success")
 	}
 	if listed() || env.generation(t) != gen+1 {
 		t.Fatalf("after the failed recovery: online %v, generation %d", listed(), env.generation(t))
 	}
-	if err := env.relays.Heartbeat(ctx, relay.ID, RelayStats{}); err != nil || !listed() || env.generation(t) != gen+2 {
+	if err := env.relays.Heartbeat(ctx, relay.ID, env.epochs[relay.ID], RelayStats{}); err != nil || !listed() || env.generation(t) != gen+2 {
 		t.Fatalf("retried recovery: %v, online %v, generation %d", err, listed(), env.generation(t))
 	}
 
@@ -709,6 +710,14 @@ func TestRelayReattachReplaces(t *testing.T) {
 	}
 	if on, _ := env.relays.Online(ctx); len(on) != 0 || env.generation(t) != gen+1 {
 		t.Errorf("after the current stream ended: online %d, generation %d", len(on), env.generation(t))
+	}
+	// A heartbeat still in flight from the replaced stream brings
+	// nothing back.
+	if err := env.relays.Heartbeat(ctx, relay.ID, first, RelayStats{Sessions: 9}); !errors.Is(err, ErrNotFound) {
+		t.Errorf("heartbeat of a replaced stream: %v", err)
+	}
+	if on, _ := env.relays.Online(ctx); len(on) != 0 || env.generation(t) != gen+1 {
+		t.Errorf("a stale heartbeat changed liveness: online %d, generation %d", len(on), env.generation(t))
 	}
 	// A deleted relay has no current attachment.
 	if _, err := env.relays.Delete(ctx, env.admin, "riyadh-1"); err != nil {
