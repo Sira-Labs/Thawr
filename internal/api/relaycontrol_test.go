@@ -585,3 +585,72 @@ func TestNewGRPCRelayNeedsDeps(t *testing.T) {
 		t.Error("a relay service without its collaborators was accepted")
 	}
 }
+
+// admitOps answers Admit with a fixed peer; nothing else is called.
+type admitOps struct {
+	RelayOps
+	peer store.Peer
+}
+
+func (o admitOps) Admit(context.Context, string, []byte) (store.Peer, error) { return o.peer, nil }
+
+type emptyNetMaps struct{}
+
+func (emptyNetMaps) Build(context.Context, string) (control.NetMap, error) {
+	return control.NetMap{Generation: 5}, nil
+}
+
+// directiveLog records what a handler sends.
+type directiveLog struct {
+	grpc.BidiStreamingServer[thawrv1.RelayEvent, thawrv1.RelayDirective]
+	sent []*thawrv1.RelayDirective
+}
+
+func (l *directiveLog) Send(d *thawrv1.RelayDirective) error {
+	l.sent = append(l.sent, d)
+	return nil
+}
+
+// TestAdmitRevokesReplacedKey pins the order the stream test cannot
+// force: a device is admitted under a new key while the session map
+// still holds its old one, because the netmap change has not reached
+// the stream yet. The old key is revoked first, then the new admitted.
+func TestAdmitRevokesReplacedKey(t *testing.T) {
+	oldPriv, err := wg.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	newPriv, err := wg.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldKey, newKey := oldPriv.PublicKey(), newPriv.PublicKey()
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := &relayControlServer{deps: RelayDeps{
+		Relays:  admitOps{peer: store.Peer{ID: "p_bob", PublicKey: newKey.String()}},
+		NetMaps: emptyNetMaps{}, Logger: quiet,
+	}}
+	sessions := map[string]*relaySession{"p_bob": {peerID: "p_bob", key: oldKey}}
+	out := &directiveLog{}
+	admit := &thawrv1.RelayAdmit{RequestId: 1, Ticket: []byte("ticket")}
+	if err := srv.admit(context.Background(), out, "rl_1", admit, sessions, quiet); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.sent) != 2 || !bytes.Equal(out.sent[0].GetRevoke().GetPeerKey(), oldKey[:]) ||
+		!bytes.Equal(out.sent[1].GetAdmitted().GetPeerKey(), newKey[:]) {
+		t.Fatalf("directives: %+v", out.sent)
+	}
+	if sessions["p_bob"].key != newKey {
+		t.Error("the session still holds the old key")
+	}
+
+	// The same key again revokes nothing.
+	out.sent = nil
+	admit.RequestId = 2
+	if err := srv.admit(context.Background(), out, "rl_1", admit, sessions, quiet); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.sent) != 1 || out.sent[0].GetAdmitted().GetRequestId() != 2 {
+		t.Errorf("re-admission under the same key: %+v", out.sent)
+	}
+}
