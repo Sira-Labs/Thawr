@@ -899,10 +899,13 @@ tree that followed. One commit each, highest severity first.
       next run took S8-2b in two parts as well: S8-2b1 done
       (2026-11-19: `relay.ticket_ttl`, the registry wired into the
       server with its sweep timer, REST, `admin relay`, the
-      `thawr_relay_nodes` metric). Open: S8-2b2 (`RelayControl` over
-      gRPC with `make proto`, the netmap fields and capability flag,
-      closing a deleted relay's stream, the `relay` label on the relay
-      counters, the UI table).
+      `thawr_relay_nodes` metric). S8-2b2 went the same way: its
+      first part is done (2026-11-21: `RelayControl` over gRPC with
+      `Register` and `Attach`, closing a deleted or replaced relay's
+      stream). Open: S8-2b3 (the netmap fields `relays` and
+      `home_relay` with the capability flag, `absent` feeding the
+      reach request, the `relay` label on the relay counters, the UI
+      table).
       - S8-2a: nothing calls `control.Relays` yet, so no behaviour
         changes; migration 0008 adds three empty tables.
       - S8-2a: the server keeps issued tickets in memory so a device
@@ -936,6 +939,24 @@ tree that followed. One commit each, highest severity first.
         trimmed format the other tables use orders wrongly inside one
         second (review of #67). The other tables are left as they are:
         not this story's code.
+      - S8-2b2: `RelayControl` authenticates in its handlers, not in
+        the node-secret interceptor, which lets its methods through by
+        service prefix; the two credentials never share a lookup, so a
+        relay secret cannot become a peer identity by a mistake there.
+      - S8-2b2: every attachment gets an epoch. A relay that reconnects
+        replaces its old stream, and the old stream's detach is ignored
+        instead of taking the relay offline; the old stream ends with
+        `Aborted` at its next event or netmap change.
+      - S8-2b2: an admission is refused on any failure on the server's
+        side as well (store error, no netmap), not only on a bad
+        ticket: the relay must not admit on doubt.
+      - S8-2b2: the keys sent to a relay are the peer keys of the
+        device's own netmap, so the relay and the device can never
+        disagree about who is visible; the hub's key is not among them
+        (the hub is reached directly, never through a relay).
+      - S8-2b2: `absent` is accepted and dropped for now. Devices learn
+        of relay nodes only with S8-2b3, and a reach request naming a
+        relay they do not know would be noise.
       - A relay node is not a peer: no WireGuard key, no address, not
         in the policy, not under the lock. Its tokens are a kind and a
         table of their own, so the peer `kind` check stays as it is.
