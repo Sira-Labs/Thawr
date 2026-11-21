@@ -85,6 +85,9 @@ type GRPCDeps struct {
 	Lock LockOps
 	// Routes enables AdvertiseRoutes; nil answers Unimplemented.
 	Routes RoutesOps
+	// Relay registers the RelayControl service for standalone relay
+	// nodes (spec 016); nil leaves it out.
+	Relay *RelayDeps
 }
 
 // NewGRPC builds the gRPC server with the Control service registered.
@@ -102,6 +105,16 @@ func NewGRPC(deps GRPCDeps) (*grpc.Server, error) {
 	}
 	srv := grpc.NewServer(opts...)
 	thawrv1.RegisterControlServer(srv, &controlServer{deps: deps})
+	if deps.Relay != nil {
+		rd := *deps.Relay
+		if rd.Relays == nil || rd.NetMaps == nil || rd.Sync == nil {
+			return nil, fmt.Errorf("api: the relay service needs Relays, NetMaps and Sync")
+		}
+		if rd.Logger == nil {
+			rd.Logger = deps.Logger
+		}
+		thawrv1.RegisterRelayControlServer(srv, &relayControlServer{deps: rd})
+	}
 	return srv, nil
 }
 

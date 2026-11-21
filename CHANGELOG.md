@@ -58,6 +58,17 @@ when one exists, and GitHub's generated notes otherwise.
   and a relay deleted, but nothing can register yet: `thawr relay`
   comes with a later change.
 
+- Relay nodes, the server's side of the wire (spec 016): the gRPC
+  service `RelayControl` on the existing listener. `Register` turns a
+  one-time relay token into a relay id and secret; `Attach` is the
+  relay's one stream, authenticated with that secret, over which it
+  reports heartbeats and asks the server to check a device's ticket,
+  and over which the server sends the keys an admitted device may
+  reach, every later change to that set, and a revocation when the
+  device is deleted or rotates its key. A relay secret opens nothing
+  on the `Control` service and a node secret nothing here. Devices
+  are not told about relay nodes yet, so nothing changes for them.
+
 - Groundwork for standalone relay nodes (spec 016): the database
   moves to schema version 8 with tables for relays, their one-time
   registration tokens and the tickets devices will present to them.
