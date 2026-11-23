@@ -230,8 +230,9 @@ func TestDeletePeerDeletesTickets(t *testing.T) {
 	}
 }
 
-// TestMigration0008 applies the relay tables to a database that stopped
-// at schema version 7 and holds a peer.
+// TestMigration0008 applies the relay tables (0008) and the relay
+// capability column (0009) to a database that stopped at schema version
+// 7 and holds a peer.
 func TestMigration0008(t *testing.T) {
 	s, path := openTemp(t)
 	ctx := context.Background()
@@ -241,7 +242,7 @@ func TestMigration0008(t *testing.T) {
 	if err := s.Peers().Create(ctx, Peer{ID: "p1", Name: "box", Kind: KindServer, Mode: ModeAgent, OwnerID: "u1", PublicKey: "K=", IPv4: "100.64.0.2", NodeSecretHash: "h1", CreatedAt: now()}); err != nil {
 		t.Fatal(err)
 	}
-	for _, stmt := range []string{`DROP TABLE relay_tickets`, `DROP TABLE relay_tokens`, `DROP TABLE relays`} {
+	for _, stmt := range []string{`DROP TABLE relay_tickets`, `DROP TABLE relay_tokens`, `DROP TABLE relays`, `ALTER TABLE peers DROP COLUMN relay_capable`} {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
 			t.Fatal(err)
 		}
@@ -257,10 +258,12 @@ func TestMigration0008(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer func() { _ = s.Close() }()
-	if v, err := s.SchemaVersion(ctx); err != nil || v != 8 {
+	if v, err := s.SchemaVersion(ctx); err != nil || v != 9 {
 		t.Fatalf("schema version: %d %v", v, err)
 	}
-	if p, err := s.Peers().GetByID(ctx, "p1"); err != nil || p.Name != "box" {
+	// The peer from before is there and cannot use relay nodes until
+	// its client says so.
+	if p, err := s.Peers().GetByID(ctx, "p1"); err != nil || p.Name != "box" || p.RelayCapable {
 		t.Errorf("peer after migration: %+v %v", p, err)
 	}
 	if err := s.Relays().Create(ctx, Relay{ID: "r1", Name: "riyadh-1", URL: "https://r:443", TLSFingerprint: "f", SecretHash: "s", CreatedAt: now()}); err != nil {
