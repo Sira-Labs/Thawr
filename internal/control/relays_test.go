@@ -850,3 +850,80 @@ func TestNetMapRelays(t *testing.T) {
 		t.Errorf("enrolled with relay_nodes: %d relays, %v", len(first.Relays), err)
 	}
 }
+
+// TestRelayDowngradeNotRecorded: a client stopped saying it can use
+// relay nodes and that could not be written down. The flag and the
+// tickets still stand in the database, yet no ticket opens anything
+// until a later attempt is on record.
+func TestRelayDowngradeNotRecorded(t *testing.T) {
+	env := newRelayEnv(t)
+	ctx := context.Background()
+	relay := env.online(t, "riyadh-1")
+	alice, bob := env.peer(t, "alice"), env.peer(t, "bob")
+	ticket := func(p store.Peer) []byte {
+		t.Helper()
+		g, err := env.relays.Tickets(ctx, p.ID)
+		if err != nil || len(g) != 1 {
+			t.Fatalf("tickets for %s: %d %v", p.Name, len(g), err)
+		}
+		return g[0].Ticket
+	}
+	held, bobs := ticket(alice), ticket(bob)
+
+	dead, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := env.registry.SetRelayCapable(dead, alice.ID, false); err == nil {
+		t.Fatal("a write on a cancelled context succeeded")
+	}
+	if p, err := env.st.Peers().GetByID(ctx, alice.ID); err != nil || !p.RelayCapable {
+		t.Fatalf("the failed downgrade changed the stored flag: %+v %v", p, err)
+	}
+	if _, err := env.relays.Admit(ctx, relay.ID, held); !errors.Is(err, ErrForbidden) {
+		t.Errorf("alice's ticket after the failed downgrade: %v", err)
+	}
+	if g, err := env.relays.Tickets(ctx, alice.ID); err != nil || len(g) != 0 {
+		t.Errorf("tickets issued to a suspended peer: %d %v", len(g), err)
+	}
+	// Nobody else is affected.
+	if p, err := env.relays.Admit(ctx, relay.ID, bobs); err != nil || p.ID != bob.ID {
+		t.Errorf("bob's ticket: %q %v", p.ID, err)
+	}
+
+	// A failed upgrade suspends nothing: there is nothing to take away.
+	if _, err := env.registry.SetRelayCapable(dead, bob.ID, true); err == nil {
+		t.Fatal("a write on a cancelled context succeeded")
+	}
+	if _, err := env.relays.Admit(ctx, relay.ID, bobs); err != nil {
+		t.Errorf("bob's ticket after a failed write of the same value: %v", err)
+	}
+
+	// The client comes back still saying it can: on record, so the
+	// suspension ends and the ticket it holds works again.
+	if _, err := env.registry.SetRelayCapable(ctx, alice.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := env.relays.Admit(ctx, relay.ID, held); err != nil || p.ID != alice.ID {
+		t.Errorf("alice's ticket after the flag was recorded: %q %v", p.ID, err)
+	}
+
+	// Or it comes back downgraded and this time the write goes through:
+	// the tickets are gone for good.
+	if _, err := env.registry.SetRelayCapable(dead, alice.ID, false); err == nil {
+		t.Fatal("a write on a cancelled context succeeded")
+	}
+	if changed, err := env.registry.SetRelayCapable(ctx, alice.ID, false); err != nil || !changed {
+		t.Fatalf("recording the downgrade: %v %v", changed, err)
+	}
+	if _, err := env.relays.Admit(ctx, relay.ID, held); !errors.Is(err, ErrForbidden) {
+		t.Errorf("alice's ticket after the recorded downgrade: %v", err)
+	}
+	if _, err := env.registry.SetRelayCapable(ctx, alice.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.relays.Admit(ctx, relay.ID, held); !errors.Is(err, ErrForbidden) {
+		t.Errorf("the deleted ticket came back with the capability: %v", err)
+	}
+	if p, err := env.relays.Admit(ctx, relay.ID, ticket(alice)); err != nil || p.ID != alice.ID {
+		t.Errorf("a fresh ticket: %q %v", p.ID, err)
+	}
+}

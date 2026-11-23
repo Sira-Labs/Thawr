@@ -36,6 +36,11 @@ type Registry struct {
 // again from memory (spec 016).
 type TicketForgetter interface {
 	ForgetPeer(peerID string)
+	// SuspendPeer makes every ticket of the peer open nothing until
+	// ResumePeer: for a peer whose loss of the relay node capability
+	// could not be written down.
+	SuspendPeer(peerID string)
+	ResumePeer(peerID string)
 }
 
 // WithTicketForgetter sets who is told that a peer's tickets are gone.
@@ -361,7 +366,16 @@ func (r *Registry) SetRelayCapable(ctx context.Context, peerID string, capable b
 		return err
 	})
 	if err != nil {
+		// The downgrade is not on record, so the stored flag and the
+		// tickets still say the device may use relay nodes. Until a
+		// later attempt succeeds they are refused from memory.
+		if !capable && !errors.Is(err, store.ErrNotFound) && r.tickets != nil {
+			r.tickets.SuspendPeer(peerID)
+		}
 		return false, err
+	}
+	if r.tickets != nil {
+		r.tickets.ResumePeer(peerID)
 	}
 	if changed {
 		if !capable {

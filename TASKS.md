@@ -973,6 +973,10 @@ tree that followed. One commit each, highest severity first.
         with `Unavailable` instead of going on, unlike the version and
         IPv6 writes next to it, because this flag decides who holds
         credentials (review of #71).
+      - S8-2b3: a downgrade that could not be written down suspends
+        the device's tickets in memory until a later attempt is on
+        record. A restart forgets the suspension; then only the
+        tickets' own expiry is left (review of #71).
       - S8-2b3: `home_relay` is left for S8-2b4 with the reach request:
         both are about where a peer is reachable, and a field no code
         fills would only be noise in the netmap.

@@ -131,8 +131,11 @@ type Relays struct {
 	// write of a new ticket's row, so ForgetPeer, which runs after the
 	// transaction that deleted a peer's rows, cannot slip in between
 	// the row and its cache entry and leave a dead ticket cached.
-	ticketMu  sync.Mutex
-	tickets   map[ticketKey]cachedTicket
+	ticketMu sync.Mutex
+	tickets  map[ticketKey]cachedTicket
+	// suspended holds the peers whose tickets open nothing although
+	// their rows say otherwise (see SuspendPeer); guarded by ticketMu.
+	suspended map[string]struct{}
 	lastPrune time.Time
 }
 
@@ -160,7 +163,7 @@ type cachedTicket struct {
 // NewRelays builds the relay registry with the default ticket lifetime.
 func NewRelays(st *store.Store, now func() time.Time, log *slog.Logger) *Relays {
 	return &Relays{store: st, now: now, log: log, ticketTTL: DefaultTicketTTL,
-		live: map[string]*liveRelay{}, tickets: map[ticketKey]cachedTicket{}}
+		live: map[string]*liveRelay{}, tickets: map[ticketKey]cachedTicket{}, suspended: map[string]struct{}{}}
 }
 
 // WithAuditor records token creation, registration and deletion.
@@ -587,6 +590,9 @@ func (r *Relays) Tickets(ctx context.Context, peerID string) ([]RelayTicketGrant
 	now := r.now()
 	r.ticketMu.Lock()
 	defer r.ticketMu.Unlock()
+	if _, off := r.suspended[peerID]; off {
+		return nil, nil
+	}
 	if err := r.pruneTicketsLocked(ctx, now); err != nil {
 		return nil, err
 	}
@@ -656,7 +662,7 @@ func (r *Relays) Admit(ctx context.Context, relayID string, ticket []byte) (stor
 	if err != nil {
 		return store.Peer{}, err
 	}
-	if t.RelayID != relayID || !r.now().Before(t.ExpiresAt) {
+	if t.RelayID != relayID || !r.now().Before(t.ExpiresAt) || r.isSuspended(t.PeerID) {
 		return store.Peer{}, ErrForbidden
 	}
 	p, err := r.store.Peers().GetByID(ctx, t.PeerID)
@@ -697,6 +703,37 @@ func (r *Relays) ForgetPeer(peerID string) {
 			delete(r.tickets, k)
 		}
 	}
+}
+
+// SuspendPeer makes every ticket of a peer open nothing, and none be
+// issued, until ResumePeer. The registry calls it when a client stopped
+// saying it can use relay nodes and that could not be written down: the
+// rows still stand, so the refusal is held here. It does not survive a
+// restart; what does is the tickets' own expiry.
+func (r *Relays) SuspendPeer(peerID string) {
+	r.ticketMu.Lock()
+	defer r.ticketMu.Unlock()
+	r.suspended[peerID] = struct{}{}
+	for k := range r.tickets {
+		if k.peerID == peerID {
+			delete(r.tickets, k)
+		}
+	}
+}
+
+// ResumePeer ends a suspension once the peer's capability is on record
+// again, whichever way it went.
+func (r *Relays) ResumePeer(peerID string) {
+	r.ticketMu.Lock()
+	defer r.ticketMu.Unlock()
+	delete(r.suspended, peerID)
+}
+
+func (r *Relays) isSuspended(peerID string) bool {
+	r.ticketMu.Lock()
+	defer r.ticketMu.Unlock()
+	_, off := r.suspended[peerID]
+	return off
 }
 
 // publish makes a liveness change visible: it moves the netmap
