@@ -69,6 +69,14 @@ when one exists, and GitHub's generated notes otherwise.
   on the `Control` service and a node secret nothing here. Devices
   are not told about relay nodes yet, so nothing changes for them.
 
+- Relay nodes in the netmap (spec 016): a client that sends
+  `relay_nodes` in `Enroll` and `Sync` gets the online relay nodes,
+  sorted by name, each with its URL, certificate fingerprint and a
+  ticket for that device at that relay. Other clients get a netmap
+  without them, as before, and a device whose client stops sending the
+  flag loses its tickets. The database moves to schema version 9
+  (`peers.relay_capable`). No released client sends the flag yet.
+
 - Groundwork for standalone relay nodes (spec 016): the database
   moves to schema version 8 with tables for relays, their one-time
   registration tokens and the tickets devices will present to them.

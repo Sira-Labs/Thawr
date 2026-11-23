@@ -118,6 +118,7 @@ Every entity that can hold a WireGuard key is a **peer**. A peer has:
 | `public_key` | WireGuard public key. Private key never leaves the device for `agent` peers |
 | `ipv4` | Overlay address, `/32`, allocated by the server from `overlay.cidr` |
 | `ipv6` | IPv6 overlay address, `/128`: the server's ULA `/64` with `ipv4` in the last 32 bits (`100.64.0.7` → `<prefix>::6440:7`); `ipv6_capable` records whether the peer's client said it carries it (spec 015) |
+| `relay_capable` | Whether the peer's client said it can use standalone relay nodes (spec 016); only then does its netmap list them, each with a ticket |
 | `node_secret_hash` | SHA-256 of the bearer secret an `agent` peer uses on the control channel |
 | `last_seen_at`, `created_at`, `expires_at` | Lifecycle |
 
