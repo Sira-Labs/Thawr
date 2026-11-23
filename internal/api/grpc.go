@@ -48,6 +48,7 @@ type PeerOps interface {
 	Touch(ctx context.Context, peerID string) error
 	SetClientVersion(ctx context.Context, peerID, version string) error
 	SetIPv6Capable(ctx context.Context, peerID string, capable bool) (bool, error)
+	SetRelayCapable(ctx context.Context, peerID string, capable bool) (bool, error)
 }
 
 // HubInfo describes the server's own WireGuard endpoint as advertised
@@ -134,6 +135,7 @@ func (s *controlServer) Enroll(ctx context.Context, req *thawrv1.EnrollRequest) 
 		Name:          req.GetName(),
 		RemoteIP:      remoteIP(ctx),
 		IPv6:          req.GetIpv6(),
+		RelayNodes:    req.GetRelayNodes(),
 	})
 	if err != nil {
 		return nil, s.toStatus(err)
@@ -197,6 +199,11 @@ func (s *controlServer) Sync(req *thawrv1.SyncRequest, stream grpc.ServerStreami
 		// carries IPv6 when the client asked for it.
 		if _, err := s.deps.Peers.SetIPv6Capable(ctx, me.ID, req.GetIpv6()); err != nil {
 			log.Warn("record ipv6 capability failed", "err", err)
+		}
+		// Likewise for relay nodes: a client that does not ask gets no
+		// list and no ticket, and loses the tickets it had.
+		if _, err := s.deps.Peers.SetRelayCapable(ctx, me.ID, req.GetRelayNodes()); err != nil {
+			log.Warn("record relay node capability failed", "err", err)
 		}
 	}
 

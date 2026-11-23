@@ -33,6 +33,9 @@ type EnrollRequest struct {
 	// IPv6 is true when the client handles an IPv6 overlay address
 	// (spec 015).
 	IPv6 bool
+	// RelayNodes is true when the client can use standalone relay
+	// nodes (spec 016).
+	RelayNodes bool
 }
 
 // EnrollResult is the newly registered peer and its node secret, which
@@ -204,6 +207,7 @@ func (e *Enroller) Enroll(ctx context.Context, req EnrollRequest) (EnrollResult,
 			IPv4:           ip.String(),
 			IPv6:           addrString(IPv6For(e.overlay6, ip)),
 			IPv6Capable:    req.IPv6,
+			RelayCapable:   req.RelayNodes,
 			NodeSecretHash: hashSecret(nodeSecret),
 			CreatedAt:      now,
 			ClientVersion:  req.ClientVersion,

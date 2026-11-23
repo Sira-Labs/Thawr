@@ -344,6 +344,34 @@ func (r *Registry) SetIPv6Capable(ctx context.Context, peerID string, capable bo
 	return changed, nil
 }
 
+// SetRelayCapable records whether a peer's client can use standalone
+// relay nodes (spec 016). Only the peer's own netmap depends on it and
+// the caller builds that next, so nothing is bumped. A client that no
+// longer says so loses its tickets: an older version must not be left
+// with credentials it does not know it holds.
+func (r *Registry) SetRelayCapable(ctx context.Context, peerID string, capable bool) (bool, error) {
+	var changed bool
+	err := r.store.InTx(ctx, func(tx *store.Store) error {
+		var err error
+		changed, err = tx.Peers().SetRelayCapable(ctx, peerID, capable)
+		if err != nil || !changed || capable {
+			return err
+		}
+		_, err = tx.RelayTickets().DeletePeer(ctx, peerID)
+		return err
+	})
+	if err != nil {
+		return false, err
+	}
+	if changed {
+		if !capable {
+			r.forgetTickets(peerID)
+		}
+		r.log.Info("peer relay node capability changed", "peer_id", peerID, "relay_nodes", capable)
+	}
+	return changed, nil
+}
+
 // Generation returns the current netmap generation.
 func (r *Registry) Generation(ctx context.Context) (int64, error) {
 	return r.store.Meta().Generation(ctx)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -748,5 +749,85 @@ func TestRelaySessionPeer(t *testing.T) {
 	}
 	if _, err := env.relays.SessionPeer(ctx, alice.ID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("after delete: %v", err)
+	}
+}
+
+// TestNetMapRelays: the online relay nodes and a ticket for each are in
+// the netmap of a device that can use them, and in no other.
+func TestNetMapRelays(t *testing.T) {
+	env := newRelayEnv(t)
+	ctx := context.Background()
+	riyadh := env.online(t, "riyadh-1")
+	berlin := env.online(t, "berlin-1")
+	env.register(t, "offline-1")
+	a, b := env.peer(t, "alice"), env.peer(t, "bob")
+	builder := NewNetMapBuilder(env.st, OwnerVisibility{}, nil, nil,
+		HubConfig{Overlay: netip.MustParsePrefix("100.64.0.0/10")}, func() int64 { return 1 }).WithRelayTickets(env.relays)
+
+	// Nobody said they can use relay nodes yet.
+	for _, p := range []store.Peer{a, b} {
+		nm, err := builder.Build(ctx, p.ID)
+		if err != nil || len(nm.Relays) != 0 {
+			t.Fatalf("%s before the capability: %d relays, %v", p.Name, len(nm.Relays), err)
+		}
+	}
+	if changed, err := env.registry.SetRelayCapable(ctx, a.ID, true); err != nil || !changed {
+		t.Fatalf("SetRelayCapable: %v %v", changed, err)
+	}
+	nm, err := builder.Build(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Sorted by name, the offline relay left out.
+	if len(nm.Relays) != 2 || nm.Relays[0].Relay.ID != berlin.ID || nm.Relays[1].Relay.ID != riyadh.ID {
+		t.Fatalf("alice's relays: %+v", nm.Relays)
+	}
+	for _, g := range nm.Relays {
+		if len(g.Ticket) != TicketLen || !g.Expires.After(env.clk.Now()) {
+			t.Errorf("grant for %s: %d ticket bytes, expires %s", g.Relay.Name, len(g.Ticket), g.Expires)
+		}
+		if p, err := env.relays.Admit(ctx, g.Relay.ID, g.Ticket); err != nil || p.ID != a.ID {
+			t.Errorf("ticket for %s admits %q, %v", g.Relay.Name, p.ID, err)
+		}
+	}
+	// The same tickets again in the next netmap, and none in bob's: he
+	// sees alice, not her credentials.
+	again, err := builder.Build(ctx, a.ID)
+	if err != nil || len(again.Relays) != 2 || !bytes.Equal(again.Relays[0].Ticket, nm.Relays[0].Ticket) {
+		t.Errorf("second build issued other tickets: %v", err)
+	}
+	if other, err := builder.Build(ctx, b.ID); err != nil || len(other.Relays) != 0 || len(other.Peers) != 1 {
+		t.Errorf("bob's netmap: %d relays, %d peers, %v", len(other.Relays), len(other.Peers), err)
+	}
+
+	// A client that stops saying it can use relay nodes (a downgrade)
+	// gets none and its tickets stop working.
+	gen := env.generation(t)
+	if changed, err := env.registry.SetRelayCapable(ctx, a.ID, false); err != nil || !changed {
+		t.Fatalf("clearing: %v %v", changed, err)
+	}
+	if after, err := builder.Build(ctx, a.ID); err != nil || len(after.Relays) != 0 {
+		t.Errorf("after the downgrade: %d relays, %v", len(after.Relays), err)
+	}
+	for _, g := range nm.Relays {
+		if _, err := env.relays.Admit(ctx, g.Relay.ID, g.Ticket); !errors.Is(err, ErrForbidden) {
+			t.Errorf("old ticket for %s after the downgrade: %v", g.Relay.Name, err)
+		}
+	}
+	if env.generation(t) != gen {
+		t.Errorf("the capability moved the generation: %d, was %d", env.generation(t), gen)
+	}
+	if _, err := env.registry.SetRelayCapable(ctx, "p_missing", true); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("unknown peer: %v", err)
+	}
+
+	// Asked for at enrolment, it is there from the first netmap.
+	res, err := env.enroller.Enroll(ctx, EnrollRequest{Token: env.token(t, TokenRequest{}), PublicKey: newPubKey(t),
+		Hostname: "carol", OS: "linux", Arch: "amd64", ClientVersion: "0.2.0", RelayNodes: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first, err := builder.Build(ctx, res.Peer.ID); err != nil || len(first.Relays) != 2 {
+		t.Errorf("enrolled with relay_nodes: %d relays, %v", len(first.Relays), err)
 	}
 }

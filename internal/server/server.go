@@ -771,7 +771,7 @@ func (s *Server) buildServices(ctx context.Context) error {
 		Address6:  s.hubAddr6(),
 		Overlay6:  s.overlay6(),
 		STUNAddrs: s.cfg.STUNEndpoints(),
-	}, hub.Generation).WithWants(hub)
+	}, hub.Generation).WithWants(hub).WithRelayTickets(relays)
 	s.dnsSource = newRegistrySource(s.st, visibility, hub.Generation, s.cfg.HubAddr().Addr(), s.hubAddr6())
 	return nil
 }
