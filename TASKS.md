@@ -967,6 +967,12 @@ tree that followed. One commit each, highest severity first.
         downgrade) has its tickets deleted at once instead of letting
         them run out, so no device holds a credential its client does
         not know about.
+      - S8-2b3: admission also refuses a device that does not say it
+        can use relay nodes, so a ticket issued across a downgrade
+        opens nothing; and a `Sync` that cannot record the flag ends
+        with `Unavailable` instead of going on, unlike the version and
+        IPv6 writes next to it, because this flag decides who holds
+        credentials (review of #71).
       - S8-2b3: `home_relay` is left for S8-2b4 with the reach request:
         both are about where a peer is reachable, and a field no code
         fills would only be noise in the netmap.

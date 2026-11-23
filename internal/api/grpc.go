@@ -202,8 +202,13 @@ func (s *controlServer) Sync(req *thawrv1.SyncRequest, stream grpc.ServerStreami
 		}
 		// Likewise for relay nodes: a client that does not ask gets no
 		// list and no ticket, and loses the tickets it had.
+		// Unlike the facts above this one guards credentials, so a
+		// failed write ends the stream and the client tries again: a
+		// downgraded client must not keep tickets, and a capable one
+		// must not be told there are no relays for a whole session.
 		if _, err := s.deps.Peers.SetRelayCapable(ctx, me.ID, req.GetRelayNodes()); err != nil {
-			log.Warn("record relay node capability failed", "err", err)
+			log.Error("record relay node capability failed", "err", err)
+			return status.Error(codes.Unavailable, "try again")
 		}
 	}
 

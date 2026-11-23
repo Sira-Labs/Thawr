@@ -66,7 +66,17 @@ func (e *relayEnv) online(t *testing.T, name string) store.Relay {
 
 func (e *relayEnv) peer(t *testing.T, hostname string) store.Peer {
 	t.Helper()
-	res, err := e.enroll(t, e.token(t, TokenRequest{}), hostname)
+	return e.enrolled(t, hostname, true)
+}
+
+// enrolled enrols a device whose client does or does not say it can
+// use relay nodes.
+func (e *relayEnv) enrolled(t *testing.T, hostname string, relayNodes bool) store.Peer {
+	t.Helper()
+	res, err := e.enroller.Enroll(context.Background(), EnrollRequest{
+		Token: e.token(t, TokenRequest{}), PublicKey: newPubKey(t), Hostname: hostname, OS: "linux", Arch: "amd64",
+		ClientVersion: "0.2.0", RelayNodes: relayNodes,
+	})
 	if err != nil {
 		t.Fatalf("enroll %s: %v", hostname, err)
 	}
@@ -760,7 +770,7 @@ func TestNetMapRelays(t *testing.T) {
 	riyadh := env.online(t, "riyadh-1")
 	berlin := env.online(t, "berlin-1")
 	env.register(t, "offline-1")
-	a, b := env.peer(t, "alice"), env.peer(t, "bob")
+	a, b := env.enrolled(t, "alice", false), env.enrolled(t, "bob", false)
 	builder := NewNetMapBuilder(env.st, OwnerVisibility{}, nil, nil,
 		HubConfig{Overlay: netip.MustParsePrefix("100.64.0.0/10")}, func() int64 { return 1 }).WithRelayTickets(env.relays)
 
@@ -813,6 +823,15 @@ func TestNetMapRelays(t *testing.T) {
 		if _, err := env.relays.Admit(ctx, g.Relay.ID, g.Ticket); !errors.Is(err, ErrForbidden) {
 			t.Errorf("old ticket for %s after the downgrade: %v", g.Relay.Name, err)
 		}
+	}
+	// Nor does a ticket issued after it, as a netmap build that read
+	// the flag just before the downgrade would get.
+	late, err := env.relays.Tickets(ctx, a.ID)
+	if err != nil || len(late) != 2 {
+		t.Fatalf("tickets: %d %v", len(late), err)
+	}
+	if _, err := env.relays.Admit(ctx, late[0].Relay.ID, late[0].Ticket); !errors.Is(err, ErrForbidden) {
+		t.Errorf("a ticket issued after the downgrade: %v", err)
 	}
 	if env.generation(t) != gen {
 		t.Errorf("the capability moved the generation: %d, was %d", env.generation(t), gen)

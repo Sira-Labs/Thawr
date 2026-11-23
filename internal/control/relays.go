@@ -642,8 +642,9 @@ func (r *Relays) pruneTicketsLocked(ctx context.Context, now time.Time) error {
 
 // Admit answers a relay's question whether ticket opens a session
 // there: the peer it belongs to, or ErrForbidden for a ticket that is
-// unknown, expired, issued for another relay, or whose peer is gone.
-// The reasons are not told apart.
+// unknown, expired, issued for another relay, or whose peer is gone or
+// no longer says it can use relay nodes. The reasons are not told
+// apart.
 func (r *Relays) Admit(ctx context.Context, relayID string, ticket []byte) (store.Peer, error) {
 	if len(ticket) != TicketLen {
 		return store.Peer{}, ErrForbidden
@@ -662,7 +663,16 @@ func (r *Relays) Admit(ctx context.Context, relayID string, ticket []byte) (stor
 	if errors.Is(err, store.ErrNotFound) {
 		return store.Peer{}, ErrForbidden
 	}
-	return p, err
+	if err != nil {
+		return store.Peer{}, err
+	}
+	// A netmap build that read the capability just before a downgrade
+	// can issue a ticket just after the downgrade deleted them; that
+	// ticket opens nothing.
+	if !p.RelayCapable {
+		return store.Peer{}, ErrForbidden
+	}
+	return p, nil
 }
 
 // SessionPeer returns the peer behind an admitted session as it is
