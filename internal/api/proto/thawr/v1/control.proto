@@ -50,6 +50,9 @@ message EnrollRequest {
   // ipv6 is true when the client handles an IPv6 overlay address
   // (spec 015); the server then sends it IPv6 fields.
   bool ipv6 = 8;
+  // relay_nodes is true when the client can use standalone relay nodes
+  // (spec 016); the server then lists them in its netmap.
+  bool relay_nodes = 9;
 }
 
 // EnrollResponse is returned once; node_secret is never shown again.
@@ -79,6 +82,9 @@ message SyncRequest {
   // ipv6 is true when the client handles IPv6 overlay addresses (spec
   // 015); without it the netmap carries IPv4 only.
   bool ipv6 = 4;
+  // relay_nodes is true when the client can use standalone relay nodes
+  // (spec 016); without it the netmap lists none and carries no ticket.
+  bool relay_nodes = 5;
 }
 
 // NetMap is one peer's complete view of the network.
@@ -98,6 +104,26 @@ message NetMap {
   // forward lists the rules the receiver installs on its forwarding
   // path as a subnet router or exit node (spec 013).
   repeated ForwardRule forward = 9;
+  // relays lists the online relay nodes, sorted by name, for a client
+  // that sent relay_nodes (spec 016). The server's own relay is never
+  // listed: it is always there and is reached with the node secret.
+  repeated RelayNode relays = 10;
+}
+
+// RelayNode is one standalone relay node the receiver may use.
+message RelayNode {
+  string id = 1;
+  string name = 2;
+  // url is the relay's public_url.
+  string url = 3;
+  // tls_fingerprint is the SHA-256 of the relay's certificate, hex; the
+  // client verifies the relay against it and nothing else.
+  string tls_fingerprint = 4;
+  // ticket is the receiver's credential at this relay and at no other.
+  bytes ticket = 5;
+  // ticket_expires is when the ticket stops being accepted, unix
+  // seconds; a newer one arrives in a netmap before that.
+  int64 ticket_expires = 6;
 }
 
 // SelfInfo describes the receiving peer.

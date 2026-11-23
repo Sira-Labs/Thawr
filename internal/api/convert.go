@@ -101,6 +101,12 @@ func netMapToProto(nm control.NetMap) *thawrv1.NetMap {
 		}
 		out.Forward = append(out.Forward, r)
 	}
+	for _, g := range nm.Relays {
+		out.Relays = append(out.Relays, &thawrv1.RelayNode{
+			Id: g.Relay.ID, Name: g.Relay.Name, Url: g.Relay.URL, TlsFingerprint: g.Relay.TLSFingerprint,
+			Ticket: g.Ticket, TicketExpires: g.Expires.Unix(),
+		})
+	}
 	for _, a := range nm.SelfAdvertised {
 		out.Self.Advertised = append(out.Self.Advertised, &thawrv1.AdvertisedRoute{Prefix: a.Prefix.String(), Approved: a.Approved})
 	}

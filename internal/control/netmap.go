@@ -149,6 +149,11 @@ type NetMap struct {
 	// SelfAdvertised lists what the receiver advertises and whether an
 	// admin approved it.
 	SelfAdvertised []AdvertisedRoute
+	// Relays lists the online relay nodes with the receiver's ticket
+	// for each, sorted by name; empty for a receiver whose client did
+	// not say it can use relay nodes (spec 016). The order carries no
+	// preference: the device measures.
+	Relays []RelayTicketGrant
 }
 
 // Visibility decides whether two peers may see each other's keys and
@@ -221,6 +226,13 @@ type NetMapBuilder struct {
 	hub        HubConfig
 	generation func() int64
 	wants      Wants
+	tickets    TicketSource
+}
+
+// TicketSource issues the tickets a device presents to the online
+// relay nodes; control.Relays implements it.
+type TicketSource interface {
+	Tickets(ctx context.Context, peerID string) ([]RelayTicketGrant, error)
 }
 
 // NewNetMapBuilder builds the netmap builder. generation supplies the
@@ -233,6 +245,13 @@ func NewNetMapBuilder(st *store.Store, vis Visibility, ep *EndpointTable, pr Pre
 // receiver.
 func (b *NetMapBuilder) WithWants(rw Wants) *NetMapBuilder {
 	b.wants = rw
+	return b
+}
+
+// WithRelayTickets makes netmaps list the online relay nodes, with a
+// ticket for each, for receivers that can use them (spec 016).
+func (b *NetMapBuilder) WithRelayTickets(ts TicketSource) *NetMapBuilder {
+	b.tickets = ts
 	return b
 }
 
@@ -321,6 +340,14 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 		self6 = netip.Addr{}
 		nm.Filter = ipv4Filter(nm.Filter)
 		nm.Forward = ipv4Forward(nm.Forward)
+	}
+	if b.tickets != nil && self.RelayCapable {
+		// A ticket is a credential for this device alone, so it goes in
+		// no netmap but its own.
+		nm.Relays, err = b.tickets.Tickets(ctx, self.ID)
+		if err != nil {
+			return NetMap{}, fmt.Errorf("control: relay tickets for peer %s: %w", self.ID, err)
+		}
 	}
 	for _, a := range advertised {
 		if p, err := netip.ParsePrefix(a.Prefix); err == nil {

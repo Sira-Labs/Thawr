@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -41,6 +42,13 @@ type relayStream = grpc.BidiStreamingClient[thawrv1.RelayEvent, thawrv1.RelayDir
 
 func newRelayCtlEnv(t *testing.T) *relayCtlEnv {
 	t.Helper()
+	return newRelayCtlEnvWith(t, func(p PeerOps) PeerOps { return p })
+}
+
+// newRelayCtlEnvWith lets a test put something between the Control
+// service and the registry.
+func newRelayCtlEnvWith(t *testing.T, wrap func(PeerOps) PeerOps) *relayCtlEnv {
+	t.Helper()
 	ctx := context.Background()
 	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
@@ -71,10 +79,10 @@ func newRelayCtlEnv(t *testing.T) *relayCtlEnv {
 	endpoints := control.NewEndpointTable(now)
 	hubInfo := control.HubConfig{PublicKey: testHubKey, Endpoint: "vpn:51820", Address: netip.MustParseAddr("100.64.0.1"), Overlay: overlay}
 	// OwnerVisibility: peers of one owner see each other, nobody else.
-	builder := control.NewNetMapBuilder(st, control.OwnerVisibility{}, endpoints, hub, hubInfo, hub.Generation)
+	builder := control.NewNetMapBuilder(st, control.OwnerVisibility{}, endpoints, hub, hubInfo, hub.Generation).WithRelayTickets(relays)
 	srv, err := NewGRPC(GRPCDeps{
 		Enroller: enroller, Hub: HubInfo{PublicKey: testHubKey, Endpoint: "vpn:51820", Overlay: overlay}, Logger: quiet,
-		NodeAuth: registry, NetMaps: builder, Sync: hub, Peers: registry, Endpoints: endpoints, Paths: control.NewPathTable(now),
+		NodeAuth: registry, NetMaps: builder, Sync: hub, Peers: wrap(registry), Endpoints: endpoints, Paths: control.NewPathTable(now),
 		Relay: &RelayDeps{Relays: relays, NetMaps: builder, Sync: hub, MaxBytesPerSecond: 4096, Version: "9.9.9"},
 	})
 	if err != nil {
@@ -182,7 +190,7 @@ func (e *relayCtlEnv) peer(owner, hostname string) (string, wg.Key) {
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	resp, err := e.control.Enroll(ctx, &thawrv1.EnrollRequest{Token: tok.Secret, PublicKey: key.PublicKey().String(), Hostname: hostname, ClientVersion: "0.2.0"})
+	resp, err := e.control.Enroll(ctx, &thawrv1.EnrollRequest{Token: tok.Secret, PublicKey: key.PublicKey().String(), Hostname: hostname, ClientVersion: "0.2.0", RelayNodes: true})
 	if err != nil {
 		e.t.Fatalf("enroll %s: %v", hostname, err)
 	}
@@ -652,5 +660,101 @@ func TestAdmitRevokesReplacedKey(t *testing.T) {
 	}
 	if len(out.sent) != 1 || out.sent[0].GetAdmitted().GetRequestId() != 2 {
 		t.Errorf("re-admission under the same key: %+v", out.sent)
+	}
+}
+
+// TestSyncListsRelayNodes: a client that says relay_nodes gets the
+// online relays with a ticket each relay's server check accepts; one
+// that does not gets none, and the tickets it held stop working.
+func TestSyncListsRelayNodes(t *testing.T) {
+	env := newRelayCtlEnv(t)
+	ctx := context.Background()
+	reg := env.register("riyadh-1")
+	relayStream, _ := env.attach(reg.GetRelaySecret())
+	env.waitOnline(1)
+
+	tok, err := env.tokens.Create(ctx, env.admin, control.TokenRequest{OwnerName: "markus", Kind: "human"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := wg.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub := key.PublicKey()
+	enrolled, err := env.control.Enroll(ctx, &thawrv1.EnrollRequest{Token: tok.Secret, PublicKey: pub.String(), Hostname: "alice", RelayNodes: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	syncCtx, cancel := context.WithCancel(authCtx(enrolled.GetNodeSecret()))
+	stream, err := env.control.Sync(syncCtx, &thawrv1.SyncRequest{RelayNodes: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nm, err := recvMap(t, stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nm.GetRelays()) != 1 {
+		t.Fatalf("relays in the netmap: %+v", nm.GetRelays())
+	}
+	node := nm.GetRelays()[0]
+	if node.GetId() != reg.GetRelayId() || node.GetName() != "riyadh-1" || node.GetUrl() != restRelayURL || node.GetTlsFingerprint() != restRelayFP ||
+		len(node.GetTicket()) != control.TicketLen || node.GetTicketExpires() <= time.Now().Unix() {
+		t.Errorf("relay node: id=%q name=%q url=%q expires=%d", node.GetId(), node.GetName(), node.GetUrl(), node.GetTicketExpires())
+	}
+	env.send(relayStream, admitEvent(1, node.GetTicket()))
+	if d, err := env.recv(relayStream); err != nil || !bytes.Equal(d.GetAdmitted().GetPeerKey(), pub[:]) {
+		t.Fatalf("the netmap's ticket at the relay: %+v %v", d, err)
+	}
+	cancel()
+
+	// The same device with a client that does not know relay nodes.
+	old, err := env.control.Sync(authCtx(enrolled.GetNodeSecret()), &thawrv1.SyncRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nm, err = recvMap(t, old)
+	if err != nil || len(nm.GetRelays()) != 0 {
+		t.Fatalf("netmap without relay_nodes: %+v %v", nm.GetRelays(), err)
+	}
+	env.send(relayStream, admitEvent(2, node.GetTicket()))
+	if d, err := env.recv(relayStream); err != nil || d.GetRefused().GetRequestId() != 2 {
+		t.Errorf("the old ticket after the downgrade: %+v %v", d, err)
+	}
+}
+
+// failingCapability is a registry whose relay capability write fails.
+type failingCapability struct{ PeerOps }
+
+func (failingCapability) SetRelayCapable(context.Context, string, bool) (bool, error) {
+	return false, errors.New("disk full")
+}
+
+// TestSyncEndsWhenCapabilityNotRecorded: the flag decides who holds
+// tickets, so a sync that could not record it sends no netmap at all
+// and the client comes back.
+func TestSyncEndsWhenCapabilityNotRecorded(t *testing.T) {
+	env := newRelayCtlEnvWith(t, func(p PeerOps) PeerOps { return failingCapability{p} })
+	ctx := context.Background()
+	tok, err := env.tokens.Create(ctx, env.admin, control.TokenRequest{OwnerName: "markus", Kind: "human"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := wg.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	enrolled, err := env.control.Enroll(ctx, &thawrv1.EnrollRequest{Token: tok.Secret, PublicKey: key.PublicKey().String(), Hostname: "alice", RelayNodes: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := env.control.Sync(authCtx(enrolled.GetNodeSecret()), &thawrv1.SyncRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nm, err := recvMap(t, stream); status.Code(err) != codes.Unavailable {
+		t.Errorf("sync with a failed capability write: %+v %v", nm, err)
 	}
 }

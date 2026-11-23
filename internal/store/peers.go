@@ -33,7 +33,10 @@ type Peer struct {
 	// server has derived it.
 	IPv6 string
 	// IPv6Capable is true once the peer's client asked for IPv6.
-	IPv6Capable    bool
+	IPv6Capable bool
+	// RelayCapable is true once the peer's client said it can use
+	// standalone relay nodes (spec 016).
+	RelayCapable   bool
 	NodeSecretHash string
 	CreatedAt      time.Time
 	LastSeenAt     *time.Time
@@ -48,7 +51,7 @@ type Peers struct {
 	q querier
 }
 
-const peerColumns = `id, name, kind, mode, owner_id, tags, public_key, ipv4, ipv6, ipv6_capable, node_secret_hash, created_at, last_seen_at, client_version, os`
+const peerColumns = `id, name, kind, mode, owner_id, tags, public_key, ipv4, ipv6, ipv6_capable, node_secret_hash, created_at, last_seen_at, client_version, os, relay_capable`
 
 func scanPeer(row interface{ Scan(...any) error }) (Peer, error) {
 	var (
@@ -57,7 +60,7 @@ func scanPeer(row interface{ Scan(...any) error }) (Peer, error) {
 		owner, secret, lastSeen sql.NullString
 		ipv6                    sql.NullString
 	)
-	if err := row.Scan(&p.ID, &p.Name, &p.Kind, &p.Mode, &owner, &tags, &p.PublicKey, &p.IPv4, &ipv6, &p.IPv6Capable, &secret, &created, &lastSeen, &p.ClientVersion, &p.OS); err != nil {
+	if err := row.Scan(&p.ID, &p.Name, &p.Kind, &p.Mode, &owner, &tags, &p.PublicKey, &p.IPv4, &ipv6, &p.IPv6Capable, &secret, &created, &lastSeen, &p.ClientVersion, &p.OS, &p.RelayCapable); err != nil {
 		return Peer{}, err
 	}
 	if err := json.Unmarshal([]byte(tags), &p.Tags); err != nil {
@@ -78,9 +81,9 @@ func (s *Peers) Create(ctx context.Context, p Peer) error {
 		return fmt.Errorf("store: encode tags: %w", err)
 	}
 	_, err = s.q.ExecContext(ctx,
-		`INSERT INTO peers (`+peerColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO peers (`+peerColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ID, p.Name, p.Kind, p.Mode, nullString(p.OwnerID), string(tags), p.PublicKey, p.IPv4,
-		nullString(p.IPv6), p.IPv6Capable, nullString(p.NodeSecretHash), formatTime(p.CreatedAt), formatTimePtr(p.LastSeenAt), p.ClientVersion, p.OS)
+		nullString(p.IPv6), p.IPv6Capable, nullString(p.NodeSecretHash), formatTime(p.CreatedAt), formatTimePtr(p.LastSeenAt), p.ClientVersion, p.OS, p.RelayCapable)
 	if isUniqueViolation(err) {
 		return fmt.Errorf("peer %q: %w", p.Name, ErrConflict)
 	}
@@ -265,6 +268,32 @@ func (s *Peers) SetIPv6Capable(ctx context.Context, id string, capable bool) (bo
 	n, err := res.RowsAffected()
 	if err != nil {
 		return false, fmt.Errorf("store: set ipv6_capable of peer %s: %w", id, err)
+	}
+	if n > 0 {
+		return true, nil
+	}
+	var exists int
+	err = s.q.QueryRowContext(ctx, `SELECT 1 FROM peers WHERE id = ?`, id).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, fmt.Errorf("peer %s: %w", id, ErrNotFound)
+	}
+	if err != nil {
+		return false, fmt.Errorf("store: find peer %s: %w", id, err)
+	}
+	return false, nil
+}
+
+// SetRelayCapable records whether the peer's client can use standalone
+// relay nodes. It reports whether the stored value changed; ErrNotFound
+// for an unknown peer.
+func (s *Peers) SetRelayCapable(ctx context.Context, id string, capable bool) (bool, error) {
+	res, err := s.q.ExecContext(ctx, `UPDATE peers SET relay_capable = ? WHERE id = ? AND relay_capable != ?`, capable, id, capable)
+	if err != nil {
+		return false, fmt.Errorf("store: set relay_capable of peer %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("store: set relay_capable of peer %s: %w", id, err)
 	}
 	if n > 0 {
 		return true, nil

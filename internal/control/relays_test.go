@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -65,7 +66,17 @@ func (e *relayEnv) online(t *testing.T, name string) store.Relay {
 
 func (e *relayEnv) peer(t *testing.T, hostname string) store.Peer {
 	t.Helper()
-	res, err := e.enroll(t, e.token(t, TokenRequest{}), hostname)
+	return e.enrolled(t, hostname, true)
+}
+
+// enrolled enrols a device whose client does or does not say it can
+// use relay nodes.
+func (e *relayEnv) enrolled(t *testing.T, hostname string, relayNodes bool) store.Peer {
+	t.Helper()
+	res, err := e.enroller.Enroll(context.Background(), EnrollRequest{
+		Token: e.token(t, TokenRequest{}), PublicKey: newPubKey(t), Hostname: hostname, OS: "linux", Arch: "amd64",
+		ClientVersion: "0.2.0", RelayNodes: relayNodes,
+	})
 	if err != nil {
 		t.Fatalf("enroll %s: %v", hostname, err)
 	}
@@ -748,5 +759,171 @@ func TestRelaySessionPeer(t *testing.T) {
 	}
 	if _, err := env.relays.SessionPeer(ctx, alice.ID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("after delete: %v", err)
+	}
+}
+
+// TestNetMapRelays: the online relay nodes and a ticket for each are in
+// the netmap of a device that can use them, and in no other.
+func TestNetMapRelays(t *testing.T) {
+	env := newRelayEnv(t)
+	ctx := context.Background()
+	riyadh := env.online(t, "riyadh-1")
+	berlin := env.online(t, "berlin-1")
+	env.register(t, "offline-1")
+	a, b := env.enrolled(t, "alice", false), env.enrolled(t, "bob", false)
+	builder := NewNetMapBuilder(env.st, OwnerVisibility{}, nil, nil,
+		HubConfig{Overlay: netip.MustParsePrefix("100.64.0.0/10")}, func() int64 { return 1 }).WithRelayTickets(env.relays)
+
+	// Nobody said they can use relay nodes yet.
+	for _, p := range []store.Peer{a, b} {
+		nm, err := builder.Build(ctx, p.ID)
+		if err != nil || len(nm.Relays) != 0 {
+			t.Fatalf("%s before the capability: %d relays, %v", p.Name, len(nm.Relays), err)
+		}
+	}
+	if changed, err := env.registry.SetRelayCapable(ctx, a.ID, true); err != nil || !changed {
+		t.Fatalf("SetRelayCapable: %v %v", changed, err)
+	}
+	nm, err := builder.Build(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Sorted by name, the offline relay left out.
+	if len(nm.Relays) != 2 || nm.Relays[0].Relay.ID != berlin.ID || nm.Relays[1].Relay.ID != riyadh.ID {
+		t.Fatalf("alice's relays: %+v", nm.Relays)
+	}
+	for _, g := range nm.Relays {
+		if len(g.Ticket) != TicketLen || !g.Expires.After(env.clk.Now()) {
+			t.Errorf("grant for %s: %d ticket bytes, expires %s", g.Relay.Name, len(g.Ticket), g.Expires)
+		}
+		if p, err := env.relays.Admit(ctx, g.Relay.ID, g.Ticket); err != nil || p.ID != a.ID {
+			t.Errorf("ticket for %s admits %q, %v", g.Relay.Name, p.ID, err)
+		}
+	}
+	// The same tickets again in the next netmap, and none in bob's: he
+	// sees alice, not her credentials.
+	again, err := builder.Build(ctx, a.ID)
+	if err != nil || len(again.Relays) != 2 || !bytes.Equal(again.Relays[0].Ticket, nm.Relays[0].Ticket) {
+		t.Errorf("second build issued other tickets: %v", err)
+	}
+	if other, err := builder.Build(ctx, b.ID); err != nil || len(other.Relays) != 0 || len(other.Peers) != 1 {
+		t.Errorf("bob's netmap: %d relays, %d peers, %v", len(other.Relays), len(other.Peers), err)
+	}
+
+	// A client that stops saying it can use relay nodes (a downgrade)
+	// gets none and its tickets stop working.
+	gen := env.generation(t)
+	if changed, err := env.registry.SetRelayCapable(ctx, a.ID, false); err != nil || !changed {
+		t.Fatalf("clearing: %v %v", changed, err)
+	}
+	if after, err := builder.Build(ctx, a.ID); err != nil || len(after.Relays) != 0 {
+		t.Errorf("after the downgrade: %d relays, %v", len(after.Relays), err)
+	}
+	for _, g := range nm.Relays {
+		if _, err := env.relays.Admit(ctx, g.Relay.ID, g.Ticket); !errors.Is(err, ErrForbidden) {
+			t.Errorf("old ticket for %s after the downgrade: %v", g.Relay.Name, err)
+		}
+	}
+	// Nor does a ticket issued after it, as a netmap build that read
+	// the flag just before the downgrade would get.
+	late, err := env.relays.Tickets(ctx, a.ID)
+	if err != nil || len(late) != 2 {
+		t.Fatalf("tickets: %d %v", len(late), err)
+	}
+	if _, err := env.relays.Admit(ctx, late[0].Relay.ID, late[0].Ticket); !errors.Is(err, ErrForbidden) {
+		t.Errorf("a ticket issued after the downgrade: %v", err)
+	}
+	if env.generation(t) != gen {
+		t.Errorf("the capability moved the generation: %d, was %d", env.generation(t), gen)
+	}
+	if _, err := env.registry.SetRelayCapable(ctx, "p_missing", true); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("unknown peer: %v", err)
+	}
+
+	// Asked for at enrolment, it is there from the first netmap.
+	res, err := env.enroller.Enroll(ctx, EnrollRequest{Token: env.token(t, TokenRequest{}), PublicKey: newPubKey(t),
+		Hostname: "carol", OS: "linux", Arch: "amd64", ClientVersion: "0.2.0", RelayNodes: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first, err := builder.Build(ctx, res.Peer.ID); err != nil || len(first.Relays) != 2 {
+		t.Errorf("enrolled with relay_nodes: %d relays, %v", len(first.Relays), err)
+	}
+}
+
+// TestRelayDowngradeNotRecorded: a client stopped saying it can use
+// relay nodes and that could not be written down. The flag and the
+// tickets still stand in the database, yet no ticket opens anything
+// until a later attempt is on record.
+func TestRelayDowngradeNotRecorded(t *testing.T) {
+	env := newRelayEnv(t)
+	ctx := context.Background()
+	relay := env.online(t, "riyadh-1")
+	alice, bob := env.peer(t, "alice"), env.peer(t, "bob")
+	ticket := func(p store.Peer) []byte {
+		t.Helper()
+		g, err := env.relays.Tickets(ctx, p.ID)
+		if err != nil || len(g) != 1 {
+			t.Fatalf("tickets for %s: %d %v", p.Name, len(g), err)
+		}
+		return g[0].Ticket
+	}
+	held, bobs := ticket(alice), ticket(bob)
+
+	dead, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := env.registry.SetRelayCapable(dead, alice.ID, false); err == nil {
+		t.Fatal("a write on a cancelled context succeeded")
+	}
+	if p, err := env.st.Peers().GetByID(ctx, alice.ID); err != nil || !p.RelayCapable {
+		t.Fatalf("the failed downgrade changed the stored flag: %+v %v", p, err)
+	}
+	if _, err := env.relays.Admit(ctx, relay.ID, held); !errors.Is(err, ErrForbidden) {
+		t.Errorf("alice's ticket after the failed downgrade: %v", err)
+	}
+	if g, err := env.relays.Tickets(ctx, alice.ID); err != nil || len(g) != 0 {
+		t.Errorf("tickets issued to a suspended peer: %d %v", len(g), err)
+	}
+	// Nobody else is affected.
+	if p, err := env.relays.Admit(ctx, relay.ID, bobs); err != nil || p.ID != bob.ID {
+		t.Errorf("bob's ticket: %q %v", p.ID, err)
+	}
+
+	// A failed upgrade suspends nothing: there is nothing to take away.
+	if _, err := env.registry.SetRelayCapable(dead, bob.ID, true); err == nil {
+		t.Fatal("a write on a cancelled context succeeded")
+	}
+	if _, err := env.relays.Admit(ctx, relay.ID, bobs); err != nil {
+		t.Errorf("bob's ticket after a failed write of the same value: %v", err)
+	}
+
+	// The client comes back still saying it can: on record, so the
+	// suspension ends and the ticket it holds works again.
+	if _, err := env.registry.SetRelayCapable(ctx, alice.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := env.relays.Admit(ctx, relay.ID, held); err != nil || p.ID != alice.ID {
+		t.Errorf("alice's ticket after the flag was recorded: %q %v", p.ID, err)
+	}
+
+	// Or it comes back downgraded and this time the write goes through:
+	// the tickets are gone for good.
+	if _, err := env.registry.SetRelayCapable(dead, alice.ID, false); err == nil {
+		t.Fatal("a write on a cancelled context succeeded")
+	}
+	if changed, err := env.registry.SetRelayCapable(ctx, alice.ID, false); err != nil || !changed {
+		t.Fatalf("recording the downgrade: %v %v", changed, err)
+	}
+	if _, err := env.relays.Admit(ctx, relay.ID, held); !errors.Is(err, ErrForbidden) {
+		t.Errorf("alice's ticket after the recorded downgrade: %v", err)
+	}
+	if _, err := env.registry.SetRelayCapable(ctx, alice.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.relays.Admit(ctx, relay.ID, held); !errors.Is(err, ErrForbidden) {
+		t.Errorf("the deleted ticket came back with the capability: %v", err)
+	}
+	if p, err := env.relays.Admit(ctx, relay.ID, ticket(alice)); err != nil || p.ID != alice.ID {
+		t.Errorf("a fresh ticket: %q %v", p.ID, err)
 	}
 }

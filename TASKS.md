@@ -902,10 +902,11 @@ tree that followed. One commit each, highest severity first.
       `thawr_relay_nodes` metric). S8-2b2 went the same way: its
       first part is done (2026-11-21: `RelayControl` over gRPC with
       `Register` and `Attach`, closing a deleted or replaced relay's
-      stream). Open: S8-2b3 (the netmap fields `relays` and
-      `home_relay` with the capability flag, `absent` feeding the
-      reach request, the `relay` label on the relay counters, the UI
-      table).
+      stream). S8-2b3 is done (2026-11-23: the `relay_nodes`
+      capability in `Enroll` and `Sync`, and `relays` with tickets in
+      the netmap). Open: S8-2b4 (`home_relay` reported by the device
+      and listed per peer, `absent` feeding the reach request, the
+      `relay` label on the relay counters, the UI table).
       - S8-2a: nothing calls `control.Relays` yet, so no behaviour
         changes; migration 0008 adds three empty tables.
       - S8-2a: the server keeps issued tickets in memory so a device
@@ -958,6 +959,27 @@ tree that followed. One commit each, highest severity first.
         device re-admitted under a new key gets its old key revoked in
         the same step, because the relay knows sessions by key and the
         netmap change may reach the stream later (review of #70).
+      - S8-2b3: the capability is stored on the peer (migration 0009)
+        like `ipv6_capable`, but changing it moves no generation: only
+        the device's own netmap depends on it, and `Sync` records it
+        before building that one.
+      - S8-2b3: a client that no longer sends `relay_nodes` (a
+        downgrade) has its tickets deleted at once instead of letting
+        them run out, so no device holds a credential its client does
+        not know about.
+      - S8-2b3: admission also refuses a device that does not say it
+        can use relay nodes, so a ticket issued across a downgrade
+        opens nothing; and a `Sync` that cannot record the flag ends
+        with `Unavailable` instead of going on, unlike the version and
+        IPv6 writes next to it, because this flag decides who holds
+        credentials (review of #71).
+      - S8-2b3: a downgrade that could not be written down suspends
+        the device's tickets in memory until a later attempt is on
+        record. A restart forgets the suspension; then only the
+        tickets' own expiry is left (review of #71).
+      - S8-2b3: `home_relay` is left for S8-2b4 with the reach request:
+        both are about where a peer is reachable, and a field no code
+        fills would only be noise in the netmap.
       - S8-2b2: `absent` is accepted and dropped for now. Devices learn
         of relay nodes only with S8-2b3, and a reach request naming a
         relay they do not know would be noise.

@@ -36,6 +36,11 @@ type Registry struct {
 // again from memory (spec 016).
 type TicketForgetter interface {
 	ForgetPeer(peerID string)
+	// SuspendPeer makes every ticket of the peer open nothing until
+	// ResumePeer: for a peer whose loss of the relay node capability
+	// could not be written down.
+	SuspendPeer(peerID string)
+	ResumePeer(peerID string)
 }
 
 // WithTicketForgetter sets who is told that a peer's tickets are gone.
@@ -340,6 +345,43 @@ func (r *Registry) SetIPv6Capable(ctx context.Context, peerID string, capable bo
 	if changed {
 		r.changed()
 		r.log.Info("peer ipv6 capability changed", "peer_id", peerID, "ipv6", capable)
+	}
+	return changed, nil
+}
+
+// SetRelayCapable records whether a peer's client can use standalone
+// relay nodes (spec 016). Only the peer's own netmap depends on it and
+// the caller builds that next, so nothing is bumped. A client that no
+// longer says so loses its tickets: an older version must not be left
+// with credentials it does not know it holds.
+func (r *Registry) SetRelayCapable(ctx context.Context, peerID string, capable bool) (bool, error) {
+	var changed bool
+	err := r.store.InTx(ctx, func(tx *store.Store) error {
+		var err error
+		changed, err = tx.Peers().SetRelayCapable(ctx, peerID, capable)
+		if err != nil || !changed || capable {
+			return err
+		}
+		_, err = tx.RelayTickets().DeletePeer(ctx, peerID)
+		return err
+	})
+	if err != nil {
+		// The downgrade is not on record, so the stored flag and the
+		// tickets still say the device may use relay nodes. Until a
+		// later attempt succeeds they are refused from memory.
+		if !capable && !errors.Is(err, store.ErrNotFound) && r.tickets != nil {
+			r.tickets.SuspendPeer(peerID)
+		}
+		return false, err
+	}
+	if r.tickets != nil {
+		r.tickets.ResumePeer(peerID)
+	}
+	if changed {
+		if !capable {
+			r.forgetTickets(peerID)
+		}
+		r.log.Info("peer relay node capability changed", "peer_id", peerID, "relay_nodes", capable)
 	}
 	return changed, nil
 }
